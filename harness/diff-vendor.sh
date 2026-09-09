@@ -26,8 +26,10 @@ for fx in "${FIXTURES[@]}"; do
   src="$ROOT/fixtures/work/$fx"
   ref="$WORK/ref-$fx"; viv="$WORK/viv-$fx"
   rm -rf "$ref" "$viv"; mkdir -p "$ref" "$viv"
-  cp "$src/composer.json" "$src/composer.lock" "$ref/"
-  cp "$src/composer.json" "$src/composer.lock" "$viv/"
+  # Projet complet (sans vendor/node_modules) : les règles d'autoload de la
+  # racine (classmap src/Kernel.php, psr-4 app/…) doivent exister.
+  (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$ref" && tar -xf -)
+  (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$viv" && tar -xf -)
   (cd "$ref" && composer install --no-interaction --no-plugins --no-scripts $AUTOLOAD_FLAG --quiet)
   (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>/dev/null)
   lines=$(diff -r "$ref/vendor" "$viv/vendor" 2>&1 \

@@ -338,3 +338,87 @@ mod tests {
         }
     }
 }
+
+/// Borne basse d'une contrainte (`Bound` de composer/semver) : la plus
+/// petite version admise et son inclusivité. `None` = borne zéro (contrainte
+/// `*`, ou une branche OR sans borne basse).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LowerBound {
+    pub version: Version,
+    pub inclusive: bool,
+}
+
+impl LowerBound {
+    /// `Bound::compareTo($other, '>')` : version puis, à version égale, une
+    /// borne exclusive est « plus haute » qu'une inclusive.
+    fn is_higher_than(&self, other: &LowerBound) -> bool {
+        match self.version.cmp(&other.version) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => !self.inclusive && other.inclusive,
+        }
+    }
+}
+
+impl Constraint {
+    pub fn lower_bound(&self) -> Option<LowerBound> {
+        let mut result: Option<LowerBound> = None;
+        for group in &self.groups {
+            // AND : la plus haute des bornes basses du groupe.
+            let mut group_bound: Option<LowerBound> = None;
+            for c in group {
+                let candidate = match c {
+                    Simple::Cmp(Op::Ge, v) | Simple::Cmp(Op::Eq, v) => LowerBound {
+                        version: v.clone(),
+                        inclusive: true,
+                    },
+                    Simple::Cmp(Op::Gt, v) => LowerBound {
+                        version: v.clone(),
+                        inclusive: false,
+                    },
+                    _ => continue,
+                };
+                if group_bound
+                    .as_ref()
+                    .is_none_or(|g| candidate.is_higher_than(g))
+                {
+                    group_bound = Some(candidate);
+                }
+            }
+            // OR : la plus basse des bornes de groupe ; un groupe sans borne = zéro.
+            let gb = group_bound?;
+            if result.as_ref().is_none_or(|r| r.is_higher_than(&gb)) {
+                result = Some(gb);
+            }
+        }
+        result
+    }
+}
+
+#[cfg(test)]
+mod lower_bound_tests {
+    use super::*;
+
+    fn lb(c: &str) -> Option<(String, bool)> {
+        Constraint::parse(c).expect(c).lower_bound().map(|b| {
+            (
+                format!(
+                    "{}.{}.{}.{}",
+                    b.version.parts[0], b.version.parts[1], b.version.parts[2], b.version.parts[3]
+                ),
+                b.inclusive,
+            )
+        })
+    }
+
+    #[test]
+    fn bounds() {
+        assert_eq!(lb("^8.2"), Some(("8.2.0.0".into(), true)));
+        assert_eq!(lb(">=8.1 <8.4"), Some(("8.1.0.0".into(), true)));
+        assert_eq!(lb(">8.1"), Some(("8.1.0.0".into(), false)));
+        assert_eq!(lb("^7.4 || ^8.0"), Some(("7.4.0.0".into(), true)));
+        assert_eq!(lb("*"), None);
+        assert_eq!(lb("<8.0"), None);
+        assert_eq!(lb("8.2.1"), Some(("8.2.1.0".into(), true)));
+    }
+}

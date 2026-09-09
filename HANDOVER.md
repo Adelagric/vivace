@@ -25,14 +25,16 @@ message explicite (jamais de skip silencieux).
 | M0 fixtures + profil + spike | terminé | bench/M0-profil.md |
 | M1 manifestes, content-hash, scope, platform | terminé | oracle golden + différentiels + proptest, 0 divergence |
 | M2 fetch + store + clone + état + proxies + CLI | terminé (`--no-autoloader`) | harness/diff-vendor.sh : 0 diff × 3 fixtures ; bench/M2-install.md |
-| M3 autoload (normal, -o, -a) | à faire | — |
+| M3 autoload (normal, -o, -a, --no-dev) | terminé | harness --with-autoloader : 0 diff × 3 fixtures ; oracle classmap ~50k fichiers ; bench/M3-autoload.md |
 | M4 harness formel (normalisations, boot, CI Linux) | à faire (script shell en place) | — |
-| M5 benchmarks publiés | partiel (M0/M2 mesurés) | — |
+| M5 benchmarks + perf classmap | à faire (mesures M0/M2/M3 faites ; scan -o à optimiser : cache par entrée de store, parallélisme) | bench/M3-autoload.md « lecture honnête » |
 | M6 sortie publique | à faire | — |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
-- **Autoload** : `vivace install` sans `--no-autoloader` refuse explicitement (M3).
+- **Perf du scan de classmap optimisé** : plus lent que Composer sur Sylius `-o` (~3,5 s vs ~1,8 s) et no-op Laravel à 449 ms (config optimize-autoloader). Plan M5 dans bench/M3-autoload.md.
+- **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
+
 - **Linux** : jamais exécuté. Le clone y passera par hardlinks (clone.rs) —
   chemin de code compilé mais non exercé ; perf non mesurée.
 - **Réseau réel** : le fetch (reqwest, auth, retries, écriture cache) n'a été
@@ -53,8 +55,10 @@ message explicite (jamais de skip silencieux).
 ## Pièges
 
 - `serde_json` DOIT garder `preserve_order` + `float_roundtrip` (content-hash).
-- Le pattern classmap de Composer (M3) exige pcre2 (possessifs, lookbehind,
-  octets non-UTF-8) — décision plan r1/F4.
+- Le pattern classmap de Composer exige pcre2 (possessifs, lookbehind,
+  octets non-UTF-8) — décision plan r1/F4. Les noms de classes sont des `Vec<u8>`.
+- `harness/diff-vendor.sh` copie le projet complet (les règles d'autoload de
+  la racine — `src/Kernel.php` chez Sylius — doivent exister).
 - Sylius boot : `php -d memory_limit=1G` (128 Mo brew insuffisants).
 - `symfony/demo` n'existe pas sur Packagist : `symfony/symfony-demo`.
 - Les fixtures (`fixtures/work/`) sont gitignorées : `fixtures/make.sh` d'abord.

@@ -1,6 +1,6 @@
 # vivace — plan v1 : `install` depuis composer.lock
 
-Statut : **révision 4** — M0, M1, M2 terminés (voir HANDOVER.md, bench/M2-install.md : parité vendor/ 0 diff × 3 fixtures, no-op 11-18 ms, warm 9,5-15×). r4 = découvertes M2 : `target-dir` legacy, chemins `./x` du namespace composer/*, replace/provide du root. Suite : M3 autoload. M0 terminé (mesures dans `bench/M0-profil.md`). r1 = intégration méta-analyse (`[F#]`) ; r2 = allowlist de plugins émulés ; r3 = **architecture store + clonefile** (le spike a montré que l'extraction naïve ne gagne rien : 1,0-1,8×, goulot = I/O metadata ; le clone par paquet mesure 8× sur la pose des fichiers).
+Statut : **révision 5** — M0→M3 terminés : `vivace install` complet (autoload normal, -o, -a, --no-dev) produit un vendor/ identique à Composer sur les 3 fixtures (harness --with-autoloader), les apps bootent sans Composer. r5 = découvertes M3 : noms de classes en octets bruts, config optimize-autoloader honorée, chemin classmap absent = erreur. Suite : M4 harness formel/CI Linux, M5 benchmarks, M6 sortie. Historique : M0, M1, M2 terminés (voir HANDOVER.md, bench/M2-install.md : parité vendor/ 0 diff × 3 fixtures, no-op 11-18 ms, warm 9,5-15×). r4 = découvertes M2 : `target-dir` legacy, chemins `./x` du namespace composer/*, replace/provide du root. Suite : M3 autoload. M0 terminé (mesures dans `bench/M0-profil.md`). r1 = intégration méta-analyse (`[F#]`) ; r2 = allowlist de plugins émulés ; r3 = **architecture store + clonefile** (le spike a montré que l'extraction naïve ne gagne rien : 1,0-1,8×, goulot = I/O metadata ; le clone par paquet mesure 8× sur la pose des fichiers).
 
 ## Cadrage
 
@@ -92,6 +92,8 @@ vivace/
 | `pcre2` = dépendance C | isolée dans vivace-autoload ; plan de sortie `regex::bytes` si le différentiel le valide |
 
 ## Journal des révisions
+
+- **r5 (2026-09-10, fin M3)** : générateur d'autoload complet (port d'AutoloadGenerator + class-map-generator, pcre2), parité vendor/ 0 diff × 3 fixtures avec autoloader, en modes normal/-o/-a/--no-dev ; classmap validée sur ~50k fichiers contre l'oracle ; trois découvertes absorbées (octets bruts, config optimize, chemin classmap absent).
 
 - **r4 (2026-09-09, fin M2)** : `vivace install --no-autoloader` fonctionnel, vendor/ identique à Composer sur les 3 fixtures (diff -r), apps bootent. Trois comportements Composer non planifiés reproduits (target-dir, chemins composer/*, replace/provide racine). Objectifs chiffrés M0 tenus avec marge (no-op 33-95×, warm 9,5-15×).
 

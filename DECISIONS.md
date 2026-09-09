@@ -77,3 +77,35 @@ modifie le store (même inode) — pnpm vit avec la même contrainte. vivace ne
 modifie jamais un fichier cloné (il remplace des répertoires entiers). À
 documenter pour les utilisateurs qui patchent vendor/ à la main ; reflink
 FICLONE par fichier sur btrfs/xfs est une amélioration possible.
+
+## 2026-09-10 — M3 : classmap par port du cleaner + pcre2, pas de tokenizer PHP
+
+Composer détecte les classes par `php_strip_whitespace()` (tokenizer) puis un
+cleaner à état + UN pattern PCRE (possessifs, lookbehind, octets `\x7f-\xff`).
+vivace porte le cleaner (en ajoutant les commentaires `#` que strip_whitespace
+retirait) et exécute le pattern original via `pcre2` (décision F4). Preuve :
+`PhpFileParser::findClasses` du phar sur ~50 000 fichiers des fixtures, zéro
+divergence (tests/oracle_classmap.rs, noms comparés en base64).
+Alternative écartée : mago-syntax (vrai parser) — plus « juste » mais pas
+identique à Composer sur les cas tordus, et la fidélité prime.
+
+## 2026-09-10 — Noms de classes en octets bruts
+
+`symfony/cache` déclare une classe nommée d'un octet non-UTF-8 et Composer
+l'écrit tel quel. Les noms circulent donc en `Vec<u8>` de bout en bout
+(scanner, var_export, fichiers assemblés en octets) — le prix d'une parité
+octale, trouvé par le harness sur la fixture symfony.
+
+## 2026-09-10 — Chemin classmap absent = erreur, comme Composer
+
+Une règle `classmap` pointant sur un chemin inexistant fait échouer Composer
+(« Could not scan for classes inside … »). vivace faisait de même en silence :
+aligné sur l'erreur explicite. Corollaire : le harness copie désormais le projet
+complet (sans vendor/node_modules/var), pas seulement composer.json/lock.
+
+## 2026-09-10 — `optimize-autoloader` / `classmap-authoritative` : flags OU config
+
+Comme InstallCommand : `-o`/`-a` ou `config.optimize-autoloader` /
+`config.classmap-authoritative` du composer.json (Laravel active le premier
+par défaut). Le suffixe des classes d'init est le content-hash du lock
+(Composer ≥ 2.2), donc déterministe et identique entre les deux outils.

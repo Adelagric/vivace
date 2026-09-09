@@ -17,6 +17,28 @@ use std::sync::Arc;
 enum Cli {
     /// Installe les dépendances depuis composer.lock (drop-in `composer install`).
     Install(InstallArgs),
+    /// Régénère l'autoloader (drop-in `composer dump-autoload`).
+    #[command(name = "dump-autoload", alias = "dumpautoload")]
+    DumpAutoload(DumpArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct DumpArgs {
+    /// Ne pas inclure les paquets de require-dev dans l'autoloader.
+    #[arg(long)]
+    no_dev: bool,
+    /// Classmap optimisée : tous les répertoires PSR sont scannés.
+    #[arg(short = 'o', long)]
+    optimize: bool,
+    /// Classmap autoritaire (implique -o).
+    #[arg(short = 'a', long)]
+    classmap_authoritative: bool,
+    #[arg(long)]
+    ignore_platform_reqs: bool,
+    #[arg(long = "ignore-platform-req", value_name = "REQ")]
+    ignore_platform_req: Vec<String>,
+    #[arg(long, value_name = "DIR")]
+    working_dir: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -27,6 +49,12 @@ struct InstallArgs {
     /// Ne pas générer l'autoloader.
     #[arg(long)]
     no_autoloader: bool,
+    /// Classmap optimisée (`-o`).
+    #[arg(short = 'o', long)]
+    optimize_autoloader: bool,
+    /// Classmap autoritaire (`-a`, implique -o).
+    #[arg(short = 'a', long)]
+    classmap_authoritative: bool,
     /// Accepté pour compatibilité : vivace n'exécute jamais les scripts.
     #[arg(long)]
     no_scripts: bool,
@@ -51,8 +79,10 @@ struct InstallArgs {
 }
 
 fn main() -> anyhow::Result<()> {
-    let Cli::Install(args) = Cli::parse();
-    let code = run_install(&args)?;
+    let code = match Cli::parse() {
+        Cli::Install(args) => run_install(&args)?,
+        Cli::DumpAutoload(args) => run_dump(&args)?,
+    };
     if code != 0 {
         std::process::exit(code);
     }
@@ -154,13 +184,6 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         }
     }
 
-    if !args.no_autoloader {
-        anyhow::bail!(
-            "la génération d'autoload n'est pas encore disponible (jalon M3) — \
-             utiliser --no-autoloader puis `composer dump-autoload`"
-        );
-    }
-
     // Transaction.
     let store = Arc::new(vivace_core::store::Store::default_location());
     let auth = vivace_core::fetch::Auth::load(&project);
@@ -178,14 +201,107 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         &project, &lock, &manifest, store, fetcher, &opts,
     ))?;
 
+    let mut autoload_note = String::new();
+    if !args.no_autoloader {
+        let report = dump_autoload(
+            &project,
+            &lock,
+            &manifest,
+            with_dev,
+            args.optimize_autoloader || args.classmap_authoritative,
+            args.classmap_authoritative,
+            args.ignore_platform_reqs,
+            &args.ignore_platform_req,
+        )?;
+        autoload_note = format!(", autoload {} classes", report.classes);
+    }
+
     eprintln!(
-        "vivace: {} installés, {} inchangés, {} retirés ({} du store, {} du cache, {} du réseau) en {:.2}s",
+        "vivace: {} installés, {} inchangés, {} retirés ({} du store, {} du cache, {} du réseau){autoload_note} en {:.2}s",
         report.installed,
         report.unchanged,
         report.removed,
         report.store_hits,
         report.from_cache,
         report.from_network,
+        t0.elapsed().as_secs_f32()
+    );
+    Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dump_autoload(
+    project: &std::path::Path,
+    lock: &vivace_core::lock::Lock,
+    manifest: &serde_json::Value,
+    dev_mode: bool,
+    optimize: bool,
+    authoritative: bool,
+    ignore_all: bool,
+    ignored: &[String],
+) -> anyhow::Result<vivace_autoload::DumpReport> {
+    let platform_check = match manifest.get("config").and_then(|c| c.get("platform-check")) {
+        Some(serde_json::Value::Bool(false)) => vivace_autoload::PlatformCheckMode::Off,
+        Some(serde_json::Value::Bool(true)) => vivace_autoload::PlatformCheckMode::Full,
+        _ => vivace_autoload::PlatformCheckMode::PhpOnly,
+    };
+    // Comme InstallCommand : les flags OU la config du composer.json.
+    let cfg_bool = |key: &str| {
+        manifest
+            .get("config")
+            .and_then(|c| c.get(key))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    };
+    let authoritative = authoritative || cfg_bool("classmap-authoritative");
+    let optimize = optimize || authoritative || cfg_bool("optimize-autoloader");
+    let opts = vivace_autoload::DumpOptions {
+        dev_mode,
+        optimize,
+        authoritative,
+        platform_check,
+        ignore_all_platform_reqs: ignore_all || ignored.iter().any(|p| p == "*"),
+        ignored_platform_reqs: ignored.to_vec(),
+        suffix: None,
+    };
+    let report = vivace_autoload::dump(project, lock, manifest, &opts)?;
+    for w in &report.warnings {
+        eprintln!("{w}");
+    }
+    Ok(report)
+}
+
+fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
+    let t0 = std::time::Instant::now();
+    let project = match &args.working_dir {
+        Some(d) => d.clone(),
+        None => std::env::current_dir().context("répertoire courant illisible")?,
+    };
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(project.join("composer.json")).context("lecture composer.json")?,
+    )
+    .context("composer.json invalide")?;
+    let lock = vivace_core::lock::Lock::read(&project.join("composer.lock"))?;
+    // Mode dev : celui de l'état installé (installed.json), comme Composer.
+    let installed_dev = std::fs::read_to_string(project.join("vendor/composer/installed.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v.get("dev").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true);
+    let dev_mode = !args.no_dev && installed_dev;
+    let report = dump_autoload(
+        &project,
+        &lock,
+        &manifest,
+        dev_mode,
+        args.optimize || args.classmap_authoritative,
+        args.classmap_authoritative,
+        args.ignore_platform_reqs,
+        &args.ignore_platform_req,
+    )?;
+    eprintln!(
+        "vivace: autoload généré ({} classes) en {:.2}s",
+        report.classes,
         t0.elapsed().as_secs_f32()
     );
     Ok(0)
@@ -219,6 +335,12 @@ fn fallback_or_fail(
     }
     if args.no_autoloader {
         cmd.arg("--no-autoloader");
+    }
+    if args.optimize_autoloader {
+        cmd.arg("--optimize-autoloader");
+    }
+    if args.classmap_authoritative {
+        cmd.arg("--classmap-authoritative");
     }
     if args.no_scripts {
         cmd.arg("--no-scripts");
