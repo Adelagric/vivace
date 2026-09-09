@@ -1,0 +1,11 @@
+[package]
+name = "vivace-autoload"
+description = "Composer-compatible autoloader generation for vivace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true

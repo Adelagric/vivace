@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/vivace", "crates/vivace-core", "crates/vivace-autoload"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Adelagric/vivace"
+
+[workspace.dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process"] }
+reqwest = { version = "0.12", features = ["http2", "gzip", "stream"] }
+zip = "2"
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+clap = { version = "4", features = ["derive"] }
