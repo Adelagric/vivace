@@ -1,1 +1,3 @@
-fn main() { println!("vivace 0.1.0-dev"); }
+fn main() {
+    println!("vivace 0.1.0-dev");
+}

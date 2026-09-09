@@ -38,7 +38,9 @@ fn extract(zip_bytes: &[u8], dest: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(dest)?;
     for i in 0..ar.len() {
         let mut f = ar.by_index(i)?;
-        let Some(raw) = f.enclosed_name() else { continue }; // zip-slip: rejeté par enclosed_name
+        let Some(raw) = f.enclosed_name() else {
+            continue;
+        }; // zip-slip: rejeté par enclosed_name
         let stripped: PathBuf = raw.components().skip(1).collect();
         if stripped.as_os_str().is_empty() {
             continue;
@@ -71,7 +73,10 @@ async fn main() -> anyhow::Result<()> {
         for p in lock[key].as_array().into_iter().flatten() {
             let name = p["name"].as_str().unwrap().to_string();
             match p["dist"]["url"].as_str() {
-                Some(url) => dists.push(Dist { name, url: url.to_string() }),
+                Some(url) => dists.push(Dist {
+                    name,
+                    url: url.to_string(),
+                }),
                 None => eprintln!("skip (pas de dist): {name}"),
             }
         }
@@ -82,11 +87,14 @@ async fn main() -> anyhow::Result<()> {
     let _ = std::fs::remove_dir_all(&vendor);
 
     let t0 = Instant::now();
-    let client = reqwest::Client::builder().user_agent("vivace-spike/0.1").build()?;
+    let client = reqwest::Client::builder()
+        .user_agent("vivace-spike/0.1")
+        .build()?;
     let mut set = tokio::task::JoinSet::new();
     let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(32));
     for d in dists {
-        let (client, cache, vendor, sem) = (client.clone(), cache.clone(), vendor.clone(), sem.clone());
+        let (client, cache, vendor, sem) =
+            (client.clone(), cache.clone(), vendor.clone(), sem.clone());
         set.spawn(async move {
             let _permit = sem.acquire().await.unwrap();
             let cp = cache_path(&cache, &d);
@@ -95,7 +103,14 @@ async fn main() -> anyhow::Result<()> {
             } else if offline {
                 anyhow::bail!("cache miss en mode offline: {}", d.name)
             } else {
-                let b = client.get(&d.url).send().await?.error_for_status()?.bytes().await?.to_vec();
+                let b = client
+                    .get(&d.url)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .bytes()
+                    .await?
+                    .to_vec();
                 std::fs::create_dir_all(cp.parent().unwrap())?;
                 let tmp = cp.with_extension("tmp-spike");
                 std::fs::write(&tmp, &b)?;

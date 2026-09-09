@@ -9,13 +9,15 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Adelagric/vivace"
 
 [workspace.dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process"] }
-reqwest = { version = "0.12", features = ["http2", "gzip", "stream"] }
-zip = "2"
-sha1 = "0.10"
-sha2 = "0.10"
-md-5 = "0.10"
-clap = { version = "4", features = ["derive"] }
+anyhow = "=1.0.104"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["preserve_order", "float_roundtrip"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "fs", "process"] }
+reqwest = { version = "=0.12.28", features = ["http2", "gzip", "stream"] }
+zip = "=2.4.2"
+sha1 = "=0.10.7"
+sha2 = "=0.10.9"
+md-5 = "=0.10.6"
+thiserror = "=2.0.20"
+clap = { version = "=4.6.6", features = ["derive"] }
+proptest = "=1.11.0"
