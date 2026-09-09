@@ -16,53 +16,104 @@
 use crate::error::{Error, Result};
 use serde_json::Value;
 
+/// Options miroir des flags de json_encode utilisés par Composer.
+#[derive(Debug, Clone, Copy)]
+pub struct EncodeOptions {
+    pub pretty: bool,
+    pub escape_slashes: bool,
+    pub escape_unicode: bool,
+}
+
+/// Flags 0 (content-hash) : compact, slashes et unicode échappés.
+pub const FLAGS_ZERO: EncodeOptions = EncodeOptions {
+    pretty: false,
+    escape_slashes: true,
+    escape_unicode: true,
+};
+
+/// Défaut JsonFile (fichiers écrits par Composer) :
+/// JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE.
+pub const FLAGS_JSONFILE: EncodeOptions = EncodeOptions {
+    pretty: true,
+    escape_slashes: false,
+    escape_unicode: false,
+};
+
 pub fn php_json_encode(value: &Value) -> Result<String> {
+    php_json_encode_with(value, FLAGS_ZERO)
+}
+
+pub fn php_json_encode_with(value: &Value, opts: EncodeOptions) -> Result<String> {
     let mut out = String::new();
-    encode_into(value, &mut out)?;
+    encode_into(value, &mut out, opts, 0)?;
     Ok(out)
 }
 
-fn encode_into(value: &Value, out: &mut String) -> Result<()> {
+fn newline_indent(out: &mut String, level: usize) {
+    out.push('\n');
+    for _ in 0..level {
+        out.push_str("    ");
+    }
+}
+
+fn encode_into(value: &Value, out: &mut String, opts: EncodeOptions, level: usize) -> Result<()> {
     match value {
         Value::Null => out.push_str("null"),
         Value::Bool(true) => out.push_str("true"),
         Value::Bool(false) => out.push_str("false"),
         Value::Number(n) => encode_number(n, out)?,
-        Value::String(s) => encode_string(s, out),
-        Value::Array(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                encode_into(item, out)?;
-            }
-            out.push(']');
-        }
+        Value::String(s) => encode_string_with(s, out, opts),
+        Value::Array(items) => encode_list(items.iter(), out, opts, level)?,
         Value::Object(map) => {
             if is_php_list(map) {
-                out.push('[');
-                for (i, (_, item)) in map.iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    encode_into(item, out)?;
-                }
-                out.push(']');
+                encode_list(map.values(), out, opts, level)?;
             } else {
                 out.push('{');
                 for (i, (key, item)) in map.iter().enumerate() {
                     if i > 0 {
                         out.push(',');
                     }
-                    encode_string(key, out);
+                    if opts.pretty {
+                        newline_indent(out, level + 1);
+                    }
+                    encode_string_with(key, out, opts);
                     out.push(':');
-                    encode_into(item, out)?;
+                    if opts.pretty {
+                        out.push(' ');
+                    }
+                    encode_into(item, out, opts, level + 1)?;
+                }
+                if opts.pretty && !map.is_empty() {
+                    newline_indent(out, level);
                 }
                 out.push('}');
             }
         }
     }
+    Ok(())
+}
+
+fn encode_list<'a>(
+    items: impl ExactSizeIterator<Item = &'a Value>,
+    out: &mut String,
+    opts: EncodeOptions,
+    level: usize,
+) -> Result<()> {
+    let len = items.len();
+    out.push('[');
+    for (i, item) in items.enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        if opts.pretty {
+            newline_indent(out, level + 1);
+        }
+        encode_into(item, out, opts, level + 1)?;
+    }
+    if opts.pretty && len > 0 {
+        newline_indent(out, level);
+    }
+    out.push(']');
     Ok(())
 }
 
@@ -146,13 +197,13 @@ fn encode_double(f: f64, out: &mut String) -> Result<()> {
     Ok(())
 }
 
-fn encode_string(s: &str, out: &mut String) {
+fn encode_string_with(s: &str, out: &mut String, opts: EncodeOptions) {
     out.push('"');
     for c in s.chars() {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
-            '/' => out.push_str("\\/"),
+            '/' if opts.escape_slashes => out.push_str("\\/"),
             '\u{08}' => out.push_str("\\b"),
             '\u{0c}' => out.push_str("\\f"),
             '\n' => out.push_str("\\n"),
@@ -162,6 +213,7 @@ fn encode_string(s: &str, out: &mut String) {
                 push_unicode_escape(c as u32, out);
             }
             c if c.is_ascii() => out.push(c),
+            c if !opts.escape_unicode => out.push(c),
             c => {
                 let cp = c as u32;
                 if cp > 0xFFFF {

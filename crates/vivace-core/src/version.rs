@@ -125,6 +125,81 @@ impl Ord for Version {
     }
 }
 
+/// Normalisation « pretty → normalized » de Composer (VersionParser::normalize),
+/// pour le sous-ensemble rencontré dans les locks : versions numériques
+/// (→ 4 composantes + suffixe canonique), branches `dev-*` (inchangées) et
+/// branches numériques `N.x-dev` (x → 9999999, complété à 4 composantes).
+/// Parité tenue par tests/oracle_normalize.rs.
+pub fn normalize_pretty(input: &str) -> Result<String, UnsupportedVersion> {
+    let s = input.trim();
+    if let Some(rest) = s.strip_prefix("dev-") {
+        if rest.is_empty() {
+            return Err(UnsupportedVersion(input.to_owned()));
+        }
+        return Ok(format!("dev-{rest}"));
+    }
+    let stripped = s
+        .strip_prefix('v')
+        .or_else(|| s.strip_prefix('V'))
+        .unwrap_or(s);
+
+    // Branche numérique `1.2.x-dev` / `1.x-dev`.
+    if let Some(stem) = stripped
+        .strip_suffix(".x-dev")
+        .or_else(|| stripped.strip_suffix(".X-dev"))
+    {
+        let mut parts: Vec<u64> = Vec::new();
+        for piece in stem.split('.') {
+            if piece.is_empty() || !piece.bytes().all(|b| b.is_ascii_digit()) || parts.len() >= 3 {
+                return Err(UnsupportedVersion(input.to_owned()));
+            }
+            parts.push(
+                piece
+                    .parse()
+                    .map_err(|_| UnsupportedVersion(input.to_owned()))?,
+            );
+        }
+        let mut out: Vec<String> = parts.iter().map(u64::to_string).collect();
+        while out.len() < 4 {
+            out.push("9999999".to_owned());
+        }
+        return Ok(format!("{}-dev", out.join(".")));
+    }
+
+    let (num, suffix) = split_stability(stripped);
+    let (stability, pre_number) = parse_stability(suffix, input)?;
+    let mut count = 0usize;
+    let mut parts = [0u64; 4];
+    for piece in num.split('.') {
+        if count >= 4 || piece.is_empty() || !piece.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(UnsupportedVersion(input.to_owned()));
+        }
+        parts[count] = piece
+            .parse()
+            .map_err(|_| UnsupportedVersion(input.to_owned()))?;
+        count += 1;
+    }
+    if count == 0 {
+        return Err(UnsupportedVersion(input.to_owned()));
+    }
+    let base = format!("{}.{}.{}.{}", parts[0], parts[1], parts[2], parts[3]);
+    let word = match stability {
+        Stability::Stable => return Ok(base),
+        Stability::Dev => "dev",
+        Stability::Alpha => "alpha",
+        Stability::Beta => "beta",
+        Stability::Rc => "RC",
+        Stability::Patch => "patch",
+    };
+    // Les suffixes sans numéro restent nus (`-alpha`), sinon numéro accolé.
+    let had_number = suffix.chars().any(|c| c.is_ascii_digit());
+    if had_number {
+        Ok(format!("{base}-{word}{pre_number}"))
+    } else {
+        Ok(format!("{base}-{word}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

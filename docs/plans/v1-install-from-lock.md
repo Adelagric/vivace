@@ -1,6 +1,6 @@
 # vivace — plan v1 : `install` depuis composer.lock
 
-Statut : **révision 3** — M0 terminé (mesures dans `bench/M0-profil.md`). r1 = intégration méta-analyse (`[F#]`) ; r2 = allowlist de plugins émulés ; r3 = **architecture store + clonefile** (le spike a montré que l'extraction naïve ne gagne rien : 1,0-1,8×, goulot = I/O metadata ; le clone par paquet mesure 8× sur la pose des fichiers).
+Statut : **révision 4** — M0, M1, M2 terminés (voir HANDOVER.md, bench/M2-install.md : parité vendor/ 0 diff × 3 fixtures, no-op 11-18 ms, warm 9,5-15×). r4 = découvertes M2 : `target-dir` legacy, chemins `./x` du namespace composer/*, replace/provide du root. Suite : M3 autoload. M0 terminé (mesures dans `bench/M0-profil.md`). r1 = intégration méta-analyse (`[F#]`) ; r2 = allowlist de plugins émulés ; r3 = **architecture store + clonefile** (le spike a montré que l'extraction naïve ne gagne rien : 1,0-1,8×, goulot = I/O metadata ; le clone par paquet mesure 8× sur la pose des fichiers).
 
 ## Cadrage
 
@@ -92,6 +92,8 @@ vivace/
 | `pcre2` = dépendance C | isolée dans vivace-autoload ; plan de sortie `regex::bytes` si le différentiel le valide |
 
 ## Journal des révisions
+
+- **r4 (2026-09-09, fin M2)** : `vivace install --no-autoloader` fonctionnel, vendor/ identique à Composer sur les 3 fixtures (diff -r), apps bootent. Trois comportements Composer non planifiés reproduits (target-dir, chemins composer/*, replace/provide racine). Objectifs chiffrés M0 tenus avec marge (no-op 33-95×, warm 9,5-15×).
 
 - **r3 (2026-09-09, fin M0)** : mesures faites (profil + spike + plancher clonefile). L'extraction naïve en Rust ne suffit pas (1,01× sur sylius) ; adoption de l'architecture **store adressé par contenu + clone par paquet** (8× mesuré sur la pose des fichiers) ; objectifs chiffrés du critère n°2 fixés ; M2 devient « fetch + store + clone ».
 - **r2 (2026-09-09, M0)** : la qualification des fixtures a révélé que `--no-plugins` casse le boot Symfony (`autoload_runtime.php` généré par le plugin `symfony/runtime`) → ajout de l'émulation native d'une allowlist de plugins déterministes ; critère de qualification des fixtures mis à jour en conséquence (make.sh encode le contrat v1).

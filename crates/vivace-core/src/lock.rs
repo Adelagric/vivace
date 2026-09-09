@@ -79,6 +79,22 @@ impl LockPackage {
         }
     }
 
+    /// `target-dir` (legacy PSR-0) : le paquet s'installe dans
+    /// vendor/<name>/<target-dir>.
+    pub fn target_dir(&self) -> Option<&str> {
+        self.str_field("target-dir")
+            .map(|t| t.trim_matches('/'))
+            .filter(|t| !t.is_empty())
+    }
+
+    /// Chemin d'installation relatif à vendor/ (`name` ou `name/target-dir`).
+    pub fn install_subpath(&self) -> String {
+        match self.target_dir() {
+            Some(t) => format!("{}/{}", self.name(), t),
+            None => self.name().to_owned(),
+        }
+    }
+
     pub fn is_metapackage(&self) -> bool {
         self.package_type() == "metapackage"
     }

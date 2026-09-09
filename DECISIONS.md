@@ -50,3 +50,30 @@ HTTP/2, pattern uv/pnpm), zip (extraction, pas d'async nécessaire : spawn_block
 sha1/sha2 (cache/shasum Composer), md-5 (content-hash), thiserror (erreurs lib),
 clap (CLI), proptest (dev, oracle fuzzé). `hex` retiré au profit de format hex
 std à venir dans vivace-core (le spike jetable l'utilise encore).
+
+## 2026-09-09 — M2 : fidélité vendor/ prouvée par diff -r, pas par tests unitaires
+
+Le juge de paix de l'installeur est `harness/diff-vendor.sh` : `diff -r` entre
+le vendor de Composer et le nôtre sur les 3 fixtures. Trois comportements de
+Composer découverts en chemin et reproduits (aucun n'était dans le plan) :
+`target-dir` legacy (chemin d'install `vendor/<name>/<target-dir>`), chemins
+d'état raccourcis `./x` pour le namespace `composer/*` (findShortestPath depuis
+vendor/composer), `replace`/`provide` du composer.json racine dans installed.php.
+Alternative écartée : un harness Rust structuré dès M2 — le script shell suffit
+et M4 le formalisera (normalisations, boot, CI).
+
+## 2026-09-09 — Store : clé (nom, version, ref12), pas de hash de contenu
+
+L'entrée de store est adressée par (paquet, version, 12 hex de la référence de
+dist) — pas par sha256 du zip : Packagist ne fournit pas de shasum, et la
+référence git est déjà l'ancrage d'intégrité de Composer. Coût : un zip
+re-publié sous la même référence (cas pathologique) réutiliserait l'ancienne
+extraction. Accepté et documenté ; `vivace store prune` viendra plus tard.
+
+## 2026-09-09 — Clone : clonefile(2) macOS, hardlinks ailleurs, copie en repli
+
+Sur Linux, le mode hardlink signifie qu'éditer EN PLACE un fichier de vendor/
+modifie le store (même inode) — pnpm vit avec la même contrainte. vivace ne
+modifie jamais un fichier cloné (il remplace des répertoires entiers). À
+documenter pour les utilisateurs qui patchent vendor/ à la main ; reflink
+FICLONE par fichier sur btrfs/xfs est une amélioration possible.
