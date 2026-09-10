@@ -37,3 +37,21 @@ un paquet inchangé dont l'entrée de store manque est extrait dans le store
 depuis le cache zip (sans être re-cloné, jamais via le réseau, échec
 silencieux) — le run suivant profite du cache. Mesuré à nouveau sur le runner
 après correctif : voir la ligne « laravel noop » du prochain tableau.
+
+## Après correctif (run 34504299371, runner plus lent — Composer aussi)
+
+| fixture | scénario | Composer | vivace | gain |
+|---|---|---|---|---|
+| laravel | noop | 1364 ms | 103 ms | 13.2× |
+| laravel | warm | 2310 ms | 260 ms | 8.9× |
+| laravel | dump-o | 1238 ms | 95 ms | 13.0× |
+| symfony | noop | 605 ms | 37 ms | 16.4× |
+| symfony | warm | 1992 ms | 237 ms | 8.4× |
+| symfony | dump-o | 1423 ms | 122 ms | 11.7× |
+| sylius | noop | 647 ms | 53 ms | 12.2× |
+| sylius | warm | 4609 ms | 900 ms | 5.1× |
+| sylius | dump-o | 3151 ms | 308 ms | 10.2× |
+
+Le no-op Laravel rejoint les autres (13×). Les runners GitHub partagés sont
+bruyants (Composer varie de 995 à 1 364 ms entre deux runs) : les ratios sont
+plus stables que les valeurs absolues — c'est ce qu'il faut citer.

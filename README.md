@@ -35,8 +35,8 @@ warm caches. Full methodology and raw data in [`bench/`](bench/).
 | `dump-autoload -o` | **46 ms** vs 1 591 ms | **60 ms** vs ~940 ms | **151 ms** vs 1 601 ms |
 
 On Linux (GitHub `ubuntu-latest`, 4 vCPU, ext4 — where Composer itself is
-faster than on APFS), the same script measures 5-13× on warm installs and
-9-12× on `dump-autoload -o`; see [`bench/M6-linux-ci.md`](bench/M6-linux-ci.md)
+faster than on APFS), the same script measures 12-16× on no-op installs, 5-9×
+on warm installs and 10-13× on `dump-autoload -o`; see [`bench/M6-linux-ci.md`](bench/M6-linux-ci.md)
 for the full table, produced by [`bench/ci-bench.sh`](bench/ci-bench.sh) on
 every push. First install on a machine (store cold, zips in Composer's cache):
 2-3× faster than Composer. Cold network: not benchmarked — that one is up to
