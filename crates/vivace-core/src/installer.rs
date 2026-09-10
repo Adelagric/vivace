@@ -39,6 +39,8 @@ pub struct InstallReport {
     pub from_cache: usize,
     pub from_network: usize,
     pub store_hits: usize,
+    /// Paquets inchangés extraits dans le store (vendor préexistant).
+    pub store_warmed: usize,
 }
 
 /// Identité installée d'un paquet : version + référence de dist.
@@ -95,8 +97,12 @@ pub async fn install(
         }
     }
 
-    // À poser : identité changée, ou répertoire absent.
+    // À poser : identité changée, ou répertoire absent. Les paquets inchangés
+    // dont l'entrée de store manque (vendor/ posé par Composer avant vivace)
+    // sont extraits dans le store sans être re-clonés : le cache de classmap
+    // s'applique dès le run suivant.
     let mut to_install: Vec<&LockPackage> = Vec::new();
+    let mut to_warm: Vec<&LockPackage> = Vec::new();
     for p in &wanted {
         if p.is_metapackage() {
             continue;
@@ -105,19 +111,27 @@ pub async fn install(
             && vendor.join(p.install_subpath()).is_dir();
         if unchanged {
             report.unchanged += 1;
+            if !store.contains(p.name(), p.version(), p.dist_reference()) {
+                to_warm.push(p);
+            }
         } else {
             to_install.push(p);
         }
     }
 
-    // Fetch + extraction vers le store, en parallèle borné.
+    // Fetch + extraction vers le store, en parallèle borné. Les paquets à
+    // « chauffer » n'utilisent que le cache local (jamais le réseau) et leur
+    // échec est silencieux : c'est une optimisation, pas une obligation.
     let sem = Arc::new(tokio::sync::Semaphore::new(opts.jobs.max(1)));
     let mut tasks = tokio::task::JoinSet::new();
-    for p in &to_install {
+    let warm_names: std::collections::BTreeSet<&str> = to_warm.iter().map(|p| p.name()).collect();
+    for p in to_install.iter().chain(to_warm.iter()) {
         if store.contains(p.name(), p.version(), p.dist_reference()) {
             report.store_hits += 1;
             continue;
         }
+        let warm_only =
+            warm_names.contains(p.name()) && !to_install.iter().any(|q| q.name() == p.name());
         let (name, version) = (p.name().to_owned(), p.version().to_owned());
         let dist_ref = p.dist_reference().map(str::to_owned);
         let url = p
@@ -131,15 +145,21 @@ pub async fn install(
             .to_owned();
         let shasum = p.dist_shasum().map(str::to_owned);
         let (store, fetcher, sem) = (store.clone(), fetcher.clone(), sem.clone());
-        let offline = opts.offline;
+        let offline = opts.offline || warm_only;
         tasks.spawn(async move {
             let _permit = sem.acquire().await.map_err(|_| Error::Http {
                 url: url.clone(),
                 message: "semaphore fermé".to_owned(),
             })?;
-            let (bytes, provenance) = fetcher
+            let fetched = fetcher
                 .dist_bytes(&name, &url, shasum.as_deref(), offline)
-                .await?;
+                .await;
+            let (bytes, provenance) = match fetched {
+                Ok(v) => v,
+                // Chauffage : zip absent du cache → on n'insiste pas.
+                Err(_) if warm_only => return Ok::<Option<Provenance>, Error>(None),
+                Err(e) => return Err(e),
+            };
             let store_name = name.clone();
             let version2 = version.clone();
             let dist_ref2 = dist_ref.clone();
@@ -151,7 +171,7 @@ pub async fn install(
                 url: name.clone(),
                 message: format!("tâche d'extraction interrompue: {e}"),
             })??;
-            Ok::<Provenance, Error>(provenance)
+            Ok::<Option<Provenance>, Error>(Some(provenance))
         });
     }
     while let Some(joined) = tasks.join_next().await {
@@ -160,10 +180,12 @@ pub async fn install(
             message: e.to_string(),
         })??;
         match provenance {
-            Provenance::Cache => report.from_cache += 1,
-            Provenance::Network => report.from_network += 1,
+            Some(Provenance::Cache) => report.from_cache += 1,
+            Some(Provenance::Network) => report.from_network += 1,
+            None => {}
         }
     }
+    report.store_warmed = to_warm.len();
 
     // Pose : suppression de l'ancienne version puis clone depuis le store.
     for p in &to_install {

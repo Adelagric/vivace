@@ -78,6 +78,16 @@ struct InstallArgs {
     working_dir: Option<PathBuf>,
 }
 
+/// `VIVACE_TRACE=1` : durée de chaque phase sur stderr (diagnostic perf).
+fn trace(label: &str, since: std::time::Instant) {
+    if std::env::var_os("VIVACE_TRACE").is_some() {
+        eprintln!(
+            "trace: {label:<22} {:>7.1} ms",
+            since.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let code = match Cli::parse() {
         Cli::Install(args) => run_install(&args)?,
@@ -110,6 +120,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         );
     }
     let lock = vivace_core::lock::Lock::read(&lock_path)?;
+    trace("read manifests", t0);
 
     // Fraîcheur du lock : même comportement que Composer, un avertissement.
     if let (Ok(actual), Some(expected)) = (
@@ -143,6 +154,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     for plugin in &scope.skipped_plugins {
         eprintln!("Note: plugin {plugin} installé comme library (non exécuté par vivace)");
     }
+    trace("scope", t0);
 
     // Plateforme.
     let mut ignored = args.ignore_platform_req.clone();
@@ -184,6 +196,8 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         }
     }
 
+    trace("platform check", t0);
+
     // Transaction.
     let store = Arc::new(vivace_core::store::Store::default_location());
     let auth = vivace_core::fetch::Auth::load(&project);
@@ -201,6 +215,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         &project, &lock, &manifest, store, fetcher, &opts,
     ))?;
 
+    trace("install transaction", t0);
     let mut autoload_note = String::new();
     if !args.no_autoloader {
         let report = dump_autoload(
@@ -214,10 +229,16 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             &args.ignore_platform_req,
         )?;
         autoload_note = format!(", autoload {} classes", report.classes);
+        trace("autoload dump", t0);
     }
 
+    let warmed = if report.store_warmed > 0 {
+        format!(", store chauffé pour {} paquets", report.store_warmed)
+    } else {
+        String::new()
+    };
     eprintln!(
-        "vivace: {} installés, {} inchangés, {} retirés ({} du store, {} du cache, {} du réseau){autoload_note} en {:.2}s",
+        "vivace: {} installés, {} inchangés, {} retirés ({} du store, {} du cache, {} du réseau){warmed}{autoload_note} en {:.2}s",
         report.installed,
         report.unchanged,
         report.removed,

@@ -34,7 +34,7 @@ message explicite (jamais de skip silencieux).
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
-- **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. No-op Laravel à 54 ms (objectif 50).
+- **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. Sur un vendor/ posé par Composer, le premier `vivace install` chauffe le store depuis le cache zip (≈1 s sur Laravel) ; les suivants profitent du cache (65 ms). `VIVACE_TRACE=1` affiche les phases (temps cumulés).
 - **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
 
 - **Linux** : exercé en conteneur arm64 (php:8.4) et sur runner GitHub x86_64 (ubuntu-latest) — gates, tests, parité, boot ; copie et hardlinks exercés en conteneur. Perf Linux mesurée en runs uniques seulement (pas d'hyperfine sur runner).
