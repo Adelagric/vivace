@@ -47,6 +47,26 @@ pub enum ScopeIssue {
     NoUsableDist(String),
 }
 
+impl std::fmt::Display for ScopeIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScopeIssue::UnknownPlugin(p) => {
+                write!(f, "plugin {p} is not on vivace's known-plugin list")
+            }
+            ScopeIssue::LayoutPlugin(p) => {
+                write!(f, "plugin {p} changes the install layout (not emulated)")
+            }
+            ScopeIssue::InstallerPaths => {
+                write!(
+                    f,
+                    "composer.json declares extra.installer-paths (custom installers)"
+                )
+            }
+            ScopeIssue::NoUsableDist(p) => write!(f, "package {p} has no zip dist (source-only)"),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ScopeReport {
     /// Bloquants : au moins un → fallback (ou erreur sans Composer).

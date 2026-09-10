@@ -103,19 +103,19 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let t0 = std::time::Instant::now();
     let project = match &args.working_dir {
         Some(d) => d.clone(),
-        None => std::env::current_dir().context("répertoire courant illisible")?,
+        None => std::env::current_dir().context("cannot determine the current directory")?,
     };
     let manifest_path = project.join("composer.json");
     let lock_path = project.join("composer.lock");
 
     let manifest_text = std::fs::read_to_string(&manifest_path)
-        .with_context(|| format!("lecture de {}", manifest_path.display()))?;
+        .with_context(|| format!("cannot read {}", manifest_path.display()))?;
     let manifest: serde_json::Value =
-        serde_json::from_str(&manifest_text).context("composer.json invalide")?;
+        serde_json::from_str(&manifest_text).context("invalid composer.json")?;
     if !lock_path.is_file() {
         anyhow::bail!(
-            "pas de composer.lock dans {} — la résolution n'est pas couverte par vivace v1, \
-             lancer `composer update` d'abord",
+            "no composer.lock in {} — vivace does not resolve dependencies yet, \
+             run `composer update` first",
             project.display()
         );
     }
@@ -145,14 +145,14 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     if vivace_core::runtime_stub::has_custom_runtime_options(&manifest) {
         let scope = vivace_core::scope::ScopeReport {
             issues: vec![vivace_core::scope::ScopeIssue::UnknownPlugin(
-                "symfony/runtime (options extra.runtime personnalisées)".to_owned(),
+                "symfony/runtime with custom extra.runtime options".to_owned(),
             )],
             skipped_plugins: vec![],
         };
         return fallback_or_fail(args, &project, &scope);
     }
     for plugin in &scope.skipped_plugins {
-        eprintln!("Note: plugin {plugin} installé comme library (non exécuté par vivace)");
+        eprintln!("Note: plugin {plugin} installed as a plain library (vivace never runs plugins)");
     }
     trace("scope", t0);
 
@@ -167,12 +167,12 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
                 platform.apply_overrides(&manifest);
                 let failures = vivace_core::platform::check(&lock, &platform, with_dev, &ignored);
                 if !failures.is_empty() {
-                    eprintln!("Le lock ne peut pas être installé sur cette plateforme :");
+                    eprintln!("Your lock file cannot be installed on this platform:");
                     for f in &failures {
                         let by = f
                             .required_by
                             .as_deref()
-                            .map(|p| format!(" (requis par {p})"))
+                            .map(|p| format!(" (required by {p})"))
                             .unwrap_or_default();
                         eprintln!(
                             "  - {} {}{}: {:?}",
@@ -180,7 +180,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
                         );
                     }
                     eprintln!(
-                        "Contourner avec --ignore-platform-req=<req> ou --ignore-platform-reqs."
+                        "Use --ignore-platform-req=<req> or --ignore-platform-reqs to bypass."
                     );
                     return Ok(4);
                 }
@@ -188,8 +188,8 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             None => {
                 if !lock.platform.is_empty() || (with_dev && !lock.platform_dev.is_empty()) {
                     eprintln!(
-                        "Warning: php introuvable, exigences de plateforme non vérifiées \
-                         (--ignore-platform-reqs pour masquer cet avertissement)"
+                        "Warning: php not found, platform requirements were not checked \
+                         (--ignore-platform-reqs silences this warning)"
                     );
                 }
             }
@@ -210,7 +210,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         offline: args.offline,
         ..Default::default()
     };
-    let runtime = tokio::runtime::Runtime::new().context("initialisation tokio")?;
+    let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
     let report = runtime.block_on(vivace_core::installer::install(
         &project, &lock, &manifest, store, fetcher, &opts,
     ))?;
@@ -228,17 +228,17 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             args.ignore_platform_reqs,
             &args.ignore_platform_req,
         )?;
-        autoload_note = format!(", autoload {} classes", report.classes);
+        autoload_note = format!(", autoloader with {} classes", report.classes);
         trace("autoload dump", t0);
     }
 
     let warmed = if report.store_warmed > 0 {
-        format!(", store chauffé pour {} paquets", report.store_warmed)
+        format!(", store warmed for {} packages", report.store_warmed)
     } else {
         String::new()
     };
     eprintln!(
-        "vivace: {} installés, {} inchangés, {} retirés ({} du store, {} du cache, {} du réseau){warmed}{autoload_note} en {:.2}s",
+        "vivace: {} installed, {} unchanged, {} removed ({} from store, {} from cache, {} from network){warmed}{autoload_note} in {:.2}s",
         report.installed,
         report.unchanged,
         report.removed,
@@ -304,12 +304,13 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
     let t0 = std::time::Instant::now();
     let project = match &args.working_dir {
         Some(d) => d.clone(),
-        None => std::env::current_dir().context("répertoire courant illisible")?,
+        None => std::env::current_dir().context("cannot determine the current directory")?,
     };
     let manifest: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(project.join("composer.json")).context("lecture composer.json")?,
+        &std::fs::read_to_string(project.join("composer.json"))
+            .context("cannot read composer.json")?,
     )
-    .context("composer.json invalide")?;
+    .context("invalid composer.json")?;
     let lock = vivace_core::lock::Lock::read(&project.join("composer.lock"))?;
     // Mode dev : celui de l'état installé (installed.json), comme Composer.
     let installed_dev = std::fs::read_to_string(project.join("vendor/composer/installed.json"))
@@ -329,7 +330,7 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
         &args.ignore_platform_req,
     )?;
     eprintln!(
-        "vivace: autoload généré ({} classes) en {:.2}s",
+        "vivace: autoloader generated ({} classes) in {:.2}s",
         report.classes,
         t0.elapsed().as_secs_f32()
     );
@@ -341,22 +342,22 @@ fn fallback_or_fail(
     project: &std::path::Path,
     scope: &vivace_core::scope::ScopeReport,
 ) -> anyhow::Result<i32> {
-    eprintln!("vivace: lock hors du scope natif :");
+    eprintln!("vivace: this lock is outside what vivace handles natively:");
     for issue in &scope.issues {
-        eprintln!("  - {issue:?}");
+        eprintln!("  - {issue}");
     }
     if args.no_fallback {
-        eprintln!("--no-fallback demandé : abandon explicite (aucun vendor/ partiel écrit).");
+        eprintln!("--no-fallback given: stopping here (no partial vendor/ was written).");
         return Ok(3);
     }
     let composer = which_composer();
     let Some(composer) = composer else {
         eprintln!(
-            "composer introuvable pour le fallback — installer Composer ou retirer les éléments hors scope."
+            "composer not found for the fallback — install Composer or remove the unsupported items."
         );
         return Ok(3);
     };
-    eprintln!("vivace: délégation à `composer install`…");
+    eprintln!("vivace: delegating to `composer install`…");
     let mut cmd = std::process::Command::new(composer);
     cmd.arg("install").current_dir(project);
     if args.no_dev {
@@ -387,11 +388,11 @@ fn fallback_or_fail(
     {
         use std::os::unix::process::CommandExt as _;
         let err = cmd.exec();
-        Err(err).context("exec composer")
+        Err(err).context("cannot exec composer")
     }
     #[cfg(not(unix))]
     {
-        let status = cmd.status().context("lancement de composer")?;
+        let status = cmd.status().context("cannot run composer")?;
         Ok(status.code().unwrap_or(1))
     }
 }
