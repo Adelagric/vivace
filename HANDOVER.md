@@ -5,12 +5,12 @@
 ## Validation (toutes plateformes de dev)
 
 ```bash
-fixtures/make.sh                         # une fois : crée + qualifie laravel/symfony/sylius (php+composer requis)
+fixtures/make.sh                         # une fois : crée + qualifie laravel/symfony/sylius/rector (php+composer requis)
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 cargo test                               # inclut les tests oracle (php + composer dans le PATH)
 cargo build --release
-harness/diff-vendor.sh [--with-autoloader]   # parité vendor/ vs Composer sur les 3 fixtures
-harness/boot.sh                          # les 3 apps démarrent sur un vendor 100 % vivace
+harness/diff-vendor.sh [--with-autoloader]   # parité vendor/ vs Composer sur les 4 fixtures
+harness/boot.sh                          # les 4 fixtures démarrent sur un vendor 100 % vivace
 harness/linux.sh                         # toute la chaîne dans un conteneur Linux (Docker)
 bench/profile.sh ; bench/spike-vs-composer.sh   # M0, longs
 ```
@@ -39,7 +39,8 @@ message explicite (jamais de skip silencieux).
 
 - **Linux** : exercé en conteneur arm64 (php:8.4) et sur runner GitHub x86_64 (ubuntu-latest) — gates, tests, parité, boot ; copie et hardlinks exercés en conteneur. Perf Linux mesurée en runs uniques seulement (pas d'hyperfine sur runner).
 - **Réseau réel** : exercé une fois (109 zips GitHub via rustls, caches vides, 3,46 s, app boote) ; retries/backoff et auth jamais exercés en conditions réelles. `gitlab-token`/`gitlab-oauth` non implémentées (github-oauth, http-basic, bearer seulement). rustls n'utilise pas le magasin de CA système (`SSL_CERT_FILE` ignoré).
-- **Version du root package** : portée (VersionGuesser git : branche, HEAD détaché, tag exact, branche de feature → parente, branch-alias ; COMPOSER_ROOT_VERSION). Le harness commite un dépôt git identique des deux côtés : parité vérifiée sur `main`. Non exercés par le harness : branches de feature, HEAD détaché, alias (tests unitaires seulement) ; hg/fossil/svn non portés (défaut `1.0.0+no-version-set`).
+- **Version du root package** : portée (VersionGuesser git : branche, HEAD détaché, tag exact, branche de feature → parente, branch-alias ; COMPOSER_ROOT_VERSION). Le harness commite un dépôt git identique des deux côtés : parité vérifiée sur `main`. Non exercés par le harness : branches de feature, HEAD détaché, alias de la racine (tests unitaires seulement) ; hg/fossil/svn non portés (défaut `1.0.0+no-version-set`).
+- **Alias des paquets verrouillés** : port de `ArrayLoader::getBranchAlias` (`branch-alias` + `default-branch`), oracle de 31 cas contre le phar ; exercé par le harness via la fixture rector (`dev-main` + `default-branch`). Non exercé par diff : `extra.branch-alias` sur un paquet verrouillé en dev (oracle seulement).
 - **`extra.runtime` personnalisé** : routé en fallback, pas émulé.
 - **Windows** : hors scope v1 (proxies .bat non générés).
 - **Concurrence** : deux installs simultanés sur le même vendor/ ne sont pas

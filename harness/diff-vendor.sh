@@ -17,7 +17,7 @@ VIVACE="$ROOT/target/release/vivace"
 WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}"
 AUTOLOAD_FLAG="--no-autoloader"
 if [ "${1:-}" = "--with-autoloader" ]; then AUTOLOAD_FLAG=""; shift; fi
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector)
 
 [ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"

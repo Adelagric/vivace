@@ -171,3 +171,20 @@ sortie git forcée en anglais (`LANGUAGE=C`, comme GitUtil::cleanEnv — un git 
 français a fait échouer le premier test). Le harness commite désormais un dépôt
 git identique (même arbre, auteur et date figés → même SHA) des deux côtés.
 Non porté : hg/fossil/svn.
+
+## 2026-09-10 — Alias de branche des paquets verrouillés (fixture rector)
+
+Premier lock extérieur passé au harness (rector-src, généré par `composer
+update --no-install`) : `installed.php` divergeait sur les quatre paquets
+`rector/rector-*` verrouillés en `dev-main` avec `"default-branch": true` —
+Composer leur attache un AliasPackage `9999999-dev` (ArrayLoader::getBranchAlias)
+et installed.php liste sa version jolie dans `aliases`. vivace ne calculait
+d'alias que pour la racine, et avec une règle partielle (raw `extra.branch-alias`).
+Décision : port complet de `getBranchAlias` dans `root_version::branch_alias_of`
+(cible `-dev` normalisée par normalizeBranch, source comparée sans casse,
+préfixes numériques compatibles, sinon `9999999-dev` si default-branch et
+version non numérique ; version jolie = `(\.9{7})+` → `.x`), utilisé pour la
+racine ET pour chaque paquet du lock. Oracle `tests/oracle_branch_alias.rs`
+(31 configurations contre le phar, 0 divergence). rector devient la 4e fixture
+figée (squelette minimal : manifestes, lock, points d'entrée d'autoload) ; il
+couvre aussi les deux plugins extension-installer et `platform-check: false`.

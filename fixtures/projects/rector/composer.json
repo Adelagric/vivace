@@ -1,0 +1,125 @@
+{
+    "name": "rector/rector-src",
+    "description": "Instant Upgrade and Automated Refactoring of any PHP code",
+    "homepage": "https://getrector.com",
+    "bin": [
+        "bin/rector"
+    ],
+    "license": "MIT",
+    "keywords": [
+        "refactoring",
+        "automation",
+        "migration"
+    ],
+    "require": {
+        "php": "^8.4",
+        "clue/ndjson-react": "^1.3",
+        "composer/pcre": "^3.4.0",
+        "composer/semver": "^3.4",
+        "composer/xdebug-handler": "^3.0.5",
+        "doctrine/inflector": "^2.1",
+        "entropy/entropy": "^0.4.12",
+        "fidry/cpu-core-counter": "^1.1",
+        "nette/utils": "^4.1.4",
+        "nikic/php-parser": "^5.8",
+        "ondram/ci-detector": "^4.2",
+        "phpstan/phpdoc-parser": "^2.3.3",
+        "phpstan/phpstan": "^2.2.12",
+        "react/child-process": "^0.6.5",
+        "react/event-loop": "^1.6",
+        "react/socket": "^1.17",
+        "rector/extension-installer": "^0.11.2",
+        "rector/rector-doctrine": "dev-main",
+        "rector/rector-downgrade-php": "dev-main",
+        "rector/rector-phpunit": "dev-main",
+        "rector/rector-symfony": "dev-main",
+        "sebastian/diff": "^9.0",
+        "symfony/console": "^6.4.24",
+        "symfony/filesystem": "^8.1",
+        "symfony/finder": "^8.1",
+        "symplify/rule-doc-generator-contracts": "^11.2",
+        "webmozart/assert": "^2.4"
+    },
+    "require-dev": {
+        "nette/robot-loader": "^4.1",
+        "php-parallel-lint/php-parallel-lint": "^1.4",
+        "phpstan/extension-installer": "^1.4",
+        "phpstan/phpstan-deprecation-rules": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpstan/phpstan-webmozart-assert": "^2.0",
+        "phpunit/phpunit": "^13.3",
+        "rector/jack": "^1.1",
+        "rector/swiss-knife": "^2.4.1",
+        "shipmonk/composer-dependency-analyser": "^1.8",
+        "symfony/process": "^8.1",
+        "symplify/easy-coding-standard": "^13.2.13",
+        "symplify/phpstan-rules": "^14.13",
+        "tomasvotruba/class-leak": "^2.1",
+        "tomasvotruba/fast-unit": "^0.1",
+        "tomasvotruba/type-coverage": "^2.3.6",
+        "tomasvotruba/unused-public": "^2.2",
+        "tracy/tracy": "^2.12"
+    },
+    "replace": {
+        "rector/rector": "self.version"
+    },
+    "autoload": {
+        "psr-4": {
+            "Rector\\": [
+                "rules",
+                "src"
+            ],
+            "Rector\\Utils\\": "utils",
+            "Rector\\Utils\\PHPStan\\": "utils/phpstan/src"
+        },
+        "files": [
+            "src/functions/node_helper.php"
+        ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Rector\\Tests\\": [
+                "rules-tests",
+                "tests"
+            ],
+            "Rector\\Utils\\PHPStan\\Tests\\": "utils/phpstan/tests",
+            "E2e\\Parallel\\Reflection\\Resolver\\": "e2e/parallel-reflection-resolver/src/",
+            "Rector\\Scripts\\": "scripts/src"
+        },
+        "classmap": [
+            "stubs",
+            "rules-tests/CodingStyle/Rector/Namespace_/ImportFullyQualifiedNamesRector/Source",
+            "rules-tests/Renaming/Rector/Name/RenameClassRector/Source"
+        ],
+        "files": [
+            "tests/debug_functions.php",
+            "rules-tests/TypeDeclaration/Rector/ClassMethod/ScalarParamTypeByMethodCallTypeRector/Source/FunctionTyped.php",
+            "rules-tests/TypeDeclaration/Rector/StmtsAwareInterface/SafeDeclareStrictTypesRector/Source/functions.php",
+            "rules-tests/Php70/Rector/ClassMethod/Php4ConstructorRector/Source/ParentClass.php"
+        ]
+    },
+    "scripts": {
+        "complete-check": [
+            "@check-cs",
+            "@phpstan",
+            "@test"
+        ],
+        "test": "vendor/bin/fastunit tests rules-tests utils/phpstan/tests",
+        "check-cs": "vendor/bin/ecs check --ansi",
+        "fix-cs": "vendor/bin/ecs check --fix --ansi",
+        "phpstan": "vendor/bin/phpstan analyse --ansi --memory-limit=512M",
+        "rector": "bin/rector process --ansi",
+        "preload": "php build/build-preload.php .",
+        "release": "vendor/bin/rng --from-commit X --to-commit Y --remote-repository rectorphp/rector-symfony --remote-repository rectorphp/rector-doctrine --remote-repository rectorphp/rector-phpunit"
+    },
+    "config": {
+        "sort-packages": true,
+        "platform-check": false,
+        "allow-plugins": {
+            "phpstan/extension-installer": true,
+            "rector/extension-installer": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

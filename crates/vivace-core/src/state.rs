@@ -255,6 +255,18 @@ pub fn installed_php(
             Some(format!("__DIR__ . '/{}'", relative_install_path(p)))
         });
         entry.dev_requirement = Some(is_dev);
+        // Paquet de branche : Composer charge un AliasPackage (branch-alias ou
+        // default-branch) et installed.php liste sa version jolie.
+        let default_branch = p
+            .raw
+            .get("default-branch")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if let Some((_, pretty)) =
+            crate::root_version::branch_alias_of(p.version(), p.raw.get("extra"), default_branch)
+        {
+            entry.aliases.push(pretty);
+        }
     }
 
     // Paquets virtuels : replace puis provide (mêmes règles que Composer).

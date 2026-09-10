@@ -365,24 +365,114 @@ pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
     }
 }
 
-/// Alias de branche (`extra.branch-alias`) applicable à la version racine :
-/// (alias normalisé, alias joli) si la version est une branche `dev-*`/`x-dev`
-/// et que l'alias est lui-même une version dev.
+/// `VersionParser::DEFAULT_BRANCH_ALIAS`.
+pub const DEFAULT_BRANCH_ALIAS: &str = "9999999-dev";
+
+/// `VersionParser::parseNumericAliasPrefix` (composer/semver) : `1.2.x-dev` et
+/// `1.2-dev` → `1.2.`, sinon None. Insensible à la casse comme le motif PCRE.
+pub fn parse_numeric_alias_prefix(branch: &str) -> Option<String> {
+    let n = branch.len();
+    if n < 4 || !branch.is_char_boundary(n - 4) || !branch[n - 4..].eq_ignore_ascii_case("-dev") {
+        return None;
+    }
+    let mut rest = &branch[..n - 4];
+    if let Some(r) = rest.strip_suffix(".x").or_else(|| rest.strip_suffix(".X")) {
+        rest = r;
+    }
+    let numeric = !rest.is_empty()
+        && rest
+            .split('.')
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    numeric.then(|| format!("{rest}."))
+}
+
+/// Version jolie d'un alias normalisé, comme ArrayLoader :
+/// `preg_replace('{(\.9{7})+}', '.x', …)`.
+fn pretty_alias(normalized: &str) -> String {
+    const X: &str = ".9999999";
+    let mut out = String::with_capacity(normalized.len());
+    let mut rest = normalized;
+    while let Some(i) = rest.find(X) {
+        out.push_str(&rest[..i]);
+        out.push_str(".x");
+        rest = &rest[i + X.len()..];
+        while let Some(r) = rest.strip_prefix(X) {
+            rest = r;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `ArrayLoader::getBranchAlias` (Composer 2.10.3) : l'alias que Composer
+/// attache à un paquet (racine ou verrouillé) dont la version est une branche
+/// (`dev-*` ou `*-dev`). Priorité à `extra.branch-alias` (cible `-dev`,
+/// normalisée par normalizeBranch, source égale à la version sans casse,
+/// préfixe numérique compatible), sinon `9999999-dev` si `default-branch`
+/// est vrai et que la version n'a pas de préfixe numérique.
+/// Retourne (alias normalisé, alias joli) — le joli est celui d'installed.php.
+pub fn branch_alias_of(
+    version: &str,
+    extra: Option<&Value>,
+    default_branch: bool,
+) -> Option<(String, String)> {
+    if !(version.starts_with("dev-") || version.ends_with("-dev")) {
+        return None;
+    }
+    if let Some(map) = extra
+        .and_then(|e| e.get("branch-alias"))
+        .and_then(Value::as_object)
+    {
+        for (source, target) in map {
+            let Some(target) = target.as_str() else {
+                continue;
+            };
+            let Some(target_base) = target.strip_suffix("-dev") else {
+                continue;
+            };
+            let validated = if target == DEFAULT_BRANCH_ALIAS {
+                target.to_owned()
+            } else {
+                normalize_branch(target_base)
+            };
+            if !validated.ends_with("-dev") {
+                continue;
+            }
+            if version.to_lowercase() != source.to_lowercase() {
+                continue;
+            }
+            if let (Some(sp), Some(tp)) = (
+                parse_numeric_alias_prefix(source),
+                parse_numeric_alias_prefix(target),
+            ) {
+                if !tp.to_lowercase().starts_with(&sp.to_lowercase()) {
+                    continue;
+                }
+            }
+            let pretty = pretty_alias(&validated);
+            return Some((validated, pretty));
+        }
+    }
+    if default_branch {
+        let v = version.strip_prefix('v').unwrap_or(version);
+        if parse_numeric_alias_prefix(v).is_none() {
+            return Some((
+                DEFAULT_BRANCH_ALIAS.to_owned(),
+                DEFAULT_BRANCH_ALIAS.to_owned(),
+            ));
+        }
+    }
+    None
+}
+
+/// Alias de branche de la racine : getBranchAlias sur le composer.json, la
+/// version étant la version jolie retenue par RootPackageLoader.
 pub fn branch_alias(manifest: &Value, root: &RootVersion) -> Option<(String, String)> {
-    let alias = manifest
-        .get("extra")?
-        .get("branch-alias")?
-        .get(&root.pretty_version)?
-        .as_str()?;
-    let is_dev = root.version.ends_with("-dev") || root.version.starts_with("dev-");
-    if !is_dev {
-        return None;
-    }
-    let normalized = normalize_pretty(alias).ok()?;
-    if !normalized.ends_with("-dev") {
-        return None;
-    }
-    Some((normalized, alias.to_owned()))
+    let default_branch = manifest
+        .get("default-branch")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    branch_alias_of(&root.pretty_version, manifest.get("extra"), default_branch)
 }
 
 impl std::fmt::Display for UnsupportedVersionAlias {

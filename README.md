@@ -47,7 +47,8 @@ Packagist.
 Every claim above comes from a differential harness, not from unit tests
 alone: [`harness/diff-vendor.sh`](harness/diff-vendor.sh) runs `composer install`
 and `vivace install` on the same projects and `diff -r`s the two `vendor/`
-trees. It passes with **zero differences** on all three fixtures, with and
+trees. It passes with **zero differences** on all four fixtures (Laravel, the
+Symfony demo, Sylius, rector-src), with and
 without the autoloader, in normal, `-o`, `-a` and `--no-dev` modes, with a
 cold and a warm classmap cache. Class detection was checked against
 Composer's own `PhpFileParser::findClasses` on ~50 000 real PHP files. Every
@@ -70,7 +71,7 @@ generated file is a port of the pinned Composer 2.10.3 source — see
   plugins, source-only packages: vivace detects them *before* touching
   `vendor/` and `exec`s the real `composer install` instead (opt out with
   `--no-fallback`). You never get a silently wrong `vendor/`.
-- Windows, `gitlab-token` auth, root package version detection from git.
+- Windows, `gitlab-token` auth, root package version detection from hg/svn/fossil (git is ported).
 
 ## Install
 
@@ -85,7 +86,7 @@ Or with `cargo binstall vivace`, or from source (`cargo install --path crates/vi
 ## Development
 
 ```bash
-fixtures/make.sh        # once: creates and qualifies the three fixture projects (php + composer needed)
+fixtures/make.sh        # once: creates and qualifies the four fixture projects (php + composer needed)
 cargo test              # unit tests + differential tests against the real Composer phar
 harness/diff-vendor.sh --with-autoloader
 harness/boot.sh

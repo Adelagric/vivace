@@ -73,5 +73,8 @@ create() { # name create-project-package boot-command...
 create laravel  laravel/laravel          php artisan --version
 create symfony  symfony/symfony-demo     php bin/console --version
 create sylius   sylius/sylius-standard   php -d memory_limit=1G bin/console --version
+# rector-src ne versionne pas de lock : le squelette figé porte celui résolu le
+# 2026-09-10 (paquets dev-main avec default-branch, plugins extension-installer).
+create rector   rectorphp/rector-src     php vendor/bin/phpstan --version
 
-echo "Fixtures qualifiées : laravel, symfony, sylius"
+echo "Fixtures qualifiées : laravel, symfony, sylius, rector"

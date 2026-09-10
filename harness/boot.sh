@@ -10,10 +10,11 @@ boot_cmd() { # bash 3.2 (macOS) : pas de tableaux associatifs
     laravel) echo "php artisan --version" ;;
     symfony) echo "php bin/console --version" ;;
     sylius)  echo "php -d memory_limit=1G bin/console --version" ;;
+    rector)  echo "php vendor/bin/phpstan --version" ;;
   esac
 }
 status=0
-for fx in laravel symfony sylius; do
+for fx in laravel symfony sylius rector; do
   src="$ROOT/fixtures/work/$fx"; dst="$WORK/$fx"
   rm -rf "$dst"; mkdir -p "$dst"
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$dst" && tar -xf -)
