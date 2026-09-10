@@ -9,8 +9,11 @@ fixtures/make.sh                         # une fois : crée + qualifie laravel/s
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 cargo test                               # inclut les tests oracle (php + composer dans le PATH)
 cargo build --release
-harness/diff-vendor.sh [--with-autoloader]   # parité vendor/ vs Composer sur les 4 fixtures
-harness/boot.sh                          # les 4 fixtures démarrent sur un vendor 100 % vivace
+harness/diff-vendor.sh [--with-autoloader]   # parité vs Composer sur les 5 fixtures (projet entier pour wordpress)
+harness/removal.sh                       # paquets retirés du lock : même projet que Composer après
+harness/boot.sh                          # les 5 fixtures démarrent sur un vendor 100 % vivace
+harness/drift-reference.sh [phar]        # docs/reference/ == fichiers du phar (2.10.3 ou autre)
+php tools/gen-installers-table.php /tmp/composer.phar [src] [tag]   # régénère assets/installers/<tag>.json
 harness/linux.sh                         # toute la chaîne dans un conteneur Linux (Docker)
 bench/profile.sh ; bench/spike-vs-composer.sh   # M0, longs
 ```
@@ -30,7 +33,8 @@ message explicite (jamais de skip silencieux).
 | M3 autoload (normal, -o, -a, --no-dev) | terminé | harness --with-autoloader : 0 diff × 3 fixtures ; oracle classmap ~50k fichiers ; bench/M3-autoload.md |
 | M4 harness (parité + boot), Linux en conteneur, CI GitHub Actions | terminé : chaîne verte dans le conteneur Linux arm64 (copie ET hardlinks) ET sur GitHub Actions ubuntu-latest x86_64 + macos-latest (run #2, 2026-09-10) ; réseau réel exercé | bench/M4-linux.md, harness/*.sh, .github/workflows/ci.yml |
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
-| M6 sortie publique | dépôt public github.com/Adelagric/vivace, CI verte, README ; release (tag v0.1.0) et annonce en attente de feu vert utilisateur | .github/workflows/release.yml |
+| M6 sortie publique | terminé : v0.1.0/v0.1.1 publiées, annonce r/PHP | .github/workflows/release.yml |
+| v0.2 composer/installers natif, drift, action | terminé localement (2026-09-10) ; tag v0.2.0 après feu vert | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
@@ -45,9 +49,33 @@ message explicite (jamais de skip silencieux).
 - **Windows** : hors scope v1 (proxies .bat non générés).
 - **Concurrence** : deux installs simultanés sur le même vendor/ ne sont pas
   protégés (comme Composer) ; le store, lui, est sûr (temp+rename).
-- **Drift** : `InstalledVersions.php` (assets/) et le template symfony/runtime
-  sont épinglés sur Composer 2.10.3 / symfony-demo actuel ; pas encore de test
-  automatique de drift contre une version plus récente.
+- **Drift** : `ci.yml` épinglé sur Composer 2.10.3 ; `drift.yml` (hebdo +
+  manuel) teste `composer:v2` et `snapshot` en deux étages (jumeaux de
+  docs/reference/, puis tests + harness) et ouvre une issue `drift`. Le
+  template symfony/runtime n'a pas de jumeau vendoré (pas dans le phar) :
+  son drift n'est vu que par le boot de la fixture symfony.
+- **composer/installers** : émulé pour les tags 2.0.0…2.3.0 et les 58
+  frameworks « table seule » ; les 38 à logique custom (agl, akaunting,
+  asgard, bitrix, cakephp, cockpit, croogo, dokuwiki, ee2, ee3, fork, grav,
+  hurad, lms, majima, mantisbt, matomo, mautic, maya, mediawiki, microweber,
+  october, ontowiki, oxid, piwik, plentymarkets, processwire, pxcms, radphp,
+  roundcube, shopware, silverstripe, sitedirect, sydes, tao, tastyigniter,
+  winter, yawik) → fallback nominatif. Exercé par diff : WordPress (plugins,
+  mu-plugin, thème, `installer-paths` par type et par nom, `bin` hors
+  vendor/, suppression, `--no-plugins`, `--working-dir` relatif à la main) ;
+  par oracle seulement : les autres frameworks,
+  `installer-disable`, `installer-name`, `vendor:`. Non couvert : un
+  `installer-paths` ciblant vendor/ (refusé), `allow-plugins` global lu mais
+  jamais exercé en CI, un lock 1.x (refusé), un projet dont le vendor a été
+  posé par un installers de version différente (le plan de suppression
+  compare l'ancien install-path au chemin recalculé : désaccord → fallback) ;
+  plugin présent d'un seul côté entre installed.json et le lock → fallback
+  (test unitaire, pas de fixture). Non porté : `realpath()` de BinaryInstaller
+  sur un vendor/ symlinké avec un `bin` hors vendor/ (Composer écrirait un
+  chemin absolu) ; `installer-name` contenant `{` refusé plutôt qu'imité.
+- **Extraction** : strip du dossier racine seulement s'il est unique
+  (règle ArchiveDownloader) ; un zip avec un `.DS_Store` de premier niveau
+  et rien d'autre à côté du dossier est traité comme mono-dossier, comme Composer.
 
 ## Pièges
 

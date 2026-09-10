@@ -7,11 +7,14 @@
 //! bénins au boot (qualification des fixtures) sont installés comme des
 //! libraries ordinaires, avec un avertissement.
 
+use crate::layout::Layout;
 use crate::lock::{DistKind, Lock, LockPackage};
 use serde_json::Value;
+use std::path::Path;
 
 /// Plugins émulés nativement par vivace (sortie identique, test de drift).
-pub const EMULATED_PLUGINS: &[&str] = &["symfony/runtime"];
+/// composer/installers l'est aussi, sous conditions (voir `layout`).
+pub const EMULATED_PLUGINS: &[&str] = &["symfony/runtime", "composer/installers"];
 
 /// Plugins dont l'inaction est prouvée sans effet sur le contenu de vendor/
 /// nécessaire au boot (fixtures qualifiées avec `--no-plugins`). Installés
@@ -29,7 +32,6 @@ pub const BENIGN_PLUGINS: &[&str] = &[
 /// Plugins connus pour modifier le layout d'installation ou le contenu des
 /// paquets : toujours hors scope.
 pub const LAYOUT_PLUGINS: &[&str] = &[
-    "composer/installers",
     "cweagans/composer-patches",
     "oomphinc/composer-installers-extender",
     "mnsami/composer-custom-directory-installer",
@@ -39,10 +41,11 @@ pub const LAYOUT_PLUGINS: &[&str] = &[
 pub enum ScopeIssue {
     /// Plugin absent des listes connues — comportement imprévisible.
     UnknownPlugin(String),
-    /// Plugin connu pour changer le layout (installers, patches…).
+    /// Plugin connu pour changer le layout (patches, installers-extender…).
     LayoutPlugin(String),
-    /// `extra.installer-paths` dans le composer.json racine.
-    InstallerPaths,
+    /// Disposition non reproductible (composer/installers : version non
+    /// portée, framework à logique personnalisée, cible refusée…).
+    Layout(String),
     /// Paquet sans dist zip exploitable (source-only, dist exotique).
     NoUsableDist(String),
 }
@@ -56,12 +59,7 @@ impl std::fmt::Display for ScopeIssue {
             ScopeIssue::LayoutPlugin(p) => {
                 write!(f, "plugin {p} changes the install layout (not emulated)")
             }
-            ScopeIssue::InstallerPaths => {
-                write!(
-                    f,
-                    "composer.json declares extra.installer-paths (custom installers)"
-                )
-            }
+            ScopeIssue::Layout(why) => write!(f, "{why}"),
             ScopeIssue::NoUsableDist(p) => write!(f, "package {p} has no zip dist (source-only)"),
         }
     }
@@ -73,6 +71,8 @@ pub struct ScopeReport {
     pub issues: Vec<ScopeIssue>,
     /// Non bloquants : plugins bénins ignorés, à signaler sur stderr.
     pub skipped_plugins: Vec<String>,
+    /// Disposition résolue (None si une issue de layout bloque).
+    pub layout: Option<Layout>,
 }
 
 impl ScopeReport {
@@ -81,19 +81,25 @@ impl ScopeReport {
     }
 }
 
-pub fn analyze(lock: &Lock, root_manifest: &Value, with_dev: bool) -> ScopeReport {
+/// `plugins_enabled` = pas de `--no-plugins` : avec le flag, Composer ignore
+/// tout plugin, composer/installers compris — tout va dans vendor/.
+pub fn analyze(
+    project_dir: &Path,
+    lock: &Lock,
+    root_manifest: &Value,
+    with_dev: bool,
+    plugins_enabled: bool,
+) -> ScopeReport {
     let mut report = ScopeReport::default();
-
-    if root_manifest
-        .get("extra")
-        .and_then(|e| e.get("installer-paths"))
-        .is_some()
-    {
-        report.issues.push(ScopeIssue::InstallerPaths);
-    }
 
     for p in lock.wanted_packages(with_dev) {
         classify_package(p, &mut report);
+    }
+    match Layout::resolve(project_dir, lock, root_manifest, with_dev, plugins_enabled) {
+        Ok(layout) => report.layout = Some(layout),
+        Err(issues) => report
+            .issues
+            .extend(issues.into_iter().map(ScopeIssue::Layout)),
     }
     report
 }
@@ -133,12 +139,17 @@ mod tests {
                "dist": {"type": "zip", "url": "https://x/y.zip", "reference": "r"}})
     }
 
+    fn proj() -> std::path::PathBuf {
+        std::path::PathBuf::from("/nonexistent-vivace-scope")
+    }
+
     #[test]
     fn plain_library_is_native() {
         let lock = lock_with(json!([zip_pkg("a/b", "library")]));
-        let r = analyze(&lock, &json!({}), true);
+        let r = analyze(&proj(), &lock, &json!({}), true, true);
         assert!(r.is_native_ok());
         assert!(r.skipped_plugins.is_empty());
+        assert_eq!(r.layout.expect("layout").rel("a/b"), Some("vendor/a/b"));
     }
 
     #[test]
@@ -147,7 +158,7 @@ mod tests {
             zip_pkg("symfony/runtime", "composer-plugin"),
             zip_pkg("symfony/flex", "composer-plugin"),
         ]));
-        let r = analyze(&lock, &json!({}), true);
+        let r = analyze(&proj(), &lock, &json!({}), true, true);
         assert!(r.is_native_ok());
         assert_eq!(r.skipped_plugins, vec!["symfony/flex"]);
     }
@@ -156,34 +167,33 @@ mod tests {
     fn unknown_or_layout_plugin_is_out_of_scope() {
         let lock = lock_with(json!([
             zip_pkg("acme/mystery-plugin", "composer-plugin"),
-            zip_pkg("composer/installers", "composer-plugin"),
+            zip_pkg("cweagans/composer-patches", "composer-plugin"),
         ]));
-        let r = analyze(&lock, &json!({}), true);
+        let r = analyze(&proj(), &lock, &json!({}), true, true);
         assert_eq!(
             r.issues,
             vec![
                 ScopeIssue::UnknownPlugin("acme/mystery-plugin".into()),
-                ScopeIssue::LayoutPlugin("composer/installers".into()),
+                ScopeIssue::LayoutPlugin("cweagans/composer-patches".into()),
             ]
         );
     }
 
     #[test]
-    fn installer_paths_and_sourceless_dist_are_out_of_scope() {
+    fn installers_without_allow_plugins_and_sourceless_dist_are_out_of_scope() {
         let lock = lock_with(json!([
             {"name": "a/src-only", "version": "1.0.0", "type": "library",
              "source": {"type": "git", "url": "https://g/x.git", "reference": "r"}},
             {"name": "a/meta", "version": "1.0.0", "type": "metapackage"},
+            zip_pkg("composer/installers", "composer-plugin"),
         ]));
+        // installer-paths seul est inerte (comme chez Composer) ; le plugin
+        // sans allow-plugins, lui, bloque.
         let manifest = json!({"extra": {"installer-paths": {"web/modules/{$name}": []}}});
-        let r = analyze(&lock, &manifest, true);
-        assert_eq!(
-            r.issues,
-            vec![
-                ScopeIssue::InstallerPaths,
-                ScopeIssue::NoUsableDist("a/src-only".into()),
-            ]
-        );
+        let r = analyze(&proj(), &lock, &manifest, true, true);
+        assert_eq!(r.issues.len(), 2, "{:?}", r.issues);
+        assert_eq!(r.issues[0], ScopeIssue::NoUsableDist("a/src-only".into()));
+        assert!(matches!(&r.issues[1], ScopeIssue::Layout(m) if m.contains("allow-plugins")));
     }
 
     #[test]
@@ -196,7 +206,7 @@ mod tests {
             .to_string(),
         )
         .expect("lock");
-        assert!(analyze(&lock, &json!({}), false).is_native_ok());
-        assert!(!analyze(&lock, &json!({}), true).is_native_ok());
+        assert!(analyze(&proj(), &lock, &json!({}), false, true).is_native_ok());
+        assert!(!analyze(&proj(), &lock, &json!({}), true, true).is_native_ok());
     }
 }

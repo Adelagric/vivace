@@ -1,0 +1,4 @@
+composer/installers v2.3.0 — https://github.com/composer/installers/tree/v2.3.0
+src/ and LICENSE copied verbatim; the vendored copy is the reference for
+crates/vivace-core/src/installers.rs and the generated installers_table.rs
+(tools/gen-installers-table.php).

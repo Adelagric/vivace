@@ -6,33 +6,42 @@
 //! Composer dans la fixture Laravel (tests/fixtures_binproxy.rs).
 
 use crate::error::{Error, Result};
+use crate::pathutil::{find_shortest_path, find_shortest_path_code, normalize_path};
 use std::path::Path;
 
-/// Génère le contenu du proxy pour `bin_rel` (chemin du binaire relatif à
-/// vendor/, ex. `nesbot/carbon/bin/carbon`), en lisant l'en-tête de la cible.
-pub fn proxy_content(vendor_dir: &Path, bin_rel: &str) -> Result<String> {
-    let target = vendor_dir.join(bin_rel);
+/// Génère le contenu du proxy `link` (vendor/bin/<nom>) vers le binaire
+/// `bin` (absolu, dans vendor/ ou hors vendor/ avec composer/installers), en
+/// lisant l'en-tête de la cible. Les chemins relatifs sont ceux de
+/// `BinaryInstaller::installUnixyProxyBinaries` (findShortestPath depuis le
+/// fichier proxy).
+pub fn proxy_content(vendor_dir: &Path, link: &Path, bin: &Path) -> Result<String> {
     let mut head = [0u8; 500];
     let n = {
         use std::io::Read as _;
-        let mut f = std::fs::File::open(&target).map_err(Error::io(&target))?;
-        f.read(&mut head).map_err(Error::io(&target))?
+        let mut f = std::fs::File::open(bin).map_err(Error::io(bin))?;
+        f.read(&mut head).map_err(Error::io(bin))?
     };
     let head = String::from_utf8_lossy(&head[..n]);
 
-    let bin_path = format!("../{bin_rel}");
-    let bin_exported = format!("__DIR__ . '/..'.'/{bin_rel}'");
+    let link_s = link.to_string_lossy();
+    let bin_s = bin.to_string_lossy();
+    let vendor_s = vendor_dir.to_string_lossy();
+    let bin_path = find_shortest_path(&link_s, &bin_s, false);
+    let bin_exported = find_shortest_path_code(&link_s, &bin_s, false, true);
+    let autoload_exported =
+        find_shortest_path_code(&link_s, &format!("{vendor_s}/autoload.php"), false, true);
 
     match php_header(&head) {
         Some(PhpHeader { shebang }) => {
             let proxy_code = shebang
                 .clone()
                 .unwrap_or_else(|| "#!/usr/bin/env php".to_owned());
-            let is_phpunit = bin_rel == "phpunit/phpunit/phpunit";
+            let is_phpunit = normalize_path(&bin_s)
+                == normalize_path(&format!("{vendor_s}/phpunit/phpunit/phpunit"));
             let mut globals = String::from("$GLOBALS['_composer_bin_dir'] = __DIR__;\n");
-            globals.push_str(
-                "$GLOBALS['_composer_autoload_path'] = __DIR__ . '/..'.'/autoload.php';\n",
-            );
+            globals.push_str(&format!(
+                "$GLOBALS['_composer_autoload_path'] = {autoload_exported};\n"
+            ));
             if is_phpunit {
                 globals.push_str(&format!(
                     "$GLOBALS['__PHPUNIT_ISOLATION_EXCLUDE_LIST'] = $GLOBALS['__PHPUNIT_ISOLATION_BLACKLIST'] = array(realpath({bin_exported}));\n"
@@ -244,19 +253,19 @@ exec "${{dir}}/{file}" "$@"
     )
 }
 
-/// Installe les proxies d'un paquet dans vendor/bin (0755).
-pub fn install_binaries(vendor_dir: &Path, package_name: &str, bins: &[&str]) -> Result<()> {
+/// Installe les proxies d'un paquet (posé dans `package_dir`) dans vendor/bin (0755).
+pub fn install_binaries(vendor_dir: &Path, package_dir: &Path, bins: &[&str]) -> Result<()> {
     let bin_dir = vendor_dir.join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(Error::io(&bin_dir))?;
     for bin in bins {
         let bin = bin.trim_start_matches("./");
-        let bin_rel = format!("{package_name}/{bin}");
+        let target = package_dir.join(bin);
         let link_name = bin.rsplit_once('/').map(|(_, f)| f).unwrap_or(bin);
         let link = bin_dir.join(link_name);
-        if !vendor_dir.join(&bin_rel).exists() {
+        if !target.exists() {
             continue; // binaire déclaré mais absent de la dist : Composer l'ignore aussi
         }
-        let content = proxy_content(vendor_dir, &bin_rel)?;
+        let content = proxy_content(vendor_dir, &link, &target)?;
         std::fs::write(&link, content).map_err(Error::io(&link))?;
         #[cfg(unix)]
         {

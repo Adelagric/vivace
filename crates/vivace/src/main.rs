@@ -37,6 +37,9 @@ struct DumpArgs {
     ignore_platform_reqs: bool,
     #[arg(long = "ignore-platform-req", value_name = "REQ")]
     ignore_platform_req: Vec<String>,
+    /// Comme Composer : aucun plugin, même émulé (composer/installers).
+    #[arg(long)]
+    no_plugins: bool,
     #[arg(long, value_name = "DIR")]
     working_dir: Option<PathBuf>,
 }
@@ -58,7 +61,8 @@ struct InstallArgs {
     /// Accepté pour compatibilité : vivace n'exécute jamais les scripts.
     #[arg(long)]
     no_scripts: bool,
-    /// Accepté pour compatibilité : vivace n'exécute jamais les plugins.
+    /// Comme Composer : aucun plugin, même émulé (composer/installers) — tout
+    /// s'installe dans vendor/.
     #[arg(long)]
     no_plugins: bool,
     /// Ignorer toutes les exigences de plateforme.
@@ -99,12 +103,21 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Racine du projet, absolue : tous les chemins relatifs écrits dans vendor/
+/// (proxies bin, install-path) en découlent et ne doivent pas dépendre du
+/// répertoire courant.
+fn project_dir(working_dir: Option<&std::path::Path>) -> anyhow::Result<PathBuf> {
+    let cwd = std::env::current_dir().context("cannot determine the current directory")?;
+    Ok(match working_dir {
+        Some(d) if d.is_absolute() => d.to_path_buf(),
+        Some(d) => cwd.join(d),
+        None => cwd,
+    })
+}
+
 fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let t0 = std::time::Instant::now();
-    let project = match &args.working_dir {
-        Some(d) => d.clone(),
-        None => std::env::current_dir().context("cannot determine the current directory")?,
-    };
+    let project = project_dir(args.working_dir.as_deref())?;
     let manifest_path = project.join("composer.json");
     let lock_path = project.join("composer.lock");
 
@@ -138,9 +151,15 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let with_dev = !args.no_dev && std::env::var("COMPOSER_NO_DEV").as_deref() != Ok("1");
 
     // Hors-scope → fallback exec composer (par défaut) ou erreur explicite.
-    let scope = vivace_core::scope::analyze(&lock, &manifest, with_dev);
+    let scope = vivace_core::scope::analyze(&project, &lock, &manifest, with_dev, !args.no_plugins);
     if !scope.is_native_ok() {
         return fallback_or_fail(args, &project, &scope);
+    }
+    let Some(layout) = scope.layout.as_ref() else {
+        anyhow::bail!("internal: scope is native but no layout was resolved");
+    };
+    if let Some(tag) = &layout.installers_tag {
+        eprintln!("Note: composer/installers {tag} emulated natively (custom install paths)");
     }
     if vivace_core::runtime_stub::has_custom_runtime_options(&manifest) {
         let scope = vivace_core::scope::ScopeReport {
@@ -148,6 +167,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
                 "symfony/runtime with custom extra.runtime options".to_owned(),
             )],
             skipped_plugins: vec![],
+            layout: None,
         };
         return fallback_or_fail(args, &project, &scope);
     }
@@ -212,7 +232,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     };
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
     let report = runtime.block_on(vivace_core::installer::install(
-        &project, &lock, &manifest, store, fetcher, &opts,
+        &project, &lock, &manifest, layout, store, fetcher, &opts,
     ))?;
 
     trace("install transaction", t0);
@@ -222,6 +242,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             &project,
             &lock,
             &manifest,
+            layout,
             with_dev,
             args.optimize_autoloader || args.classmap_authoritative,
             args.classmap_authoritative,
@@ -255,6 +276,7 @@ fn dump_autoload(
     project: &std::path::Path,
     lock: &vivace_core::lock::Lock,
     manifest: &serde_json::Value,
+    layout: &vivace_core::layout::Layout,
     dev_mode: bool,
     optimize: bool,
     authoritative: bool,
@@ -293,7 +315,7 @@ fn dump_autoload(
             })
         },
     };
-    let report = vivace_autoload::dump(project, lock, manifest, &opts)?;
+    let report = vivace_autoload::dump(project, lock, manifest, layout, &opts)?;
     for w in &report.warnings {
         eprintln!("{w}");
     }
@@ -302,10 +324,7 @@ fn dump_autoload(
 
 fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
     let t0 = std::time::Instant::now();
-    let project = match &args.working_dir {
-        Some(d) => d.clone(),
-        None => std::env::current_dir().context("cannot determine the current directory")?,
-    };
+    let project = project_dir(args.working_dir.as_deref())?;
     let manifest: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(project.join("composer.json"))
             .context("cannot read composer.json")?,
@@ -319,10 +338,28 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
         .and_then(|v| v.get("dev").and_then(serde_json::Value::as_bool))
         .unwrap_or(true);
     let dev_mode = !args.no_dev && installed_dev;
+    let layout = match vivace_core::layout::Layout::resolve(
+        &project,
+        &lock,
+        &manifest,
+        dev_mode,
+        !args.no_plugins,
+    ) {
+        Ok(l) => l,
+        Err(issues) => {
+            eprintln!("vivace: this lock is outside what vivace handles natively:");
+            for i in &issues {
+                eprintln!("  - {i}");
+            }
+            eprintln!("Run `composer dump-autoload` instead.");
+            return Ok(3);
+        }
+    };
     let report = dump_autoload(
         &project,
         &lock,
         &manifest,
+        &layout,
         dev_mode,
         args.optimize || args.classmap_authoritative,
         args.classmap_authoritative,

@@ -1,149 +1,18 @@
-//! Utilitaires de chemins de Composer\Util\Filesystem, portés pour produire
-//! les mêmes chaînes que le générateur : `normalizePath`, `findShortestPath`,
-//! `findShortestPathCode`, et `var_export` d'une chaîne PHP.
+//! Utilitaires de chemins pour le générateur : les ports exacts de
+//! Composer\Util\Filesystem vivent dans vivace-core::pathutil ; ici les
+//! variantes « répertoires » qu'utilise AutoloadGenerator (`$directories =
+//! true`), et `var_export` en octets bruts / `preg_quote`.
 
-/// `Filesystem::normalizePath` : slashes uniques, résolution de `.`/`..`,
-/// pas de slash final (hors racine).
-pub fn normalize_path(path: &str) -> String {
-    let path = path.replace('\\', "/");
-    let (absolute, rest) = if let Some(r) = path.strip_prefix('/') {
-        ("/", r)
-    } else {
-        ("", path.as_str())
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    let mut up = false;
-    for chunk in rest.split('/') {
-        if chunk == ".." && (!absolute.is_empty() || up) {
-            parts.pop();
-            up = !(parts.is_empty() || parts.last() == Some(&".."));
-        } else if chunk != "." && !chunk.is_empty() {
-            parts.push(chunk);
-            up = chunk != "..";
-        }
-    }
-    format!("{absolute}{}", parts.join("/"))
-}
+pub use vivace_core::pathutil::{normalize_path, php_str};
 
-/// `Filesystem::findShortestPath($from, $to, $directories = true)` — chemin
-/// relatif le plus court de `from` (un répertoire) vers `to`, ou absolu si
-/// aucun préfixe commun utile. Les deux entrées sont absolues et normalisées.
+/// `Filesystem::findShortestPath($from, $to, true)`.
 pub fn find_shortest_path(from: &str, to: &str) -> String {
-    let from = normalize_path(from);
-    let to = normalize_path(to);
-    if from == to {
-        return "./".to_owned();
-    }
-    let common = common_prefix_dirs(&from, &to);
-    // Composer : si le préfixe commun est trop court (< 2 segments hors
-    // racine) pour un chemin qui n'est pas un simple parent, il renvoie
-    // l'absolu. Approximation fidèle pour nos cas : vendor/composer ↔ projet.
-    if common.is_empty() || common == "/" {
-        return to;
-    }
-    let from_rest = from[common.len()..].trim_start_matches('/');
-    let to_rest = to[common.len()..].trim_start_matches('/');
-    let ups = if from_rest.is_empty() {
-        0
-    } else {
-        from_rest.split('/').count()
-    };
-    let mut out = String::new();
-    for _ in 0..ups {
-        out.push_str("../");
-    }
-    if to_rest.is_empty() {
-        if out.is_empty() {
-            "./".to_owned()
-        } else {
-            out
-        }
-    } else {
-        out.push_str(to_rest);
-        out
-    }
+    vivace_core::pathutil::find_shortest_path(from, to, true)
 }
 
-fn common_prefix_dirs(a: &str, b: &str) -> String {
-    let a_parts: Vec<&str> = a.split('/').collect();
-    let b_parts: Vec<&str> = b.split('/').collect();
-    let mut common: Vec<&str> = Vec::new();
-    for (x, y) in a_parts.iter().zip(b_parts.iter()) {
-        if x == y {
-            common.push(x);
-        } else {
-            break;
-        }
-    }
-    let joined = common.join("/");
-    if joined.is_empty() && a.starts_with('/') {
-        "/".to_owned()
-    } else {
-        joined
-    }
-}
-
-/// `Filesystem::findShortestPathCode($from, $to, true, $staticCode)` : une
-/// expression PHP relative à `__DIR__` (ou `$vendorDir` après substitution).
-/// Forme observée : `__DIR__ . '/..'` ; `dirname(__DIR__)` en mode dynamique.
+/// `Filesystem::findShortestPathCode($from, $to, true, $staticCode)`.
 pub fn find_shortest_path_code(from: &str, to: &str, static_code: bool) -> String {
-    let from = normalize_path(from);
-    let to = normalize_path(to);
-    if from == to {
-        return "__DIR__".to_owned();
-    }
-    let common = common_prefix_dirs(&from, &to);
-    if common.is_empty() || common == "/" {
-        return php_str(&to);
-    }
-    let from_rest = from[common.len()..].trim_start_matches('/');
-    let to_rest = to[common.len()..].trim_start_matches('/');
-    let ups = if from_rest.is_empty() {
-        0
-    } else {
-        from_rest.split('/').count()
-    };
-    if static_code {
-        let mut rel = String::new();
-        for i in 0..ups {
-            if i > 0 {
-                rel.push('/');
-            }
-            rel.push_str("..");
-        }
-        if !to_rest.is_empty() {
-            if !rel.is_empty() {
-                rel.push('/');
-            }
-            rel.push_str(to_rest);
-        }
-        format!("__DIR__ . {}", php_str(&format!("/{rel}")))
-    } else {
-        let mut code = "__DIR__".to_owned();
-        for _ in 0..ups {
-            code = format!("dirname({code})");
-        }
-        if to_rest.is_empty() {
-            code
-        } else {
-            format!("{code} . {}", php_str(&format!("/{to_rest}")))
-        }
-    }
-}
-
-/// `var_export()` d'une chaîne : quotes simples, `\` et `'` échappés.
-pub fn php_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        match c {
-            '\'' => out.push_str("\\'"),
-            '\\' => out.push_str("\\\\"),
-            c => out.push(c),
-        }
-    }
-    out.push('\'');
-    out
+    vivace_core::pathutil::find_shortest_path_code(from, to, true, static_code)
 }
 
 /// `var_export()` d'une chaîne PHP en octets bruts (noms de classes non-UTF-8).
@@ -176,14 +45,6 @@ pub fn preg_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalize() {
-        assert_eq!(normalize_path("/a/b/../c/./d/"), "/a/c/d");
-        assert_eq!(normalize_path("app/"), "app");
-        assert_eq!(normalize_path("/a//b"), "/a/b");
-        assert_eq!(normalize_path("../x"), "../x");
-    }
 
     #[test]
     fn shortest_paths() {

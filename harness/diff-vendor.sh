@@ -17,7 +17,7 @@ VIVACE="$ROOT/target/release/vivace"
 WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}"
 AUTOLOAD_FLAG="--no-autoloader"
 if [ "${1:-}" = "--with-autoloader" ]; then AUTOLOAD_FLAG=""; shift; fi
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector wordpress)
 
 [ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
@@ -38,19 +38,27 @@ for fx in "${FIXTURES[@]}"; do
       GIT_COMMITTER_NAME=vivace GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
       git commit -q -m fixture)
   done
-  (cd "$ref" && composer install --no-interaction --no-plugins --no-scripts $AUTOLOAD_FLAG --quiet)
+  # Fixture à plugin de layout émulé (composer/installers autorisé) : la
+  # référence tourne AVEC le plugin et la comparaison couvre le projet entier,
+  # puisque des paquets vivent hors vendor/.
+  if jq -e '.config["allow-plugins"]["composer/installers"] == true' "$src/composer.json" >/dev/null 2>&1; then
+    plugin_flag=""; scope_ref="$ref"; scope_viv="$viv"; what="projet"
+  else
+    plugin_flag="--no-plugins"; scope_ref="$ref/vendor"; scope_viv="$viv/vendor"; what="vendor/"
+  fi
+  (cd "$ref" && composer install --no-interaction $plugin_flag --no-scripts $AUTOLOAD_FLAG --quiet)
   if ! (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>"$WORK/$fx.vivace.log"); then
     echo "FAIL $fx : vivace install a échoué :"; tail -20 "$WORK/$fx.vivace.log"; status=1; continue
   fi
-  lines=$(diff -r "$ref/vendor" "$viv/vendor" 2>&1 \
+  lines=$(diff -r --exclude=.git "$scope_ref" "$scope_viv" 2>&1 \
     | grep -v 'autoload_runtime.php' \
     | grep -v 'No such file or directory' \
     | wc -l | tr -d ' ' || true)   # grep -v renvoie 1 sur diff vide : c'est le succès
   if [ "$lines" = "0" ]; then
-    echo "OK   $fx : vendor/ identique"
+    echo "OK   $fx : $what identique"
   else
     echo "FAIL $fx : $lines lignes de diff"
-    diff -r "$ref/vendor" "$viv/vendor" 2>&1 | grep -v autoload_runtime.php | head -20
+    diff -r --exclude=.git "$scope_ref" "$scope_viv" 2>&1 | grep -v autoload_runtime.php | head -20
     status=1
   fi
 done

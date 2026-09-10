@@ -1,0 +1,56 @@
+name: action
+
+# The composite action at the repository root, exercised against the binary
+# built from this very commit (`binary:` input), then a real install of the
+# frozen Laravel skeleton over the network — the end-to-end path a user's CI
+# takes with `uses: Adelagric/vivace@vX.Y.Z`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  action:
+    name: action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p vivace
+
+      - name: Setup vivace from the local action
+        id: setup
+        uses: ./
+        with:
+          binary: target/release/vivace
+
+      - name: vivace is on PATH and reports its version
+        run: |
+          which vivace
+          vivace --version
+          test "${{ steps.setup.outputs.version }}" = "$(vivace --version)"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:2.10.3
+
+      - name: Install the Laravel skeleton with vivace (network)
+        working-directory: fixtures/projects/laravel
+        run: |
+          vivace install
+          php artisan --version
+          test -f vendor/composer/installed.php
+
+      - name: Second install is a no-op
+        working-directory: fixtures/projects/laravel
+        run: |
+          vivace install 2> install.log
+          cat install.log
+          grep -q ' 0 installed, ' install.log

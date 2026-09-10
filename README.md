@@ -47,14 +47,36 @@ Packagist.
 Every claim above comes from a differential harness, not from unit tests
 alone: [`harness/diff-vendor.sh`](harness/diff-vendor.sh) runs `composer install`
 and `vivace install` on the same projects and `diff -r`s the two `vendor/`
-trees. It passes with **zero differences** on all four fixtures (Laravel, the
-Symfony demo, Sylius, rector-src), with and
+trees. It passes with **zero differences** on all five fixtures (Laravel, the
+Symfony demo, Sylius, rector-src, and a WordPress project laid out by
+`composer/installers` — compared as a whole project, since packages live
+outside `vendor/`), with and
 without the autoloader, in normal, `-o`, `-a` and `--no-dev` modes, with a
 cold and a warm classmap cache. Class detection was checked against
 Composer's own `PhpFileParser::findClasses` on ~50 000 real PHP files. Every
 generated file is a port of the pinned Composer 2.10.3 source — see
 [`DECISIONS.md`](DECISIONS.md) for what was decided and why, and
 [`HANDOVER.md`](HANDOVER.md) for what is *not* covered yet.
+
+CI is pinned to Composer 2.10.3 so it stays deterministic; a weekly
+[drift job](.github/workflows/drift.yml) reruns everything against the latest
+stable and the snapshot, diffing the vendored reference files first so a
+failure names the exact port that moved.
+
+## composer/installers
+
+Projects that place packages outside `vendor/` through `composer/installers`
+(WordPress plugins and themes, Drupal modules, Magento 1, Moodle, …) are
+handled natively when the plugin is locked at a version between 2.0.0 and
+2.3.0, allowed by
+`config.allow-plugins`, and its framework only uses the plugin's location
+table (58 of the 96 frameworks, WordPress and Drupal included). The path
+logic is a port of the plugin checked against the real plugin on 665 cases
+(`installer-paths` by type, name and vendor, `installer-name`,
+`installer-disable`, unsupported types → `vendor/`). Frameworks with custom
+naming logic (CakePHP, Grav, October/Winter, Shopware, Mautic, Matomo, …) and
+anything vivace would have to guess (absolute or out-of-project targets, two
+packages on one path) fall back to Composer with a message naming the reason.
 
 ## What vivace does not do (v1)
 
@@ -66,11 +88,12 @@ generated file is a port of the pinned Composer 2.10.3 source — see
   `phpstan/extension-installer`, …) is installed as plain libraries with a
   notice. Post-install scripts such as Laravel's `package:discover` are yours
   to run afterwards.
-- **Anything it isn't sure about.** Layout-changing plugins
-  (`composer/installers`, `composer-patches`), `installer-paths`, unknown
-  plugins, source-only packages: vivace detects them *before* touching
-  `vendor/` and `exec`s the real `composer install` instead (opt out with
-  `--no-fallback`). You never get a silently wrong `vendor/`.
+- **Anything it isn't sure about.** Other layout-changing plugins
+  (`composer-patches`, `installers-extender`, core scaffolders), unknown
+  plugins, source-only packages, `composer/installers` cases outside the
+  emulated set: vivace detects them *before* touching `vendor/` and `exec`s
+  the real `composer install` instead (opt out with `--no-fallback`). You
+  never get a silently wrong `vendor/`.
 - Windows, `gitlab-token` auth, root package version detection from hg/svn/fossil (git is ported).
 
 ## Install
@@ -83,13 +106,27 @@ curl -fsSL https://raw.githubusercontent.com/Adelagric/vivace/main/install.sh | 
 
 Or with `cargo binstall vivace`, or from source (`cargo install --path crates/vivace`).
 
+### In GitHub Actions
+
+```yaml
+- uses: Adelagric/vivace@v0.2.0   # installs exactly v0.2.0, sha256-verified download
+- run: vivace install
+```
+
+The action caches the vivace store and Composer's dist cache between runs
+(`cache: false` to opt out) and needs no Composer on the runner as long as
+the lock stays inside what vivace handles natively; keep Composer installed
+if you want the fallback.
+
 ## Development
 
 ```bash
-fixtures/make.sh        # once: creates and qualifies the four fixture projects (php + composer needed)
+fixtures/make.sh        # once: creates and qualifies the five fixture projects (php + composer needed)
 cargo test              # unit tests + differential tests against the real Composer phar
 harness/diff-vendor.sh --with-autoloader
+harness/removal.sh      # packages dropped from the lock disappear like with Composer
 harness/boot.sh
+harness/drift-reference.sh   # docs/reference/ still matches the installed Composer
 harness/linux.sh        # the whole chain in a Linux container (Docker)
 ```
 

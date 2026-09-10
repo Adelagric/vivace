@@ -18,6 +18,7 @@ use md5::{Digest, Md5};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use vivace_core::layout::Layout;
 use vivace_core::lock::Lock;
 
 #[derive(Debug, thiserror::Error)]
@@ -152,6 +153,7 @@ pub fn dump(
     project_dir: &Path,
     lock: &Lock,
     root_manifest: &Value,
+    layout: &Layout,
     opts: &DumpOptions,
 ) -> Result<DumpReport, AutoloadError> {
     let mut report = DumpReport::default();
@@ -170,6 +172,16 @@ pub fn dump(
     let target_dir = vendor_dir.join("composer");
     std::fs::create_dir_all(&target_dir).map_err(io(&target_dir))?;
     let target_path = format!("{vendor_path}/composer");
+
+    // Chemin d'installation absolu d'un paquet : sous vendor/ via le vendor
+    // canonicalisé (symlinks résolus comme Composer), sinon sous la racine.
+    let install_abs = |name: &str| -> Option<String> {
+        let rel = layout.rel(name)?;
+        Some(match rel.strip_prefix("vendor/") {
+            Some(rest) => format!("{vendor_path}/{rest}"),
+            None => format!("{base_path}/{rel}"),
+        })
+    };
 
     let vendor_path_code = find_shortest_path_code(&target_path, &vendor_path, false);
     let vendor_to_target_code = find_shortest_path_code(&vendor_path, &target_path, false);
@@ -213,11 +225,7 @@ pub fn dump(
         let v = Value::Object(p.raw.clone());
         packages.push(Pkg {
             name: p.name().to_owned(),
-            install_path: if p.is_metapackage() {
-                None
-            } else {
-                Some(format!("{vendor_path}/{}", p.install_subpath()))
-            },
+            install_path: install_abs(p.name()),
             target_dir: p.target_dir().map(str::to_owned),
             autoload: obj(v.get("autoload")),
             autoload_dev: Map::new(),
@@ -237,12 +245,11 @@ pub fn dump(
         Some(cfg) => {
             let store = vivace_core::store::Store::at(cfg.store_root.clone());
             lock.wanted_packages(opts.dev_mode)
-                .filter(|p| !p.is_metapackage())
-                .map(|p| {
-                    (
-                        format!("{vendor_path}/{}", p.install_subpath()),
+                .filter_map(|p| {
+                    Some((
+                        install_abs(p.name())?,
                         store.entry_path(p.name(), p.version(), p.dist_reference()),
-                    )
+                    ))
                 })
                 .collect()
         }

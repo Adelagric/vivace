@@ -1,10 +1,16 @@
 #!/usr/bin/env sh
 # Installs the vivace binary from the latest GitHub release.
 #   curl -fsSL https://raw.githubusercontent.com/Adelagric/vivace/main/install.sh | sh
-# Variables: VIVACE_VERSION (default: latest), VIVACE_INSTALL_DIR (default: ~/.local/bin)
+# Variables: VIVACE_VERSION (default: latest), VIVACE_INSTALL_DIR (default: ~/.local/bin),
+#            GITHUB_TOKEN (optional: authenticates the release lookup — CI runners share
+#            the anonymous API rate limit of 60 requests/hour per IP)
 set -eu
 REPO="Adelagric/vivace"
 DIR="${VIVACE_INSTALL_DIR:-$HOME/.local/bin}"
+auth=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  auth="Authorization: Bearer $GITHUB_TOKEN"
+fi
 os=$(uname -s); arch=$(uname -m)
 case "$os" in
   Linux)  os="unknown-linux-gnu" ;;
@@ -20,7 +26,7 @@ target="$arch-$os"
 if [ -n "${VIVACE_VERSION:-}" ]; then
   tag="$VIVACE_VERSION"
 else
-  tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+  tag=$(curl -fsSL ${auth:+-H "$auth"} "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
   [ -n "$tag" ] || { echo "vivace: could not determine the latest release" >&2; exit 1; }
 fi
 name="vivace-$tag-$target.tar.gz"

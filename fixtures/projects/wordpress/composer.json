@@ -1,0 +1,49 @@
+{
+    "name": "vivace/wordpress-fixture",
+    "description": "Harness fixture: WordPress plugins and themes laid out by composer/installers (Bedrock-style installer-paths for plugins, default paths for themes).",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://wpackagist.org",
+            "only": ["wpackagist-plugin/*", "wpackagist-theme/*"]
+        },
+        {
+            "type": "package",
+            "package": {
+                "name": "vivace/mu-sample",
+                "version": "1.7.3",
+                "type": "wordpress-muplugin",
+                "dist": {
+                    "type": "zip",
+                    "url": "https://downloads.wordpress.org/plugin/hello-dolly.1.7.3.zip"
+                },
+                "bin": ["hello.php"]
+            }
+        }
+    ],
+    "require": {
+        "php": ">=8.1",
+        "composer/installers": "^2.3",
+        "wpackagist-plugin/akismet": "*",
+        "wpackagist-plugin/hello-dolly": "*",
+        "wpackagist-theme/twentytwentyfour": "*",
+        "roots/soil": "*",
+        "vivace/mu-sample": "1.7.3",
+        "monolog/monolog": "^3.0"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        },
+        "sort-packages": true
+    },
+    "extra": {
+        "installer-paths": {
+            "web/app/plugins/dolly-by-name/": ["wpackagist-plugin/hello-dolly"],
+            "web/app/mu-plugins/{$name}/": ["type:wordpress-muplugin"],
+            "web/app/plugins/{$name}/": ["type:wordpress-plugin"]
+        }
+    }
+}

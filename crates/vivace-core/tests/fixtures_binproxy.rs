@@ -35,8 +35,9 @@ fn proxies_match_composer_byte_for_byte() {
                 continue;
             }
             let expected = std::fs::read_to_string(&link).expect("proxy composer");
-            let ours = vivace_core::binproxy::proxy_content(&vendor, &format!("{name}/{bin}"))
-                .expect("proxy vivace");
+            let ours =
+                vivace_core::binproxy::proxy_content(&vendor, &link, &vendor.join(name).join(bin))
+                    .expect("proxy vivace");
             assert_eq!(
                 ours, expected,
                 "proxy divergent pour {link_name} (paquet {name})"

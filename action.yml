@@ -1,0 +1,71 @@
+name: "Setup vivace"
+description: "Install vivace (a drop-in `composer install` in Rust) on the runner and add it to PATH."
+author: "Adel Kaleche"
+
+branding:
+  icon: "zap"
+  color: "purple"
+
+inputs:
+  version:
+    description: >
+      Release tag to install (e.g. v0.2.0). Defaults to the ref this action
+      was used with (`uses: Adelagric/vivace@v0.2.0` installs v0.2.0), so the
+      action and the binary always match.
+    required: false
+    default: ${{ github.action_ref }}
+  binary:
+    description: >
+      Path to an already-built vivace binary to install instead of a release
+      download (used by vivace's own CI to test the action against the
+      current commit).
+    required: false
+    default: ""
+  cache:
+    description: "Cache the vivace store and the Composer dist cache between runs."
+    required: false
+    default: "true"
+
+outputs:
+  version:
+    description: "The version string reported by `vivace --version`."
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cache vivace store and Composer dists
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/vivace
+          ~/Library/Caches/vivace
+          ~/.cache/composer
+          ~/Library/Caches/composer
+        key: vivace-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          vivace-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install vivace
+      id: install
+      shell: bash
+      env:
+        VIVACE_VERSION: ${{ inputs.version }}
+        VIVACE_BINARY: ${{ inputs.binary }}
+        VIVACE_INSTALL_DIR: ${{ runner.temp }}/vivace-bin
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -eu
+        mkdir -p "$VIVACE_INSTALL_DIR"
+        if [ -n "$VIVACE_BINARY" ]; then
+          install -m 0755 "$VIVACE_BINARY" "$VIVACE_INSTALL_DIR/vivace"
+        else
+          case "$VIVACE_VERSION" in
+            v[0-9]*) ;;
+            *) echo "::error::inputs.version must be a release tag like v0.2.0 (got '$VIVACE_VERSION'); pin the action to a release tag"; exit 1 ;;
+          esac
+          sh "$GITHUB_ACTION_PATH/install.sh"
+        fi
+        echo "$VIVACE_INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "version=$("$VIVACE_INSTALL_DIR/vivace" --version)" >> "$GITHUB_OUTPUT"

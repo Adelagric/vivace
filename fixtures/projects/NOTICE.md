@@ -12,6 +12,17 @@ and independent of upstream churn. They are test data, not part of vivace.
 | symfony | symfony/demo (symfony/symfony-demo) | MIT (see its LICENSE) |
 | sylius | sylius/sylius-standard | MIT |
 | rector | rectorphp/rector-src | MIT |
+| wordpress | (own manifest, see below) | MIT for the manifest; packages have their own licenses |
+
+`wordpress` is not a copy of an upstream template: it is a small manifest
+written for the harness (`composer.json` + the lock resolved on 2026-09-10)
+that exercises `composer/installers` — Bedrock-style `installer-paths` for
+plugins and mu-plugins, default `wp-content/themes/` for themes, a plugin with
+a PSR-4 autoload (`roots/soil`, so the boot can `class_exists` a class living
+outside vendor/), a `package` repository entry with a `bin` (proxy outside
+vendor/), and one ordinary library. The WordPress plugins and theme
+(GPL-2.0-or-later) are downloaded by `fixtures/make.sh` from wordpress.org;
+nothing from them is committed here. Its boot check is `class_exists('Roots\Soil\Options')`.
 
 `rector` is a library, not an application template, and upstream does not
 commit a `composer.lock`: the skeleton holds `composer.json`, the lock

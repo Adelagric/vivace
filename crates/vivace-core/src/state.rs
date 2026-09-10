@@ -10,7 +10,9 @@
 //!   (c'est un fichier COPIÉ par Composer, pas généré — test de drift dédié).
 
 use crate::error::{Error, Result};
+use crate::layout::Layout;
 use crate::lock::{Lock, LockPackage};
+use crate::pathutil::php_str;
 use crate::phpjson::{php_json_encode_with, FLAGS_JSONFILE};
 use crate::version::normalize_pretty;
 use serde_json::{Map, Value};
@@ -115,27 +117,19 @@ impl RootPackage {
     }
 }
 
-/// Chemin d'installation relatif à vendor/composer — findShortestPath de
-/// Composer : les paquets du namespace `composer/*` vivent à côté des fichiers
-/// d'état, donc `./pcre` plutôt que `../composer/pcre`.
-fn relative_install_path(p: &LockPackage) -> String {
-    let sub = p.install_subpath();
-    match sub.strip_prefix("composer/") {
-        Some(rest) => format!("./{rest}"),
-        None => format!("../{sub}"),
-    }
-}
-
-fn entry_install_path(p: &LockPackage) -> Value {
-    if p.is_metapackage() {
-        Value::Null
+/// `install_path` d'installed.php (dumpToPhpCode) : `__DIR__ . '/<rel>'`,
+/// ou la chaîne exportée telle quelle si Composer n'a pas trouvé de chemin
+/// relatif (absolu).
+fn install_path_code(install_path: &str) -> String {
+    if install_path.starts_with('/') {
+        php_str(install_path)
     } else {
-        Value::String(relative_install_path(p))
+        format!("__DIR__ . {}", php_str(&format!("/{install_path}")))
     }
 }
 
 /// installed.json complet (texte, avec le newline final de JsonFile::write).
-pub fn installed_json(lock: &Lock, with_dev: bool) -> Result<String> {
+pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<String> {
     let mut entries: Vec<&LockPackage> = lock.wanted_packages(with_dev).collect();
     entries.sort_by(|a, b| a.name().cmp(b.name()).then(a.version().cmp(b.version())));
 
@@ -160,7 +154,13 @@ pub fn installed_json(lock: &Lock, with_dev: bool) -> Result<String> {
         for (k, v) in src {
             entry.insert(k, v);
         }
-        entry.insert("install-path".to_owned(), entry_install_path(p));
+        entry.insert(
+            "install-path".to_owned(),
+            layout
+                .install_path(p.name())
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
         packages.push(Value::Object(entry));
     }
 
@@ -220,6 +220,7 @@ pub fn installed_php(
     root: &RootPackage,
     root_manifest: &Value,
     with_dev: bool,
+    layout: &Layout,
 ) -> Result<String> {
     use std::collections::BTreeMap;
 
@@ -249,11 +250,11 @@ pub fn installed_php(
             Some(normalize_pretty(p.version()).unwrap_or_else(|_| p.version().to_owned()));
         entry.reference = Some(reference);
         entry.package_type = Some(p.package_type().to_owned());
-        entry.install_path = Some(if p.is_metapackage() {
-            None
-        } else {
-            Some(format!("__DIR__ . '/{}'", relative_install_path(p)))
-        });
+        entry.install_path = Some(
+            layout
+                .install_path(p.name())
+                .map(|ip| install_path_code(&ip)),
+        );
         entry.dev_requirement = Some(is_dev);
         // Paquet de branche : Composer charge un AliasPackage (branch-alias ou
         // default-branch) et installed.php liste sa version jolie.
@@ -453,34 +454,20 @@ fn push_string_list(out: &mut String, level: usize, key: &str, values: &[String]
     out.push_str("),\n");
 }
 
-/// var_export() d'une chaîne PHP : quotes simples, `\` et `'` échappés.
-fn php_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    for c in s.chars() {
-        match c {
-            '\'' => out.push_str("\\'"),
-            '\\' => out.push_str("\\\\"),
-            c => out.push(c),
-        }
-    }
-    out.push('\'');
-    out
-}
-
 pub fn write_state_files(
     vendor_composer: &std::path::Path,
     lock: &Lock,
     root: &RootPackage,
     root_manifest: &Value,
     with_dev: bool,
+    layout: &Layout,
 ) -> Result<()> {
     std::fs::create_dir_all(vendor_composer).map_err(Error::io(vendor_composer))?;
     let writes = [
-        ("installed.json", installed_json(lock, with_dev)?),
+        ("installed.json", installed_json(lock, with_dev, layout)?),
         (
             "installed.php",
-            installed_php(lock, root, root_manifest, with_dev)?,
+            installed_php(lock, root, root_manifest, with_dev, layout)?,
         ),
         ("InstalledVersions.php", INSTALLED_VERSIONS_PHP.to_owned()),
     ];
@@ -520,7 +507,9 @@ mod tests {
 
     #[test]
     fn installed_json_shape() {
-        let text = installed_json(&sample_lock(), true).expect("json");
+        let lock = sample_lock();
+        let layout = Layout::vendor_only(std::path::Path::new("/proj"), &lock, true);
+        let text = installed_json(&lock, true, &layout).expect("json");
         let v: Value = serde_json::from_str(&text).expect("parse");
         let names: Vec<&str> = v["packages"]
             .as_array()
@@ -545,7 +534,9 @@ mod tests {
         let dist = entry_text.find("\"dist\"").expect("dist");
         assert!(vn < dist);
 
-        let no_dev = installed_json(&sample_lock(), false).expect("json");
+        let lock = sample_lock();
+        let layout = Layout::vendor_only(std::path::Path::new("/proj"), &lock, false);
+        let no_dev = installed_json(&lock, false, &layout).expect("json");
         let v: Value = serde_json::from_str(&no_dev).expect("parse");
         assert_eq!(v["packages"].as_array().expect("arr").len(), 2);
         assert_eq!(v["dev"], false);
@@ -562,7 +553,9 @@ mod tests {
             dev: true,
             aliases: Vec::new(),
         };
-        let text = installed_php(&sample_lock(), &root, &json!({}), true).expect("php");
+        let lock = sample_lock();
+        let layout = Layout::vendor_only(std::path::Path::new("/proj"), &lock, true);
+        let text = installed_php(&lock, &root, &json!({}), true, &layout).expect("php");
         assert!(text.starts_with("<?php return array(\n"));
         assert!(text.contains("'acme/app' => array("));
         assert!(text.contains("'a/lib-compat' => array("));

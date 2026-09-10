@@ -6,6 +6,7 @@
 
 use crate::error::{Error, Result};
 use crate::fetch::{Fetcher, Provenance};
+use crate::layout::Layout;
 use crate::lock::{Lock, LockPackage};
 use crate::state::RootPackage;
 use crate::store::Store;
@@ -70,13 +71,17 @@ fn installed_identities(vendor: &Path) -> BTreeMap<String, (String, String)> {
 }
 
 pub async fn install(
-    project_dir: &Path,
+    _project_dir: &Path,
     lock: &Lock,
     root_manifest: &Value,
+    layout: &Layout,
     store: Arc<Store>,
     fetcher: Arc<Fetcher>,
     opts: &InstallOptions,
 ) -> Result<InstallReport> {
+    // Racine absolue (celle du layout) : les chemins relatifs des proxies et
+    // des fichiers d'état ne doivent pas dépendre d'un --working-dir relatif.
+    let project_dir = layout.root();
     let vendor = project_dir.join("vendor");
     std::fs::create_dir_all(&vendor).map_err(Error::io(&vendor))?;
 
@@ -85,15 +90,17 @@ pub async fn install(
     let wanted_names: std::collections::BTreeSet<&str> = wanted.iter().map(|p| p.name()).collect();
     let previous = installed_identities(&vendor);
 
-    // Suppressions : présents avant, plus voulus.
+    // Suppressions : présents avant, plus voulus — au chemin qu'a validé le
+    // layout (ancien install-path = chemin recalculé, comme LibraryInstaller).
     for name in previous.keys() {
         if !wanted_names.contains(name.as_str()) {
-            let dir = vendor.join(name);
-            if dir.exists() {
-                std::fs::remove_dir_all(&dir).map_err(Error::io(&dir))?;
-                prune_empty_parent(&vendor, name);
-            }
             report.removed += 1;
+        }
+    }
+    for (_, dir) in layout.removals() {
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(Error::io(&dir))?;
+            prune_empty_parent(project_dir, &dir);
         }
     }
 
@@ -108,7 +115,7 @@ pub async fn install(
             continue;
         }
         let unchanged = previous.get(p.name()) == Some(&identity(p))
-            && vendor.join(p.install_subpath()).is_dir();
+            && layout.abs(p.name()).is_some_and(|d| d.is_dir());
         if unchanged {
             report.unchanged += 1;
             if !store.contains(p.name(), p.version(), p.dist_reference()) {
@@ -189,12 +196,14 @@ pub async fn install(
 
     // Pose : suppression de l'ancienne version puis clone depuis le store.
     for p in &to_install {
-        // On repart toujours de vendor/<name> vide (target-dir compris).
-        let pkg_root = vendor.join(p.name());
+        let (Some(pkg_root), Some(dest)) = (layout.package_root(p.name()), layout.abs(p.name()))
+        else {
+            continue;
+        };
+        // On repart toujours d'une racine de paquet vide (target-dir compris).
         if pkg_root.exists() {
             std::fs::remove_dir_all(&pkg_root).map_err(Error::io(&pkg_root))?;
         }
-        let dest = vendor.join(p.install_subpath());
         let src = store.entry_path(p.name(), p.version(), p.dist_reference());
         crate::clone::clone_tree(&src, &dest)?;
         report.installed += 1;
@@ -204,8 +213,8 @@ pub async fn install(
     // proxies orphelins (paquets retirés).
     for p in &wanted {
         let bins = p.bins();
-        if !bins.is_empty() {
-            crate::binproxy::install_binaries(&vendor, &p.install_subpath(), &bins)?;
+        if let (false, Some(dir)) = (bins.is_empty(), layout.abs(p.name())) {
+            crate::binproxy::install_binaries(&vendor, &dir, &bins)?;
         }
     }
     prune_orphan_bin_proxies(&vendor, &wanted)?;
@@ -218,6 +227,7 @@ pub async fn install(
         &root,
         root_manifest,
         opts.with_dev,
+        layout,
     )?;
     if wanted.iter().any(|p| p.name() == "symfony/runtime") {
         crate::runtime_stub::write_stub(&vendor)?;
@@ -226,16 +236,21 @@ pub async fn install(
     Ok(report)
 }
 
-/// vendor/a/b supprimé → retire aussi vendor/a s'il est vide.
-fn prune_empty_parent(vendor: &Path, name: &str) {
-    if let Some((vendor_ns, _)) = name.split_once('/') {
-        let parent = vendor.join(vendor_ns);
-        if std::fs::read_dir(&parent)
-            .map(|mut d| d.next().is_none())
-            .unwrap_or(false)
-        {
-            let _ = std::fs::remove_dir(&parent);
-        }
+/// `LibraryInstaller::uninstall` : le répertoire parent du paquet retiré
+/// (vendor/<ns>, web/app/plugins…) est supprimé s'il est vide — jamais la
+/// racine du projet.
+fn prune_empty_parent(project_dir: &Path, removed: &Path) {
+    let Some(parent) = removed.parent() else {
+        return;
+    };
+    if parent == project_dir {
+        return;
+    }
+    if std::fs::read_dir(parent)
+        .map(|mut d| d.next().is_none())
+        .unwrap_or(false)
+    {
+        let _ = std::fs::remove_dir(parent);
     }
 }
 

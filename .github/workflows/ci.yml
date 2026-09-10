@@ -22,7 +22,9 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
-          tools: composer:v2
+          # Pinned to the vendored reference: ci.yml must be deterministic.
+          # drift.yml is the job that asks about newer Composer versions.
+          tools: composer:2.10.3
           extensions: mbstring, intl, gd, exif, bcmath, sodium, xml, curl, zip, fileinfo
           ini-values: memory_limit=1G
 
@@ -61,5 +63,11 @@ jobs:
           harness/diff-vendor.sh --with-autoloader
           harness/diff-vendor.sh --with-autoloader
 
+      - name: Removals (inside and outside vendor/)
+        run: harness/removal.sh
+
       - name: Boot on vivace vendor
         run: harness/boot.sh
+
+      - name: Reference twins still match the pinned Composer
+        run: harness/drift-reference.sh

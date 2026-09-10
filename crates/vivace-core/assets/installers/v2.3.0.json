@@ -1,0 +1,965 @@
+{
+    "tag": "v2.3.0",
+    "frameworks": [
+        {
+            "key": "agl",
+            "class": "AglInstaller",
+            "custom": true,
+            "locations": {
+                "module": "More/{$name}/"
+            }
+        },
+        {
+            "key": "akaunting",
+            "class": "AkauntingInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$name}"
+            }
+        },
+        {
+            "key": "annotatecms",
+            "class": "AnnotateCmsInstaller",
+            "custom": false,
+            "locations": {
+                "component": "addons/components/{$name}/",
+                "module": "addons/modules/{$name}/",
+                "service": "addons/services/{$name}/"
+            }
+        },
+        {
+            "key": "asgard",
+            "class": "AsgardInstaller",
+            "custom": true,
+            "locations": {
+                "module": "Modules/{$name}/",
+                "theme": "Themes/{$name}/"
+            }
+        },
+        {
+            "key": "attogram",
+            "class": "AttogramInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "bitrix",
+            "class": "BitrixInstaller",
+            "custom": true,
+            "locations": {
+                "component": "{$bitrix_dir}/components/{$name}/",
+                "d7-component": "{$bitrix_dir}/components/{$vendor}/{$name}/",
+                "d7-module": "{$bitrix_dir}/modules/{$vendor}.{$name}/",
+                "d7-template": "{$bitrix_dir}/templates/{$vendor}_{$name}/",
+                "module": "{$bitrix_dir}/modules/{$name}/",
+                "theme": "{$bitrix_dir}/templates/{$name}/"
+            }
+        },
+        {
+            "key": "bonefish",
+            "class": "BonefishInstaller",
+            "custom": false,
+            "locations": {
+                "package": "Packages/{$vendor}/{$name}/"
+            }
+        },
+        {
+            "key": "botble",
+            "class": "BotbleInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "platform/plugins/{$name}/",
+                "theme": "platform/themes/{$name}/"
+            }
+        },
+        {
+            "key": "cakephp",
+            "class": "CakePHPInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "Plugin/{$name}/"
+            }
+        },
+        {
+            "key": "ccframework",
+            "class": "ClanCatsFrameworkInstaller",
+            "custom": false,
+            "locations": {
+                "ship": "CCF/orbit/{$name}/",
+                "theme": "CCF/app/themes/{$name}/"
+            }
+        },
+        {
+            "key": "chef",
+            "class": "ChefInstaller",
+            "custom": false,
+            "locations": {
+                "cookbook": "Chef/{$vendor}/{$name}/",
+                "role": "Chef/roles/{$name}/"
+            }
+        },
+        {
+            "key": "civicrm",
+            "class": "CiviCrmInstaller",
+            "custom": false,
+            "locations": {
+                "ext": "ext/{$name}/"
+            }
+        },
+        {
+            "key": "cockpit",
+            "class": "CockpitInstaller",
+            "custom": true,
+            "locations": {
+                "module": "cockpit/modules/addons/{$name}/"
+            }
+        },
+        {
+            "key": "codeigniter",
+            "class": "CodeIgniterInstaller",
+            "custom": false,
+            "locations": {
+                "library": "application/libraries/{$name}/",
+                "module": "application/modules/{$name}/",
+                "third-party": "application/third_party/{$name}/"
+            }
+        },
+        {
+            "key": "concrete5",
+            "class": "Concrete5Installer",
+            "custom": false,
+            "locations": {
+                "block": "application/blocks/{$name}/",
+                "core": "concrete/",
+                "package": "packages/{$name}/",
+                "theme": "application/themes/{$name}/",
+                "update": "updates/{$name}/"
+            }
+        },
+        {
+            "key": "concretecms",
+            "class": "ConcreteCMSInstaller",
+            "custom": false,
+            "locations": {
+                "block": "application/blocks/{$name}/",
+                "core": "concrete/",
+                "package": "packages/{$name}/",
+                "theme": "application/themes/{$name}/",
+                "update": "updates/{$name}/"
+            }
+        },
+        {
+            "key": "croogo",
+            "class": "CroogoInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "Plugin/{$name}/",
+                "theme": "View/Themed/{$name}/"
+            }
+        },
+        {
+            "key": "decibel",
+            "class": "DecibelInstaller",
+            "custom": false,
+            "locations": {
+                "app": "app/{$name}/"
+            }
+        },
+        {
+            "key": "dframe",
+            "class": "DframeInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$vendor}/{$name}/"
+            }
+        },
+        {
+            "key": "dokuwiki",
+            "class": "DokuWikiInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "lib/plugins/{$name}/",
+                "template": "lib/tpl/{$name}/"
+            }
+        },
+        {
+            "key": "dolibarr",
+            "class": "DolibarrInstaller",
+            "custom": false,
+            "locations": {
+                "module": "htdocs/custom/{$name}/"
+            }
+        },
+        {
+            "key": "drupal",
+            "class": "DrupalInstaller",
+            "custom": false,
+            "locations": {
+                "config": "config/sync/",
+                "console": "console/{$name}/",
+                "console-language": "console/language/{$name}/",
+                "core": "core/",
+                "custom-module": "modules/custom/{$name}/",
+                "custom-profile": "profiles/custom/{$name}/",
+                "custom-theme": "themes/custom/{$name}/",
+                "database-driver": "drivers/lib/Drupal/Driver/Database/{$name}/",
+                "drupal-multisite": "sites/{$name}/",
+                "drush": "drush/{$name}/",
+                "library": "libraries/{$name}/",
+                "module": "modules/{$name}/",
+                "profile": "profiles/{$name}/",
+                "recipe": "recipes/{$name}",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "ee2",
+            "class": "ExpressionEngineInstaller",
+            "custom": true,
+            "locations": {
+                "addon": "system/expressionengine/third_party/{$name}/",
+                "theme": "themes/third_party/{$name}/"
+            }
+        },
+        {
+            "key": "ee3",
+            "class": "ExpressionEngineInstaller",
+            "custom": true,
+            "locations": {
+                "addon": "system/user/addons/{$name}/",
+                "theme": "themes/user/{$name}/"
+            }
+        },
+        {
+            "key": "elgg",
+            "class": "ElggInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "mod/{$name}/"
+            }
+        },
+        {
+            "key": "eliasis",
+            "class": "EliasisInstaller",
+            "custom": false,
+            "locations": {
+                "component": "components/{$name}/",
+                "module": "modules/{$name}/",
+                "plugin": "plugins/{$name}/",
+                "template": "templates/{$name}/"
+            }
+        },
+        {
+            "key": "ezplatform",
+            "class": "EzPlatformInstaller",
+            "custom": false,
+            "locations": {
+                "assets": "web/assets/ezplatform/{$name}/",
+                "meta-assets": "web/assets/ezplatform/"
+            }
+        },
+        {
+            "key": "fork",
+            "class": "ForkCMSInstaller",
+            "custom": true,
+            "locations": {
+                "module": "src/Modules/{$name}/",
+                "theme": "src/Themes/{$name}/"
+            }
+        },
+        {
+            "key": "fuel",
+            "class": "FuelInstaller",
+            "custom": false,
+            "locations": {
+                "module": "fuel/app/modules/{$name}/",
+                "package": "fuel/packages/{$name}/",
+                "theme": "fuel/app/themes/{$name}/"
+            }
+        },
+        {
+            "key": "fuelphp",
+            "class": "FuelphpInstaller",
+            "custom": false,
+            "locations": {
+                "component": "components/{$name}/"
+            }
+        },
+        {
+            "key": "grav",
+            "class": "GravInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "user/plugins/{$name}/",
+                "theme": "user/themes/{$name}/"
+            }
+        },
+        {
+            "key": "hurad",
+            "class": "HuradInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/",
+                "theme": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "imagecms",
+            "class": "ImageCMSInstaller",
+            "custom": false,
+            "locations": {
+                "library": "application/libraries/{$name}/",
+                "module": "application/modules/{$name}/",
+                "template": "templates/{$name}/"
+            }
+        },
+        {
+            "key": "itop",
+            "class": "ItopInstaller",
+            "custom": false,
+            "locations": {
+                "extension": "extensions/{$name}/"
+            }
+        },
+        {
+            "key": "kanboard",
+            "class": "KanboardInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "known",
+            "class": "KnownInstaller",
+            "custom": false,
+            "locations": {
+                "console": "ConsolePlugins/{$name}/",
+                "plugin": "IdnoPlugins/{$name}/",
+                "theme": "Themes/{$name}/"
+            }
+        },
+        {
+            "key": "kodicms",
+            "class": "KodiCMSInstaller",
+            "custom": false,
+            "locations": {
+                "media": "cms/media/vendor/{$name}/",
+                "plugin": "cms/plugins/{$name}/"
+            }
+        },
+        {
+            "key": "kohana",
+            "class": "KohanaInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "laravel",
+            "class": "LaravelInstaller",
+            "custom": false,
+            "locations": {
+                "library": "libraries/{$name}/"
+            }
+        },
+        {
+            "key": "lavalite",
+            "class": "LavaLiteInstaller",
+            "custom": false,
+            "locations": {
+                "package": "packages/{$vendor}/{$name}/",
+                "theme": "public/themes/{$name}/"
+            }
+        },
+        {
+            "key": "lithium",
+            "class": "LithiumInstaller",
+            "custom": false,
+            "locations": {
+                "library": "libraries/{$name}/",
+                "source": "libraries/_source/{$name}/"
+            }
+        },
+        {
+            "key": "lms",
+            "class": "LanManagementSystemInstaller",
+            "custom": true,
+            "locations": {
+                "document-template": "documents/templates/{$name}/",
+                "plugin": "plugins/{$name}/",
+                "template": "templates/{$name}/",
+                "userpanel-module": "userpanel/modules/{$name}/"
+            }
+        },
+        {
+            "key": "magento",
+            "class": "MagentoInstaller",
+            "custom": false,
+            "locations": {
+                "library": "lib/{$name}/",
+                "skin": "skin/frontend/default/{$name}/",
+                "theme": "app/design/frontend/{$name}/"
+            }
+        },
+        {
+            "key": "majima",
+            "class": "MajimaInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "mako",
+            "class": "MakoInstaller",
+            "custom": false,
+            "locations": {
+                "package": "app/packages/{$name}/"
+            }
+        },
+        {
+            "key": "mantisbt",
+            "class": "MantisBTInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "matomo",
+            "class": "MatomoInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "mautic",
+            "class": "MauticInstaller",
+            "custom": true,
+            "locations": {
+                "core": "app/",
+                "plugin": "plugins/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "maya",
+            "class": "MayaInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "mediawiki",
+            "class": "MediaWikiInstaller",
+            "custom": true,
+            "locations": {
+                "core": "core/",
+                "extension": "extensions/{$name}/",
+                "skin": "skins/{$name}/"
+            }
+        },
+        {
+            "key": "miaoxing",
+            "class": "MiaoxingInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "microweber",
+            "class": "MicroweberInstaller",
+            "custom": true,
+            "locations": {
+                "components": "components/{$install_item_dir}/",
+                "element": "userfiles/elements/{$install_item_dir}/",
+                "module": "userfiles/modules/{$install_item_dir}/",
+                "module-skin": "userfiles/modules/{$install_item_dir}/templates/",
+                "template": "userfiles/templates/{$install_item_dir}/",
+                "vendor": "vendor/{$install_item_dir}/"
+            }
+        },
+        {
+            "key": "modulework",
+            "class": "MODULEWorkInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "modx",
+            "class": "ModxInstaller",
+            "custom": false,
+            "locations": {
+                "extra": "core/packages/{$name}/"
+            }
+        },
+        {
+            "key": "modxevo",
+            "class": "MODXEvoInstaller",
+            "custom": false,
+            "locations": {
+                "lib": "assets/lib/{$name}/",
+                "module": "assets/modules/{$name}/",
+                "plugin": "assets/plugins/{$name}/",
+                "snippet": "assets/snippets/{$name}/",
+                "template": "assets/templates/{$name}/"
+            }
+        },
+        {
+            "key": "moodle",
+            "class": "MoodleInstaller",
+            "custom": false,
+            "locations": {
+                "admin_report": "admin/report/{$name}/",
+                "antivirus": "lib/antivirus/{$name}/",
+                "assignfeedback": "mod/assign/feedback/{$name}/",
+                "assignment": "mod/assignment/type/{$name}/",
+                "assignsubmission": "mod/assign/submission/{$name}/",
+                "atto": "lib/editor/atto/plugins/{$name}/",
+                "auth": "auth/{$name}/",
+                "availability": "availability/condition/{$name}/",
+                "block": "blocks/{$name}/",
+                "booktool": "mod/book/tool/{$name}/",
+                "cachelock": "cache/locks/{$name}/",
+                "cachestore": "cache/stores/{$name}/",
+                "calendartype": "calendar/type/{$name}/",
+                "communication": "communication/provider/{$name}/",
+                "contenttype": "contentbank/contenttype/{$name}/",
+                "coursereport": "course/report/{$name}/",
+                "customcertelement": "mod/customcert/element/{$name}/",
+                "customfield": "customfield/field/{$name}/",
+                "datafield": "mod/data/field/{$name}/",
+                "dataformat": "dataformat/{$name}/",
+                "datapreset": "mod/data/preset/{$name}/",
+                "editor": "lib/editor/{$name}/",
+                "enrol": "enrol/{$name}/",
+                "fileconverter": "files/converter/{$name}/",
+                "filter": "filter/{$name}/",
+                "format": "course/format/{$name}/",
+                "forumreport": "mod/forum/report/{$name}/",
+                "gradeexport": "grade/export/{$name}/",
+                "gradeimport": "grade/import/{$name}/",
+                "gradereport": "grade/report/{$name}/",
+                "gradingform": "grade/grading/form/{$name}/",
+                "h5plib": "h5p/h5plib/{$name}/",
+                "local": "local/{$name}/",
+                "logstore": "admin/tool/log/store/{$name}/",
+                "ltiservice": "mod/lti/service/{$name}/",
+                "ltisource": "mod/lti/source/{$name}/",
+                "media": "media/player/{$name}/",
+                "message": "message/output/{$name}/",
+                "mlbackend": "lib/mlbackend/{$name}/",
+                "mnetservice": "mnet/service/{$name}/",
+                "mod": "mod/{$name}/",
+                "paygw": "payment/gateway/{$name}/",
+                "plagiarism": "plagiarism/{$name}/",
+                "portfolio": "portfolio/{$name}/",
+                "profilefield": "user/profile/field/{$name}/",
+                "qbank": "question/bank/{$name}/",
+                "qbehaviour": "question/behaviour/{$name}/",
+                "qformat": "question/format/{$name}/",
+                "qtype": "question/type/{$name}/",
+                "quiz": "mod/quiz/report/{$name}/",
+                "quizaccess": "mod/quiz/accessrule/{$name}/",
+                "report": "report/{$name}/",
+                "repository": "repository/{$name}/",
+                "scormreport": "mod/scorm/report/{$name}/",
+                "search": "search/engine/{$name}/",
+                "theme": "theme/{$name}/",
+                "tiny": "lib/editor/tiny/plugins/{$name}/",
+                "tinymce": "lib/editor/tinymce/plugins/{$name}/",
+                "tool": "admin/tool/{$name}/",
+                "webservice": "webservice/{$name}/",
+                "workshopallocation": "mod/workshop/allocation/{$name}/",
+                "workshopeval": "mod/workshop/eval/{$name}/",
+                "workshopform": "mod/workshop/form/{$name}/"
+            }
+        },
+        {
+            "key": "october",
+            "class": "OctoberInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$name}/",
+                "plugin": "plugins/{$vendor}/{$name}/",
+                "theme": "themes/{$vendor}-{$name}/"
+            }
+        },
+        {
+            "key": "ontowiki",
+            "class": "OntoWikiInstaller",
+            "custom": true,
+            "locations": {
+                "extension": "extensions/{$name}/",
+                "theme": "extensions/themes/{$name}/",
+                "translation": "extensions/translations/{$name}/"
+            }
+        },
+        {
+            "key": "osclass",
+            "class": "OsclassInstaller",
+            "custom": false,
+            "locations": {
+                "language": "oc-content/languages/{$name}/",
+                "plugin": "oc-content/plugins/{$name}/",
+                "theme": "oc-content/themes/{$name}/"
+            }
+        },
+        {
+            "key": "oxid",
+            "class": "OxidInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$name}/",
+                "out": "out/{$name}/",
+                "theme": "application/views/{$name}/"
+            }
+        },
+        {
+            "key": "phifty",
+            "class": "PhiftyInstaller",
+            "custom": false,
+            "locations": {
+                "bundle": "bundles/{$name}/",
+                "framework": "frameworks/{$name}/",
+                "library": "libraries/{$name}/"
+            }
+        },
+        {
+            "key": "phpbb",
+            "class": "PhpBBInstaller",
+            "custom": false,
+            "locations": {
+                "extension": "ext/{$vendor}/{$name}/",
+                "language": "language/{$name}/",
+                "style": "styles/{$name}/"
+            }
+        },
+        {
+            "key": "piwik",
+            "class": "PiwikInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "plentymarkets",
+            "class": "PlentymarketsInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "{$name}/"
+            }
+        },
+        {
+            "key": "porto",
+            "class": "PortoInstaller",
+            "custom": false,
+            "locations": {
+                "container": "app/Containers/{$name}/"
+            }
+        },
+        {
+            "key": "ppi",
+            "class": "PPIInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "prestashop",
+            "class": "PrestashopInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "processwire",
+            "class": "ProcessWireInstaller",
+            "custom": true,
+            "locations": {
+                "module": "site/modules/{$name}/"
+            }
+        },
+        {
+            "key": "puppet",
+            "class": "PuppetInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$name}/"
+            }
+        },
+        {
+            "key": "pxcms",
+            "class": "PxcmsInstaller",
+            "custom": true,
+            "locations": {
+                "module": "app/Modules/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "quicksilver",
+            "class": "PantheonInstaller",
+            "custom": false,
+            "locations": {
+                "module": "web/private/scripts/quicksilver/{$name}",
+                "script": "web/private/scripts/quicksilver/{$name}"
+            }
+        },
+        {
+            "key": "radphp",
+            "class": "RadPHPInstaller",
+            "custom": true,
+            "locations": {
+                "bundle": "src/{$name}/"
+            }
+        },
+        {
+            "key": "redaxo",
+            "class": "RedaxoInstaller",
+            "custom": false,
+            "locations": {
+                "addon": "redaxo/include/addons/{$name}/",
+                "bestyle-plugin": "redaxo/include/addons/be_style/plugins/{$name}/"
+            }
+        },
+        {
+            "key": "redaxo5",
+            "class": "Redaxo5Installer",
+            "custom": false,
+            "locations": {
+                "addon": "redaxo/src/addons/{$name}/",
+                "bestyle-plugin": "redaxo/src/addons/be_style/plugins/{$name}/"
+            }
+        },
+        {
+            "key": "reindex",
+            "class": "ReIndexInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "plugins/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "roundcube",
+            "class": "RoundcubeInstaller",
+            "custom": true,
+            "locations": {
+                "plugin": "plugins/{$name}/"
+            }
+        },
+        {
+            "key": "shopware",
+            "class": "ShopwareInstaller",
+            "custom": true,
+            "locations": {
+                "backend-plugin": "engine/Shopware/Plugins/Local/Backend/{$name}/",
+                "core-plugin": "engine/Shopware/Plugins/Local/Core/{$name}/",
+                "frontend-plugin": "engine/Shopware/Plugins/Local/Frontend/{$name}/",
+                "frontend-theme": "themes/Frontend/{$name}/",
+                "plugin": "custom/plugins/{$name}/",
+                "theme": "templates/{$name}/"
+            }
+        },
+        {
+            "key": "silverstripe",
+            "class": "SilverStripeInstaller",
+            "custom": true,
+            "locations": {
+                "module": "{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "sitedirect",
+            "class": "SiteDirectInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$vendor}/{$name}/",
+                "plugin": "plugins/{$vendor}/{$name}/"
+            }
+        },
+        {
+            "key": "smf",
+            "class": "SMFInstaller",
+            "custom": false,
+            "locations": {
+                "module": "Sources/{$name}/",
+                "theme": "Themes/{$name}/"
+            }
+        },
+        {
+            "key": "starbug",
+            "class": "StarbugInstaller",
+            "custom": false,
+            "locations": {
+                "custom-module": "app/modules/{$name}/",
+                "custom-theme": "app/themes/{$name}/",
+                "module": "modules/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "sydes",
+            "class": "SyDESInstaller",
+            "custom": true,
+            "locations": {
+                "module": "app/modules/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "sylius",
+            "class": "SyliusInstaller",
+            "custom": false,
+            "locations": {
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "tao",
+            "class": "TaoInstaller",
+            "custom": true,
+            "locations": {
+                "extension": "{$name}"
+            }
+        },
+        {
+            "key": "tastyigniter",
+            "class": "TastyIgniterInstaller",
+            "custom": true,
+            "locations": {
+                "extension": "extensions/{$vendor}/{$name}/",
+                "module": "app/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "thelia",
+            "class": "TheliaInstaller",
+            "custom": false,
+            "locations": {
+                "backoffice-template": "templates/backOffice/{$name}/",
+                "email-template": "templates/email/{$name}/",
+                "frontoffice-template": "templates/frontOffice/{$name}/",
+                "module": "local/modules/{$name}/"
+            }
+        },
+        {
+            "key": "tusk",
+            "class": "TuskInstaller",
+            "custom": false,
+            "locations": {
+                "asset": "assets/tusk/{$name}/",
+                "command": ".tusk/commands/{$name}/",
+                "task": ".tusk/tasks/{$name}/"
+            }
+        },
+        {
+            "key": "userfrosting",
+            "class": "UserFrostingInstaller",
+            "custom": false,
+            "locations": {
+                "sprinkle": "app/sprinkles/{$name}/"
+            }
+        },
+        {
+            "key": "vanilla",
+            "class": "VanillaInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "plugins/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "whmcs",
+            "class": "WHMCSInstaller",
+            "custom": false,
+            "locations": {
+                "addons": "modules/addons/{$vendor}_{$name}/",
+                "fraud": "modules/fraud/{$vendor}_{$name}/",
+                "gateways": "modules/gateways/{$vendor}_{$name}/",
+                "includes": "includes/{$vendor}_{$name}/",
+                "notifications": "modules/notifications/{$vendor}_{$name}/",
+                "registrars": "modules/registrars/{$vendor}_{$name}/",
+                "reports": "modules/reports/{$vendor}_{$name}/",
+                "security": "modules/security/{$vendor}_{$name}/",
+                "servers": "modules/servers/{$vendor}_{$name}/",
+                "social": "modules/social/{$vendor}_{$name}/",
+                "support": "modules/support/{$vendor}_{$name}/",
+                "templates": "templates/{$vendor}_{$name}/"
+            }
+        },
+        {
+            "key": "winter",
+            "class": "WinterInstaller",
+            "custom": true,
+            "locations": {
+                "module": "modules/{$name}/",
+                "plugin": "plugins/{$vendor}/{$name}/",
+                "theme": "themes/{$name}/"
+            }
+        },
+        {
+            "key": "wolfcms",
+            "class": "WolfCMSInstaller",
+            "custom": false,
+            "locations": {
+                "plugin": "wolf/plugins/{$name}/"
+            }
+        },
+        {
+            "key": "wordpress",
+            "class": "WordPressInstaller",
+            "custom": false,
+            "locations": {
+                "dropin": "wp-content/{$name}/",
+                "muplugin": "wp-content/mu-plugins/{$name}/",
+                "plugin": "wp-content/plugins/{$name}/",
+                "theme": "wp-content/themes/{$name}/"
+            }
+        },
+        {
+            "key": "yawik",
+            "class": "YawikInstaller",
+            "custom": true,
+            "locations": {
+                "module": "module/{$name}/"
+            }
+        },
+        {
+            "key": "zend",
+            "class": "ZendInstaller",
+            "custom": false,
+            "locations": {
+                "extra": "extras/library/{$name}/",
+                "library": "library/{$name}/",
+                "module": "module/{$name}/"
+            }
+        },
+        {
+            "key": "zikula",
+            "class": "ZikulaInstaller",
+            "custom": false,
+            "locations": {
+                "module": "modules/{$vendor}-{$name}/",
+                "theme": "themes/{$vendor}-{$name}/"
+            }
+        }
+    ]
+}

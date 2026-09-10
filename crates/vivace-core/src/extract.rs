@@ -1,5 +1,7 @@
 //! Extraction d'une dist zip vers un répertoire, avec le strip du dossier
-//! racine unique des zipballs GitHub/Packagist, et une extraction MÉFIANTE :
+//! racine unique des zipballs GitHub/Packagist (règle d'ArchiveDownloader :
+//! strip ssi l'archive a exactement une entrée de premier niveau et que c'est
+//! un répertoire — sinon tout est extrait tel quel), et une extraction MÉFIANTE :
 //! - chemins : `enclosed_name()` (rejette `..` et absolus) ;
 //! - symlinks (mode unix S_IFLNK) : cible relative uniquement, et le chemin
 //!   résolu lexicalement doit rester dans la racine du paquet ;
@@ -17,10 +19,55 @@ const MAX_UNCOMPRESSED: u64 = 512 * 1024 * 1024;
 const S_IFMT: u32 = 0o170000;
 const S_IFLNK: u32 = 0o120000;
 
+/// Chemin d'une entrée, ou erreur si elle est absolue ou contient `..` :
+/// enclosed_name accepte un `..` interne (`r/../x` reste dans la racine) que
+/// le strip du premier composant transformerait en évasion, et aucune dist
+/// légitime n'en contient.
+fn entry_path(entry: &zip::read::ZipFile<'_>, dest: &Path) -> Result<PathBuf> {
+    entry
+        .enclosed_name()
+        .filter(|p| {
+            p.components()
+                .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+        })
+        .ok_or_else(|| Error::HostileArchive {
+            dest: dest.to_path_buf(),
+            reason: format!("chemin d'entrée invalide: {:?}", entry.name()),
+        })
+}
+
+/// Nombre de composants à retirer en tête de chaque entrée : 1 si l'archive
+/// a exactement une entrée de premier niveau et que c'est un répertoire
+/// (`ArchiveDownloader::install`, `$singleDirAtTopLevel` ; un `.DS_Store` de
+/// premier niveau n'est pas compté, et disparaît alors avec le dossier
+/// racine), 0 sinon — auquel cas tout est déplacé, `.DS_Store` compris
+/// (`rename($temporaryDir, $path)` sur une cible vide).
+fn root_strip(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, dest: &Path) -> Result<usize> {
+    let mut top: std::collections::BTreeMap<std::ffi::OsString, bool> =
+        std::collections::BTreeMap::new();
+    for i in 0..archive.len() {
+        let entry = archive.by_index(i).map_err(Error::zip(dest))?;
+        let raw = entry_path(&entry, dest)?;
+        let mut comps = raw
+            .components()
+            .filter(|c| matches!(c, Component::Normal(_)));
+        let Some(Component::Normal(first)) = comps.next() else {
+            continue;
+        };
+        let is_dir = entry.is_dir() || comps.next().is_some();
+        if !is_dir && first == ".DS_Store" {
+            continue;
+        }
+        *top.entry(first.to_owned()).or_insert(false) |= is_dir;
+    }
+    Ok(usize::from(top.len() == 1 && top.values().all(|d| *d)))
+}
+
 pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(Error::zip(dest))?;
     std::fs::create_dir_all(dest).map_err(Error::io(dest))?;
+    let strip = root_strip(&mut archive, dest)?;
 
     let mut total: u64 = 0;
     for i in 0..archive.len() {
@@ -32,22 +79,12 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
                 reason: format!("taille décompressée > {MAX_UNCOMPRESSED} octets"),
             });
         }
-        // enclosed_name refuse les chemins absolus et ceux qui s'échappent —
-        // mais accepte un `..` interne (`r/../x` reste dans la racine), que
-        // notre strip du premier composant transformerait en évasion. Aucune
-        // dist légitime ne contient `..` : rejet pur et simple.
-        let raw = entry.enclosed_name().filter(|p| {
-            p.components()
-                .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
-        });
-        let Some(raw) = raw else {
-            return Err(Error::HostileArchive {
-                dest: dest.to_path_buf(),
-                reason: format!("chemin d'entrée invalide: {:?}", entry.name()),
-            });
-        };
-        // Strip du dossier racine unique (zipball GitHub: `owner-repo-sha/…`).
-        let stripped: PathBuf = raw.components().skip(1).collect();
+        let raw = entry_path(&entry, dest)?;
+        let stripped: PathBuf = raw
+            .components()
+            .filter(|c| matches!(c, Component::Normal(_)))
+            .skip(strip)
+            .collect();
         if stripped.as_os_str().is_empty() {
             continue;
         }
@@ -173,6 +210,50 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o111, 0o111, "bit exécutable perdu");
         }
+    }
+
+    #[test]
+    fn strips_only_a_single_top_level_directory() {
+        // Dossier unique sans entrée de répertoire explicite : strip.
+        let single = build_zip(&[("pkg/a.txt", b"a", None), ("pkg/sub/b.txt", b"b", None)]);
+        let d = tmpdir();
+        extract_zip(&single, d.path()).expect("extract");
+        assert!(d.path().join("a.txt").is_file() && d.path().join("sub/b.txt").is_file());
+
+        // Fichier à la racine + dossier : rien n'est retiré, rien n'est perdu.
+        let mixed = build_zip(&[("README", b"r", None), ("src/a.php", b"<?php", None)]);
+        let d = tmpdir();
+        extract_zip(&mixed, d.path()).expect("extract");
+        assert!(d.path().join("README").is_file(), "fichier racine perdu");
+        assert!(
+            d.path().join("src/a.php").is_file(),
+            "dossier aplati à tort"
+        );
+
+        // Deux dossiers de premier niveau : rien n'est retiré.
+        let two = build_zip(&[("a/x", b"x", None), ("b/y", b"y", None)]);
+        let d = tmpdir();
+        extract_zip(&two, d.path()).expect("extract");
+        assert!(d.path().join("a/x").is_file() && d.path().join("b/y").is_file());
+
+        // Un seul fichier à la racine : ce n'est pas un répertoire, pas de strip.
+        let file = build_zip(&[("only.txt", b"o", None)]);
+        let d = tmpdir();
+        extract_zip(&file, d.path()).expect("extract");
+        assert!(d.path().join("only.txt").is_file(), "fichier unique perdu");
+
+        // .DS_Store de premier niveau : ignoré pour le compte (strip du
+        // dossier unique, il disparaît) ; sans dossier unique, extrait comme
+        // le reste.
+        let ds = build_zip(&[(".DS_Store", b"junk", None), ("pkg/a.txt", b"a", None)]);
+        let d = tmpdir();
+        extract_zip(&ds, d.path()).expect("extract");
+        assert!(d.path().join("a.txt").is_file());
+        assert!(!d.path().join(".DS_Store").exists());
+        let ds2 = build_zip(&[(".DS_Store", b"junk", None), ("a.txt", b"a", None)]);
+        let d = tmpdir();
+        extract_zip(&ds2, d.path()).expect("extract");
+        assert!(d.path().join("a.txt").is_file() && d.path().join(".DS_Store").is_file());
     }
 
     fn build_zip_with_symlink(link_name: &str, target: &str) -> Vec<u8> {

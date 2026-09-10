@@ -188,3 +188,83 @@ racine ET pour chaque paquet du lock. Oracle `tests/oracle_branch_alias.rs`
 (31 configurations contre le phar, 0 divergence). rector devient la 4e fixture
 figée (squelette minimal : manifestes, lock, points d'entrée d'autoload) ; il
 couvre aussi les deux plugins extension-installer et `platform-check: false`.
+
+## 2026-09-10 — composer/installers émulé nativement (v0.2)
+
+Premier plugin de layout émulé. Le chemin d'un paquet n'est jamais deviné :
+`layout::resolve` ne s'active que si le plugin est verrouillé, **autorisé**
+par `config.allow-plugins` (port des trois formes de PluginManager : booléen,
+motifs `packageNameToRegexp`, fusion avec `$COMPOSER_HOME/config.json` ;
+non listé → fallback, car Composer non interactif refuse), et **porté** : une
+table par tag 2.0.0…2.3.0 (`assets/installers/<tag>.json`, générées par
+`tools/gen-installers-table.php` par réflexion sur la source, jamais
+recopiées ; la logique Installer/BaseInstaller est identique sur tout 2.x,
+seules les tables bougent). 58 frameworks « table seule » sont émulés
+(WordPress, Drupal, Laravel, Magento, Moodle…) ; les 38 qui surchargent
+`inflectPackageVars`/`getLocations`/`getInstallPath` (CakePHP, Grav,
+October/Winter, Shopware, Mautic, Matomo, MediaWiki, ProcessWire…) restent en
+fallback avec un message nominatif. Refus délibérés (→ fallback) : cible
+absolue, hors projet, racine du projet, sous vendor/, deux paquets sur la même
+cible, cible contenant une autre cible, `installer-paths`/`installer-name`
+hors schéma, variable de template inconnue.
+
+Vérité : un oracle de bout en bout (`tests/oracle_installers.rs`) construit
+un Composer avec le vrai plugin activé et interroge
+`InstallationManager::getInstallPath` (dispatch réel : `supports` faux →
+LibraryInstaller → vendor/) puis `findShortestPath` — 665 chemins comparés,
+0 divergence ; la fixture `wordpress` (wpackagist + roots/soil + un dépôt
+`package` avec `bin`) est comparée **projet entier** contre Composer avec le
+plugin actif, et `harness/removal.sh` vérifie qu'un paquet retiré du lock
+disparaît au bon endroit, dans et hors vendor/.
+
+État du plugin : Composer le charge depuis installed.json
+(`PluginManager::loadInstalledPlugins`) et l'installe en premier dans la
+transaction. vivace n'émule que les états où installed.json et le lock
+concordent ; un plugin présent d'un seul côté (ajouté à un vendor existant,
+retiré, ou en require-dev avec `--no-dev`) alors qu'un paquet a un type que
+le plugin prendrait → fallback nominatif (« let Composer handle this
+transition »). `--no-plugins` désactive l'émulation comme chez Composer.
+Trouvé par la revue indépendante, pas par le harness (qui installe toujours
+à partir de zéro).
+
+Conséquences dans le code : `Filesystem::findShortestPath(Code)` et
+`normalizePath` sont désormais des ports exacts dans vivace-core (l'ancienne
+approximation de vivace-autoload est remplacée) ; les proxies bin calculent
+leurs chemins relatifs au lieu de `../` codé en dur ; la suppression d'un
+paquet retiré suit la règle de LibraryInstaller (chemin recalculé avec la
+config courante, égal à l'ancien install-path, sinon fallback ; répertoire
+effacé = `getPackageBasePath`, donc `vendor/<name>` sans le target-dir ;
+parent vide supprimé, jamais la racine du projet). La racine du projet est
+absolutisée dès la CLI : un `--working-dir` relatif produisait des proxies
+bin à chemin absolu (régression trouvée par la revue).
+
+## 2026-09-10 — Extraction : strip du dossier racine seulement s'il est unique
+
+`extract.rs` retirait le premier composant de chaque entrée sans condition —
+un zip à racine multiple (fichier + dossier, ou deux dossiers) perdait ses
+fichiers de premier niveau en silence. Règle d'`ArchiveDownloader::install`
+portée : strip ssi exactement une entrée de premier niveau et que c'est un
+répertoire (`.DS_Store` ignoré). Trouvé par la méta-analyse du plan v0.2,
+avant qu'un dépôt `package` ne le déclenche.
+
+## 2026-09-10 — Drift en deux étages, CI épinglée
+
+`ci.yml` teste désormais `composer:2.10.3` (la référence vendorée) pour être
+déterministe. `drift.yml` (hebdomadaire + manuel) interroge le dernier stable
+et le snapshot : étage 1, `harness/drift-reference.sh` diffe chaque fichier
+de docs/reference/ avec son jumeau dans le phar (signal nominatif en
+secondes) ; étage 2, tests + harness complet. Un échec ouvre ou commente une
+issue `drift`. Le même script tourne en fin de CI contre le Composer épinglé
+(garde-fou contre une référence modifiée à la main).
+
+## 2026-09-10 — GitHub Action à la racine du dépôt
+
+`action.yml` (composite) plutôt qu'un dépôt `setup-vivace` séparé : versionné
+par les tags de release, `uses: Adelagric/vivace@v0.2.0` installe exactement
+cette version (défaut `github.action_ref`, jamais « latest » depuis une
+action ; un ref qui n'est pas un tag est refusé). `install.sh` authentifie la
+requête API avec `GITHUB_TOKEN` quand il existe (limite anonyme partagée sur
+les runners). `action-test.yml` teste l'action contre le binaire du commit
+courant (`binary:`), puis un vrai `vivace install` réseau de la fixture
+Laravel. L'attestation de provenance des binaires est notée pour plus tard :
+le README dit « sha256-verified download », pas « verified binary ».

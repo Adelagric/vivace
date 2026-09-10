@@ -22,12 +22,12 @@ fn analyze(name: &str) -> vivace_core::scope::ScopeReport {
         &std::fs::read_to_string(dir.join("composer.json")).expect("composer.json"),
     )
     .expect("manifest");
-    vivace_core::scope::analyze(&lock, &manifest, true)
+    vivace_core::scope::analyze(&dir, &lock, &manifest, true, true)
 }
 
 #[test]
 fn all_fixtures_are_native() {
-    for name in ["laravel", "symfony", "sylius"] {
+    for name in ["laravel", "symfony", "sylius", "rector", "wordpress"] {
         let report = analyze(name);
         assert!(
             report.is_native_ok(),

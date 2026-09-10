@@ -1,0 +1,98 @@
+name: drift
+
+# vivace promises byte-identical output against Composer 2.10.3 (the vendored
+# reference). This job asks the question "is that still true against the
+# Composer people actually install?" — latest stable and the snapshot —
+# without touching ci.yml, which stays pinned and deterministic.
+#
+# Stage 1 diffs the reference twins (docs/reference/*.php) against the same
+# files inside the newer phar: it names the exact port that moved, in seconds.
+# Stage 2 runs the tests and the whole harness against that Composer.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    name: drift (composer ${{ matrix.composer }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        composer: [v2, snapshot]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:${{ matrix.composer }}
+          extensions: mbstring, intl, gd, exif, bcmath, sodium, xml, curl, zip, fileinfo
+          ini-values: memory_limit=1G
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Composer version under test
+        id: composer
+        run: |
+          composer --version
+          echo "version=$(composer --version --no-ansi 2>/dev/null | sed -n 's/^Composer version \([^ ]*\).*/\1/p')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer downloads and fixtures
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/composer
+            fixtures/work
+          key: fixtures-drift-${{ runner.os }}-${{ steps.composer.outputs.version }}-${{ hashFiles('fixtures/make.sh') }}
+
+      - name: Stage 1 — reference twins
+        id: twins
+        continue-on-error: true
+        run: harness/drift-reference.sh
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Fixtures
+        run: fixtures/make.sh
+
+      - name: Stage 2 — tests and harness
+        id: harness
+        continue-on-error: true
+        run: |
+          cargo test
+          harness/diff-vendor.sh
+          harness/diff-vendor.sh --with-autoloader
+          harness/removal.sh
+          harness/boot.sh
+
+      - name: Report
+        if: steps.twins.outcome == 'failure' || steps.harness.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPOSER_VERSION: ${{ steps.composer.outputs.version }}
+          CHANNEL: ${{ matrix.composer }}
+          TWINS: ${{ steps.twins.outcome }}
+          HARNESS: ${{ steps.harness.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create drift --color B60205 --description "Output drifted from a newer Composer" --force
+          title="Drift against Composer $COMPOSER_VERSION ($CHANNEL)"
+          body="Reference twins: **$TWINS** · tests + harness: **$HARNESS** · run: $RUN_URL
+
+          The vendored reference is Composer 2.10.3. A failing stage 1 names the file whose port must be re-read; a failing stage 2 with a passing stage 1 means behaviour changed outside the vendored files."
+          existing=$(gh issue list --label drift --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --label drift --body "$body"
+          fi
+          exit 1
