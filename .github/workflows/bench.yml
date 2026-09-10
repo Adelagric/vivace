@@ -1,0 +1,36 @@
+name: bench
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["crates/**", "bench/ci-bench.sh", ".github/workflows/bench.yml"]
+
+jobs:
+  bench:
+    name: hyperfine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+          extensions: mbstring, intl, gd, exif, bcmath, sodium, xml, curl, zip, fileinfo
+          ini-values: memory_limit=1G
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: hyperfine
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq hyperfine jq
+      - run: cargo build --release
+      - run: fixtures/make.sh
+      - name: Benchmarks
+        run: bench/ci-bench.sh | tee bench-linux.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench-linux.md

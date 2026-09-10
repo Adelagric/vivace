@@ -69,11 +69,13 @@ generated file is a port of the pinned Composer 2.10.3 source — see
 
 ## Install
 
-Build from source for now (Rust stable):
+Prebuilt binaries (Linux x86_64/arm64, macOS arm64/x86_64), checksum-verified:
 
 ```bash
-cargo install --path crates/vivace
+curl -fsSL https://raw.githubusercontent.com/Adelagric/vivace/main/install.sh | sh
 ```
+
+Or with `cargo binstall vivace`, or from source (`cargo install --path crates/vivace`).
 
 ## Development
 
