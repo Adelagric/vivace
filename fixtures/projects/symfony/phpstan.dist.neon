@@ -1,0 +1,30 @@
+includes:
+    - phpstan-baseline.neon
+    - vendor/phpstan/phpstan-doctrine/extension.neon
+    - vendor/phpstan/phpstan-symfony/extension.neon
+    - vendor/phpstan/phpstan-symfony/rules.neon
+
+parameters:
+    doctrine:
+        objectManagerLoader: tests/object-manager.php
+
+    excludePaths:
+        - config/reference.php
+
+    ignoreErrors:
+        - identifier: missingType.generics
+        -
+            message: '#^Method App\\Kernel\:\:getAllowedEnvs\(\) is unused\.$#'
+            identifier: method.unused
+            path: src/Kernel.php
+
+    level: 6
+    paths:
+        - bin
+        - config
+        - public
+        - src
+        - tests
+
+    symfony:
+        containerXmlPath: var/cache/dev/App_KernelDevDebugContainer.xml

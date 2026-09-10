@@ -128,3 +128,35 @@ symlink n'est jamais caché. Contrat assumé : vendor/ immuable entre installs
 (documenté ; `VIVACE_NO_CLASSMAP_CACHE=1` pour l'ignorer). Alternative écartée :
 mettre en cache la classmap finale par projet — dépendante des exclusions et
 des chemins, plus fragile pour un gain identique.
+
+## 2026-09-10 — M4 : harness en shell, Linux d'abord en conteneur, CI ensuite
+
+Le harness reste un script (`harness/diff-vendor.sh` + `harness/boot.sh`) :
+`diff -r` sur des copies complètes du projet est le test le plus fidèle qui
+existe, et le suffixe d'autoloader étant déterministe (content-hash), aucune
+normalisation n'est nécessaire — un harness Rust n'apporterait rien. Linux est
+exercé localement dans un conteneur (`harness/linux.sh`, image php:8.4 +
+rustup, code monté en lecture seule, volumes pour cargo/target/fixtures/caches)
+AVANT toute CI distante, pour ne pas déboguer à l'aveugle sur des runners. Le
+workflow GitHub Actions (`.github/workflows/ci.yml`, matrice ubuntu + macos)
+rejoue la même chaîne.
+
+## 2026-09-10 — Fixtures créées sans exécuter de PHP
+
+`fixtures/make.sh` fait `create-project --no-scripts --no-plugins --no-install`
+puis `install --no-plugins --no-scripts` : aucun code PHP tiers n'est exécuté
+sur la machine de dev ni en CI (les scripts post-create de Laravel/Sylius sont
+inutiles pour la qualification au boot). Effet de bord observé : une résolution
+fraîche de sylius-standard ne boote pas sur PHP 8.5 (Doctrine ORM exige
+symfony/var-exporter ou les lazy objects natifs 8.4 — incompatibilité amont) ;
+la CI épingle PHP 8.4. `VIVACE_FIXTURES_DIR` permet un répertoire alternatif.
+
+## 2026-09-10 — TLS : rustls, pas OpenSSL
+
+Le premier build Linux a échoué sur `openssl-sys` (reqwest en `native-tls`).
+Bascule sur `rustls-tls` avec `default-features = false` : aucune bibliothèque
+système requise, même comportement HTTP/2, et un binaire distribuable sans
+dépendre de la libssl de l'hôte (utile pour `cargo dist` en M6). Coût : la
+racine de confiance est celle embarquée par rustls (webpki-roots via reqwest),
+pas le magasin système — acceptable pour Packagist/GitHub ; à noter pour les
+dépôts privés à CA interne (`SSL_CERT_FILE` non lu : limitation documentée).

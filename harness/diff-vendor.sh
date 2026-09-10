@@ -31,7 +31,9 @@ for fx in "${FIXTURES[@]}"; do
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$ref" && tar -xf -)
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$viv" && tar -xf -)
   (cd "$ref" && composer install --no-interaction --no-plugins --no-scripts $AUTOLOAD_FLAG --quiet)
-  (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>/dev/null)
+  if ! (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>"$WORK/$fx.vivace.log"); then
+    echo "FAIL $fx : vivace install a échoué :"; tail -20 "$WORK/$fx.vivace.log"; status=1; continue
+  fi
   lines=$(diff -r "$ref/vendor" "$viv/vendor" 2>&1 \
     | grep -v 'autoload_runtime.php' \
     | grep -v 'No such file or directory' \

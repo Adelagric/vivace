@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  parity:
+    name: parity (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+          extensions: mbstring, intl, gd, exif, bcmath, sodium, xml, curl, zip, fileinfo
+          ini-values: memory_limit=1G
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Composer downloads and fixtures
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/composer
+            ~/Library/Caches/composer
+            fixtures/work
+          key: fixtures-${{ runner.os }}-${{ hashFiles('fixtures/make.sh') }}
+
+      - name: Gates
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo build --release
+
+      - name: Fixtures (create-project sans scripts, qualification à l'oracle)
+        run: fixtures/make.sh
+
+      - name: Tests (unitaires + oracles PHP)
+        run: cargo test
+
+      - name: Parity without autoloader
+        run: harness/diff-vendor.sh
+
+      - name: Parity with autoloader, cold then warm classmap cache
+        run: |
+          harness/diff-vendor.sh --with-autoloader
+          harness/diff-vendor.sh --with-autoloader
+
+      - name: Boot on vivace vendor
+        run: harness/boot.sh

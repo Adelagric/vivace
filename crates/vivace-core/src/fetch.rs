@@ -98,32 +98,75 @@ impl Auth {
     }
 }
 
-fn composer_home() -> Option<PathBuf> {
-    if let Ok(h) = std::env::var("COMPOSER_HOME") {
-        return Some(PathBuf::from(h));
-    }
-    let home = std::env::var("HOME").ok()?;
-    if cfg!(target_os = "macos") {
-        Some(PathBuf::from(home).join(".composer"))
-    } else if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        Some(PathBuf::from(xdg).join("composer"))
-    } else {
-        Some(PathBuf::from(home).join(".config/composer"))
-    }
+/// `Factory::useXdg` : vrai dès qu'une variable d'environnement `XDG_*` existe.
+fn use_xdg() -> bool {
+    std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("XDG_"))
 }
 
+fn user_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(|h| PathBuf::from(h.trim_end_matches('/')))
+}
+
+/// `Factory::getHomeDir` (docs/reference/Factory.php) : COMPOSER_HOME, sinon
+/// le premier répertoire existant parmi `$XDG_CONFIG_HOME/composer` (si XDG
+/// est en usage) et `~/.composer`, sinon le premier candidat.
+pub fn composer_home() -> Option<PathBuf> {
+    if let Ok(h) = std::env::var("COMPOSER_HOME") {
+        if !h.is_empty() {
+            return Some(PathBuf::from(h));
+        }
+    }
+    let user = user_dir()?;
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if use_xdg() {
+        let xdg = std::env::var("XDG_CONFIG_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| user.join(".config"));
+        dirs.push(xdg.join("composer"));
+    }
+    dirs.push(user.join(".composer"));
+    dirs.iter()
+        .find(|d| d.is_dir())
+        .cloned()
+        .or_else(|| dirs.first().cloned())
+}
+
+/// `Factory::getCacheDir` : COMPOSER_CACHE_DIR ; sinon `$COMPOSER_HOME/cache`
+/// si COMPOSER_HOME est défini ; Darwin → `~/Library/Caches/composer` ;
+/// `~/.composer/cache` s'il existe ; XDG → `$XDG_CACHE_HOME/composer` ;
+/// sinon `<home>/cache`.
 pub fn composer_cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("COMPOSER_CACHE_DIR") {
-        return PathBuf::from(d);
+        if !d.is_empty() {
+            return PathBuf::from(d);
+        }
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_owned());
+    if let Ok(h) = std::env::var("COMPOSER_HOME") {
+        if !h.is_empty() {
+            return PathBuf::from(h).join("cache");
+        }
+    }
+    let user = user_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = composer_home().unwrap_or_else(|| user.join(".composer"));
     if cfg!(target_os = "macos") {
-        PathBuf::from(home).join("Library/Caches/composer")
-    } else if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
-        PathBuf::from(xdg).join("composer")
-    } else {
-        PathBuf::from(home).join(".cache/composer")
+        return user.join("Library/Caches/composer");
     }
+    if home == user.join(".composer") && home.join("cache").is_dir() {
+        return home.join("cache");
+    }
+    if use_xdg() {
+        let xdg = std::env::var("XDG_CACHE_HOME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| user.join(".cache"));
+        return xdg.join("composer");
+    }
+    home.join("cache")
 }
 
 /// Chemin de cache d'une dist, identique à Composer : sha1 de l'URL COMPLÈTE

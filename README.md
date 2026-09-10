@@ -1,0 +1,88 @@
+# vivace
+
+A fast, drop-in replacement for `composer install`, written in Rust.
+
+vivace reads your `composer.json` and `composer.lock`, downloads the same
+dists, and produces a `vendor/` that is **byte-for-byte identical** to what
+Composer 2 produces — packages, `vendor/bin` proxies, `installed.json`,
+`installed.php`, and the full autoloader (`autoload_static.php`,
+`platform_check.php`, …). It just does it faster, because it never starts
+PHP, extracts every package once into a content-addressed store and clones
+it into `vendor/` (APFS `clonefile`, hardlinks elsewhere), and caches class
+maps per store entry.
+
+```
+composer install       →  vivace install
+composer dump-autoload →  vivace dump-autoload
+```
+
+Same flags where they matter: `--no-dev`, `-o/--optimize-autoloader`,
+`-a/--classmap-authoritative`, `--no-autoloader`, `--ignore-platform-reqs`,
+`--ignore-platform-req=…`. `config.optimize-autoloader` and
+`config.classmap-authoritative` are honoured like Composer does.
+
+## Numbers
+
+Mac Studio M4 Max, macOS/APFS, PHP 8.5, Composer 2.10.3, hyperfine medians,
+warm caches. Full methodology and raw data in [`bench/`](bench/).
+
+| scenario | Laravel (109 pkgs) | Symfony demo (153) | Sylius (276) |
+|---|---|---|---|
+| `install`, nothing to do | **54 ms** vs 1 049 ms | **23 ms** vs 577 ms | **31 ms** vs 592 ms |
+| `install`, `vendor/` deleted, store warm | **196 ms** vs 2 695 ms | **182 ms** vs 2 405 ms | **609 ms** vs 6 007 ms |
+| `dump-autoload -o` | **46 ms** vs 1 591 ms | **60 ms** vs ~940 ms | **151 ms** vs 1 601 ms |
+
+First install on a machine (store cold, zips in Composer's cache): 2-3× faster
+than Composer. Cold network: not benchmarked — that one is up to Packagist.
+
+## How it stays honest
+
+Every claim above comes from a differential harness, not from unit tests
+alone: [`harness/diff-vendor.sh`](harness/diff-vendor.sh) runs `composer install`
+and `vivace install` on the same projects and `diff -r`s the two `vendor/`
+trees. It passes with **zero differences** on all three fixtures, with and
+without the autoloader, in normal, `-o`, `-a` and `--no-dev` modes, with a
+cold and a warm classmap cache. Class detection was checked against
+Composer's own `PhpFileParser::findClasses` on ~50 000 real PHP files. Every
+generated file is a port of the pinned Composer 2.10.3 source — see
+[`DECISIONS.md`](DECISIONS.md) for what was decided and why, and
+[`HANDOVER.md`](HANDOVER.md) for what is *not* covered yet.
+
+## What vivace does not do (v1)
+
+- **Resolve dependencies.** No `update`, no `require`: you need a
+  `composer.lock`. (A PubGrub-based resolver is the natural next step.)
+- **Run scripts or plugins.** vivace never executes PHP. `symfony/runtime` is
+  emulated natively (its `autoload_runtime.php` stub); a short list of plugins
+  proven harmless at install time (`symfony/flex`, `php-http/discovery`,
+  `phpstan/extension-installer`, …) is installed as plain libraries with a
+  notice. Post-install scripts such as Laravel's `package:discover` are yours
+  to run afterwards.
+- **Anything it isn't sure about.** Layout-changing plugins
+  (`composer/installers`, `composer-patches`), `installer-paths`, unknown
+  plugins, source-only packages: vivace detects them *before* touching
+  `vendor/` and `exec`s the real `composer install` instead (opt out with
+  `--no-fallback`). You never get a silently wrong `vendor/`.
+- Windows, `gitlab-token` auth, root package version detection from git.
+
+## Install
+
+Build from source for now (Rust stable):
+
+```bash
+cargo install --path crates/vivace
+```
+
+## Development
+
+```bash
+fixtures/make.sh        # once: creates and qualifies the three fixture projects (php + composer needed)
+cargo test              # unit tests + differential tests against the real Composer phar
+harness/diff-vendor.sh --with-autoloader
+harness/boot.sh
+harness/linux.sh        # the whole chain in a Linux container (Docker)
+```
+
+## License
+
+MIT or Apache-2.0, at your option.

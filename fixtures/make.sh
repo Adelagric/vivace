@@ -5,7 +5,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK="$DIR/work"
+WORK="${VIVACE_FIXTURES_DIR:-$DIR/work}"
 mkdir -p "$WORK"
 
 emit_runtime_stub() { # options par défaut du template de symfony/runtime
@@ -49,9 +49,14 @@ PHP
 create() { # name create-project-package boot-command...
   local name="$1" pkg="$2"
   shift 2
-  if [ ! -d "$WORK/$name" ]; then
-    echo "== create-project $pkg -> $name"
-    (cd "$WORK" && composer create-project --no-interaction --quiet "$pkg" "$name")
+  if [ -d "$DIR/projects/$name" ]; then
+    # Squelette figé (fixtures/projects, composer.lock compris) : déterministe,
+    # sans réseau. Le vendor/ existant est conservé pour la qualification.
+    mkdir -p "$WORK/$name"
+    (cd "$DIR/projects/$name" && tar -cf - .) | (cd "$WORK/$name" && tar -xf -)
+  elif [ ! -d "$WORK/$name" ]; then
+    echo "== create-project $pkg -> $name (sans scripts ni plugins : aucun PHP exécuté)"
+    (cd "$WORK" && composer create-project --no-interaction --no-scripts --no-plugins --no-install --quiet "$pkg" "$name")
   fi
   echo "== qualify $name (install --no-plugins --no-scripts sur checkout nu)"
   rm -rf "$WORK/$name/vendor"

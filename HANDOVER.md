@@ -9,7 +9,9 @@ fixtures/make.sh                         # une fois : crée + qualifie laravel/s
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 cargo test                               # inclut les tests oracle (php + composer dans le PATH)
 cargo build --release
-harness/diff-vendor.sh                   # parité vendor/ vs Composer sur les 3 fixtures
+harness/diff-vendor.sh [--with-autoloader]   # parité vendor/ vs Composer sur les 3 fixtures
+harness/boot.sh                          # les 3 apps démarrent sur un vendor 100 % vivace
+harness/linux.sh                         # toute la chaîne dans un conteneur Linux (Docker)
 bench/profile.sh ; bench/spike-vs-composer.sh   # M0, longs
 ```
 
@@ -26,7 +28,7 @@ message explicite (jamais de skip silencieux).
 | M1 manifestes, content-hash, scope, platform | terminé | oracle golden + différentiels + proptest, 0 divergence |
 | M2 fetch + store + clone + état + proxies + CLI | terminé (`--no-autoloader`) | harness/diff-vendor.sh : 0 diff × 3 fixtures ; bench/M2-install.md |
 | M3 autoload (normal, -o, -a, --no-dev) | terminé | harness --with-autoloader : 0 diff × 3 fixtures ; oracle classmap ~50k fichiers ; bench/M3-autoload.md |
-| M4 harness formel (normalisations, boot, CI Linux) | à faire (script shell en place) | — |
+| M4 harness (parité + boot), Linux en conteneur, CI GitHub Actions | terminé localement : chaîne complète verte dans le conteneur Linux (copie ET hardlinks exercés), réseau réel exercé ; CI écrite, jamais exécutée à distance | bench/M4-linux.md, harness/*.sh, .github/workflows/ci.yml |
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
 | M6 sortie publique | à faire | — |
 
@@ -35,12 +37,8 @@ message explicite (jamais de skip silencieux).
 - **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. No-op Laravel à 54 ms (objectif 50).
 - **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
 
-- **Linux** : jamais exécuté. Le clone y passera par hardlinks (clone.rs) —
-  chemin de code compilé mais non exercé ; perf non mesurée.
-- **Réseau réel** : le fetch (reqwest, auth, retries, écriture cache) n'a été
-  exercé qu'en cache chaud (`--offline`). Un test réseau contrôlé (miroir
-  local) est prévu en M4/M5. L'auth `gitlab-token`/`gitlab-oauth` n'est pas
-  implémentée (github-oauth, http-basic, bearer seulement).
+- **Linux** : exercé en conteneur arm64 (php:8.4) — gates, tests, parité, boot, copie et hardlinks. Pas encore sur x86_64 ni sur un runner distant ; perf Linux mesurée en runs uniques seulement.
+- **Réseau réel** : exercé une fois (109 zips GitHub via rustls, caches vides, 3,46 s, app boote) ; retries/backoff et auth jamais exercés en conditions réelles. `gitlab-token`/`gitlab-oauth` non implémentées (github-oauth, http-basic, bearer seulement). rustls n'utilise pas le magasin de CA système (`SSL_CERT_FILE` ignoré).
 - **Version du root package** : pas de détection VCS (Composer devine
   `dev-<branche>` + sha depuis git) → `installed.php` diverge sur `root` dans un
   checkout git. À porter (VersionGuesser) ou à normaliser dans le harness.
@@ -59,6 +57,7 @@ message explicite (jamais de skip silencieux).
   octets non-UTF-8) — décision plan r1/F4. Les noms de classes sont des `Vec<u8>`.
 - `harness/diff-vendor.sh` copie le projet complet (les règles d'autoload de
   la racine — `src/Kernel.php` chez Sylius — doivent exister).
-- Sylius boot : `php -d memory_limit=1G` (128 Mo brew insuffisants).
+- Sylius boot : `php -d memory_limit=1G` (128 Mo brew insuffisants) ; une résolution FRAÎCHE de sylius-standard ne boote pas sur PHP 8.5 (Doctrine ORM / lazy objects) — CI épinglée en PHP 8.4.
 - `symfony/demo` n'existe pas sur Packagist : `symfony/symfony-demo`.
-- Les fixtures (`fixtures/work/`) sont gitignorées : `fixtures/make.sh` d'abord.
+- Les fixtures (`fixtures/work/`) sont gitignorées : `fixtures/make.sh` d'abord — il copie les squelettes FIGÉS de `fixtures/projects/` (locks committés) ; ne pas re-résoudre.
+- Cache Composer : chemins canoniques portés de `Factory` (Linux sans XDG → `~/.composer/cache`) ; `harness/linux.sh` persiste `/root/.composer` dans un volume.

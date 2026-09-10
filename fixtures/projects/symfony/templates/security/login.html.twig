@@ -1,0 +1,113 @@
+{% extends 'base.html.twig' %}
+
+{% block body_id 'login' %}
+
+{% block main %}
+    {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error.messageKey|trans(error.messageData, 'security') }}
+        </div>
+    {% endif %}
+
+    {#
+        This references the Stimulus controller defined in "assets/controllers/login-controller.js".
+        See https://symfony.com/bundles/StimulusBundle/current/index.html
+        For more info on Symfony UX see https://ux.symfony.com
+    #}
+    <div class="row" {{ stimulus_controller('login') }}>
+        <div class="col-sm-5">
+            <div class="well">
+                <form action="{{ path('security_login') }}" method="post">
+                    <fieldset>
+                        <legend><twig:ux:icon name="tabler:lock"/> {{ 'title.login'|trans }}</legend>
+                        <div class="mb-3">
+                            <label class="form-label" for="username">{{ 'label.username'|trans }}</label>
+                            <input class="form-control" {{ stimulus_target('login', 'username') }} id="username" name="_username" required="required" type="text" value="{{ last_username }}">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="password">{{ 'label.password'|trans }}</label>
+                            <div class="input-group">
+                                <input class="form-control" {{ stimulus_target('login', 'password') }} id="password" name="_password" required="required" type="password">
+                                <button class="btn btn-primary" type="button" {{ stimulus_action('login', 'togglePasswordInputType') }}><twig:ux:icon name="tabler:eye" aria-hidden="false" aria-label="Toggle password visibility"/></button>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input class="form-check-input" id="remember_me" name="_remember_me" type="checkbox" checked>
+                            <label class="form-check-label" for="remember_me">{{ 'label.remember_me'|trans }}</label>
+                        </div>
+
+                        <input type="hidden" name="_target_path" value="{{ app.request.query.get('redirect_to') }}">
+                        <input type="hidden" name="_csrf_token" data-controller="csrf-protection" value="{{ csrf_token('authenticate') }}">
+                        <button type="submit" class="btn btn-primary">
+                            <twig:ux:icon name="tabler:login"/> {{ 'action.sign_in'|trans }}
+                        </button>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+
+        <div id="login-help" class="col-sm-7">
+            <h3>
+                <twig:ux:icon name="tabler:arrow-left"/>
+                {{ 'help.login_users'|trans }}
+            </h3>
+
+            <table class="table table-striped table-bordered table-hover">
+                <thead>
+                    <tr>
+                        <th scope="col">{{ 'label.username'|trans }}</th>
+                        <th scope="col">{{ 'label.password'|trans }}</th>
+                        <th scope="col">{{ 'label.role'|trans }}</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>john_user</td>
+                        <td>kitten</td>
+                        <td><code>ROLE_USER</code> ({{ 'help.role_user'|trans }})</td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" {{ stimulus_action('login', 'prefillJohnUser') }}>
+                                <twig:ux:icon name="tabler:user" aria-hidden="false" aria-label="Log in as the user John"/>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>jane_admin</td>
+                        <td>kitten</td>
+                        <td><code>ROLE_ADMIN</code> ({{ 'help.role_admin'|trans }})</td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" {{ stimulus_action('login', 'prefillJaneAdmin') }}>
+                                <twig:ux:icon name="tabler:user" aria-hidden="false" aria-label="Log in as the user Jane"/>
+                            </button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div id="login-users-help" class="card">
+                <div class="card-body">
+                    <p class="card-text">
+                        <span class="badge text-bg-info">{{ 'note'|trans }}</span>
+                        {{ 'help.reload_fixtures'|trans }}<br>
+                        <code class="d-block my-2 p-2">$ php bin/console doctrine:fixtures:load</code>
+                    </p>
+
+                    <p class="card-text">
+                        <span class="badge text-bg-info">{{ 'tip'|trans }}</span>
+                        {{ 'help.add_user'|trans }}<br>
+                        <code class="d-block my-2 p-2">$ php bin/console app:add-user</code>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block sidebar %}
+    {{ parent() }}
+
+    {{ show_source_code(_self) }}
+{% endblock %}

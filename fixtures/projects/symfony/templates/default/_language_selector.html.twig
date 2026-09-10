@@ -1,0 +1,34 @@
+{% macro render_language_selector(display_current_language = false) %}
+    <a class="nav-link language-selector-dropdown-button" href="#" role="button" data-bs-toggle="modal" data-bs-target="#locale-selector-modal">
+        <twig:ux:icon name="tabler:world"/>
+        {% if display_current_language %}
+            <span class="current-language">{{ app.locale|locale_name }}</span>
+        {% endif %}
+        <span class="sr-only">{{ 'menu.choose_language'|trans }}</span>
+    </a>
+
+    <div id="locale-selector-modal" class="modal" tabindex="-1" aria-hidden="true">
+        <div class="modal-lg modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    {# Display this title always in English to make the language selector easier to use #}
+                    <h1 class="modal-title" lang="en">Choose your language</h1>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="{{ 'action.close'|trans }}"></button>
+                </div>
+
+                <div class="modal-body">
+                    <ul class="locales">
+                        {% for locale in locales() %}
+                            {%- set is_active = app.locale == locale.code -%}
+                            <li class="{{ is_active ? 'active' }}{{ is_rtl(locale.code) ? ' rtl' }}" translate="no">
+                                <a class="stretched-link" lang="{{ locale.code }}" hreflang="{{ locale.code }}" href="{{ path(app.current_route ?? 'blog_index', app.current_route_parameters|merge({_locale: locale.code})) }}">
+                                    {{ locale.name|capitalize }} <small>{{ locale.code }}</small>
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endmacro %}

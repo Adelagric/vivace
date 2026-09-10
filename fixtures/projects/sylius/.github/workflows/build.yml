@@ -1,0 +1,41 @@
+name: Build
+
+on:
+    pull_request:
+        paths-ignore:
+            - "adr/**"
+            - "docs/**"
+            - "*.md"
+    workflow_dispatch: ~
+    schedule:
+        - cron: '0 3 * * *'  # Daily at 03:00 UTC
+    push:
+        branches-ignore:
+            - 'dependabot/**'
+            - 'upmerge/**'
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    static-checks:
+        name: Static checks
+        uses: ./.github/workflows/ci_static-checks.yaml
+        with:
+            type: minimal
+    ci:
+        name: Tests
+        needs: static-checks
+        uses: ./.github/workflows/ci.yaml
+        with:
+            type: minimal
+    ci-js:
+        name: Javascript Tests
+        needs: static-checks
+        uses: ./.github/workflows/ci_js.yaml
+        with:
+            type: minimal
