@@ -160,3 +160,14 @@ dépendre de la libssl de l'hôte (utile pour `cargo dist` en M6). Coût : la
 racine de confiance est celle embarquée par rustls (webpki-roots via reqwest),
 pas le magasin système — acceptable pour Packagist/GitHub ; à noter pour les
 dépôts privés à CA interne (`SSL_CERT_FILE` non lu : limitation documentée).
+
+## 2026-09-10 — Version racine devinée depuis git, comme Composer
+
+`installed.php` divergeait sur l'entrée `root` dans tout checkout git (Composer
+devine `dev-<branche>` + SHA via VersionGuesser). Port de RootPackageLoader +
+guessGitVersion (branche courante, HEAD détaché → tag exact, branche de feature
+→ parente la plus proche par `git rev-list`, branch-alias, COMPOSER_ROOT_VERSION),
+sortie git forcée en anglais (`LANGUAGE=C`, comme GitUtil::cleanEnv — un git en
+français a fait échouer le premier test). Le harness commite désormais un dépôt
+git identique (même arbre, auteur et date figés → même SHA) des deux côtés.
+Non porté : hg/fossil/svn.

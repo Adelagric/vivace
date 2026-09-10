@@ -11,6 +11,7 @@ pub mod installer;
 pub mod lock;
 pub mod phpjson;
 pub mod platform;
+pub mod root_version;
 pub mod runtime_stub;
 pub mod scope;
 pub mod state;

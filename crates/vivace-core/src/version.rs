@@ -132,6 +132,12 @@ impl Ord for Version {
 /// Parité tenue par tests/oracle_normalize.rs.
 pub fn normalize_pretty(input: &str) -> Result<String, UnsupportedVersion> {
     let s = input.trim();
+    // master/trunk/default (avec ou sans `dev-`) → branche par défaut.
+    let lower = s.to_ascii_lowercase();
+    let bare = lower.strip_prefix("dev-").unwrap_or(&lower);
+    if matches!(bare, "master" | "trunk" | "default") {
+        return Ok("9999999-dev".to_owned());
+    }
     if let Some(rest) = s.strip_prefix("dev-") {
         if rest.is_empty() {
             return Err(UnsupportedVersion(input.to_owned()));

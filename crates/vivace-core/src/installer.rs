@@ -189,7 +189,7 @@ pub async fn install(
     prune_orphan_bin_proxies(&vendor, &wanted)?;
 
     // Fichiers d'état + stub runtime.
-    let root = RootPackage::from_manifest(root_manifest, opts.with_dev);
+    let root = RootPackage::detect(root_manifest, project_dir, opts.with_dev);
     crate::state::write_state_files(
         &vendor.join("composer"),
         lock,

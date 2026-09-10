@@ -30,6 +30,14 @@ for fx in "${FIXTURES[@]}"; do
   # racine (classmap src/Kernel.php, psr-4 app/…) doivent exister.
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$ref" && tar -xf -)
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$viv" && tar -xf -)
+  # Dépôt git identique des deux côtés (même arbre, même auteur/date → même SHA) :
+  # Composer devine la version racine depuis git, vivace doit faire pareil.
+  for d in "$ref" "$viv"; do
+    (cd "$d" && git init -q -b main && git add -A >/dev/null && \
+      GIT_AUTHOR_NAME=vivace GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
+      GIT_COMMITTER_NAME=vivace GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
+      git commit -q -m fixture)
+  done
   (cd "$ref" && composer install --no-interaction --no-plugins --no-scripts $AUTOLOAD_FLAG --quiet)
   if ! (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>"$WORK/$fx.vivace.log"); then
     echo "FAIL $fx : vivace install a échoué :"; tail -20 "$WORK/$fx.vivace.log"; status=1; continue

@@ -39,9 +39,7 @@ message explicite (jamais de skip silencieux).
 
 - **Linux** : exercé en conteneur arm64 (php:8.4) et sur runner GitHub x86_64 (ubuntu-latest) — gates, tests, parité, boot ; copie et hardlinks exercés en conteneur. Perf Linux mesurée en runs uniques seulement (pas d'hyperfine sur runner).
 - **Réseau réel** : exercé une fois (109 zips GitHub via rustls, caches vides, 3,46 s, app boote) ; retries/backoff et auth jamais exercés en conditions réelles. `gitlab-token`/`gitlab-oauth` non implémentées (github-oauth, http-basic, bearer seulement). rustls n'utilise pas le magasin de CA système (`SSL_CERT_FILE` ignoré).
-- **Version du root package** : pas de détection VCS (Composer devine
-  `dev-<branche>` + sha depuis git) → `installed.php` diverge sur `root` dans un
-  checkout git. À porter (VersionGuesser) ou à normaliser dans le harness.
+- **Version du root package** : portée (VersionGuesser git : branche, HEAD détaché, tag exact, branche de feature → parente, branch-alias ; COMPOSER_ROOT_VERSION). Le harness commite un dépôt git identique des deux côtés : parité vérifiée sur `main`. Non exercés par le harness : branches de feature, HEAD détaché, alias (tests unitaires seulement) ; hg/fossil/svn non portés (défaut `1.0.0+no-version-set`).
 - **`extra.runtime` personnalisé** : routé en fallback, pas émulé.
 - **Windows** : hors scope v1 (proxies .bat non générés).
 - **Concurrence** : deux installs simultanés sur le même vendor/ ne sont pas

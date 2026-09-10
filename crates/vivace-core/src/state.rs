@@ -64,13 +64,15 @@ pub struct RootPackage {
     pub reference: Option<String>,
     pub package_type: String,
     pub dev: bool,
+    /// Alias de branche (`extra.branch-alias`) : version jolie de l'alias.
+    pub aliases: Vec<String>,
 }
 
 impl RootPackage {
-    /// Équivalent pratique du root package de Composer. La détection de
-    /// version par VCS n'est pas portée en v1 (HANDOVER) : composer.json
-    /// `version`, sinon le défaut `1.0.0+no-version-set`.
-    pub fn from_manifest(manifest: &Value, dev: bool) -> RootPackage {
+    /// Comme RootPackageLoader : `version` du composer.json, sinon
+    /// COMPOSER_ROOT_VERSION, sinon devinée depuis git, sinon
+    /// `1.0.0+no-version-set` (voir root_version.rs).
+    pub fn detect(manifest: &Value, project_dir: &std::path::Path, dev: bool) -> RootPackage {
         let name = manifest
             .get("name")
             .and_then(Value::as_str)
@@ -81,21 +83,35 @@ impl RootPackage {
             .and_then(Value::as_str)
             .unwrap_or("library")
             .to_owned();
-        let (pretty_version, version) = match manifest.get("version").and_then(Value::as_str) {
-            Some(v) => (
-                v.to_owned(),
-                normalize_pretty(v).unwrap_or_else(|_| v.to_owned()),
-            ),
-            None => ("1.0.0+no-version-set".to_owned(), "1.0.0.0".to_owned()),
-        };
+        let rv = crate::root_version::detect(manifest, project_dir);
+        let aliases = crate::root_version::branch_alias(manifest, &rv)
+            .map(|(_, pretty)| vec![pretty])
+            .unwrap_or_default();
         RootPackage {
             name,
-            pretty_version,
-            version,
-            reference: None,
+            pretty_version: rv.pretty_version,
+            version: rv.version,
+            reference: rv.reference,
             package_type,
             dev,
+            aliases,
         }
+    }
+
+    /// Sans détection VCS ni environnement (tests, cas sans projet sur disque).
+    pub fn from_manifest(manifest: &Value, dev: bool) -> RootPackage {
+        let mut r = RootPackage::detect(
+            manifest,
+            std::path::Path::new("/nonexistent-vivace-root"),
+            dev,
+        );
+        if manifest.get("version").is_none() && std::env::var("COMPOSER_ROOT_VERSION").is_err() {
+            r.pretty_version = crate::root_version::DEFAULT_PRETTY_VERSION.to_owned();
+            r.version = "1.0.0.0".to_owned();
+            r.reference = None;
+            r.aliases = Vec::new();
+        }
+        r
     }
 }
 
@@ -176,6 +192,7 @@ struct VersionEntry {
     package_type: Option<String>,
     install_path: Option<Option<String>>, // None = pas encore posé ; Some(None) = null
     dev_requirement: Option<bool>,
+    aliases: Vec<String>,
     replaced: Vec<String>,
     provided: Vec<String>,
 }
@@ -309,6 +326,7 @@ pub fn installed_php(
         entry.package_type = Some(root.package_type.clone());
         entry.install_path = Some(Some("__DIR__ . '/../../'".to_owned()));
         entry.dev_requirement = Some(false);
+        entry.aliases = root.aliases.clone();
     }
 
     for e in versions.values_mut() {
@@ -340,7 +358,11 @@ pub fn installed_php(
     );
     push_kv(&mut out, 2, "type", &php_str(&root.package_type));
     push_kv(&mut out, 2, "install_path", "__DIR__ . '/../../'");
-    push_kv(&mut out, 2, "aliases", "array()");
+    if root.aliases.is_empty() {
+        push_kv(&mut out, 2, "aliases", "array()");
+    } else {
+        push_string_list(&mut out, 2, "aliases", &root.aliases);
+    }
     push_kv(&mut out, 2, "dev", if root.dev { "true" } else { "false" });
     out.push_str("    ),\n");
     out.push_str("    'versions' => array(\n");
@@ -369,7 +391,11 @@ pub fn installed_php(
             push_kv(&mut out, 3, "install_path", ip.as_deref().unwrap_or("null"));
         }
         if e.pretty_version.is_some() {
-            push_kv(&mut out, 3, "aliases", "array()");
+            if e.aliases.is_empty() {
+                push_kv(&mut out, 3, "aliases", "array()");
+            } else {
+                push_string_list(&mut out, 3, "aliases", &e.aliases);
+            }
         }
         if let Some(d) = e.dev_requirement {
             push_kv(
@@ -522,6 +548,7 @@ mod tests {
             reference: None,
             package_type: "project".to_owned(),
             dev: true,
+            aliases: Vec::new(),
         };
         let text = installed_php(&sample_lock(), &root, &json!({}), true).expect("php");
         assert!(text.starts_with("<?php return array(\n"));
