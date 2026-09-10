@@ -1,5 +1,7 @@
 # vivace
 
+[![ci](https://github.com/Adelagric/vivace/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vivace/actions/workflows/ci.yml)
+
 A fast, drop-in replacement for `composer install`, written in Rust.
 
 vivace reads your `composer.json` and `composer.lock`, downloads the same
