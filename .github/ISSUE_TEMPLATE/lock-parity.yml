@@ -1,0 +1,40 @@
+name: Lock parity
+description: vivace produced a different vendor/ than Composer, or fell back to Composer unexpectedly
+labels: ["lock-parity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks — this is the most useful kind of report. A lock that breaks vivace becomes a regression test for everyone.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What happened
+      options:
+        - "diff -r shows differences between Composer's vendor/ and vivace's"
+        - "vivace fell back to `composer install` (out of scope) where I expected native handling"
+        - "vivace failed with an error"
+        - "the app does not boot on vivace's vendor/"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: vivace output (stderr) and, if applicable, the `diff -r` output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: composer.json and composer.lock
+      description: Attach both files (drag & drop). For private packages, redact URLs and tokens but keep the structure.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS, PHP version, Composer version, vivace version
+      placeholder: "macOS 15 / PHP 8.4.2 / Composer 2.10.3 / vivace 0.1.1"
+    validations:
+      required: true
