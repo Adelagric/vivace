@@ -28,16 +28,16 @@ message explicite (jamais de skip silencieux).
 | M1 manifestes, content-hash, scope, platform | terminé | oracle golden + différentiels + proptest, 0 divergence |
 | M2 fetch + store + clone + état + proxies + CLI | terminé (`--no-autoloader`) | harness/diff-vendor.sh : 0 diff × 3 fixtures ; bench/M2-install.md |
 | M3 autoload (normal, -o, -a, --no-dev) | terminé | harness --with-autoloader : 0 diff × 3 fixtures ; oracle classmap ~50k fichiers ; bench/M3-autoload.md |
-| M4 harness (parité + boot), Linux en conteneur, CI GitHub Actions | terminé localement : chaîne complète verte dans le conteneur Linux (copie ET hardlinks exercés), réseau réel exercé ; CI écrite, jamais exécutée à distance | bench/M4-linux.md, harness/*.sh, .github/workflows/ci.yml |
+| M4 harness (parité + boot), Linux en conteneur, CI GitHub Actions | terminé : chaîne verte dans le conteneur Linux arm64 (copie ET hardlinks) ET sur GitHub Actions ubuntu-latest x86_64 + macos-latest (run #2, 2026-09-10) ; réseau réel exercé | bench/M4-linux.md, harness/*.sh, .github/workflows/ci.yml |
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
-| M6 sortie publique | à faire | — |
+| M6 sortie publique | dépôt public github.com/Adelagric/vivace, CI verte, README ; release (tag v0.1.0) et annonce en attente de feu vert utilisateur | .github/workflows/release.yml |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
 - **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. No-op Laravel à 54 ms (objectif 50).
 - **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
 
-- **Linux** : exercé en conteneur arm64 (php:8.4) — gates, tests, parité, boot, copie et hardlinks. Pas encore sur x86_64 ni sur un runner distant ; perf Linux mesurée en runs uniques seulement.
+- **Linux** : exercé en conteneur arm64 (php:8.4) et sur runner GitHub x86_64 (ubuntu-latest) — gates, tests, parité, boot ; copie et hardlinks exercés en conteneur. Perf Linux mesurée en runs uniques seulement (pas d'hyperfine sur runner).
 - **Réseau réel** : exercé une fois (109 zips GitHub via rustls, caches vides, 3,46 s, app boote) ; retries/backoff et auth jamais exercés en conditions réelles. `gitlab-token`/`gitlab-oauth` non implémentées (github-oauth, http-basic, bearer seulement). rustls n'utilise pas le magasin de CA système (`SSL_CERT_FILE` ignoré).
 - **Version du root package** : pas de détection VCS (Composer devine
   `dev-<branche>` + sha depuis git) → `installed.php` diverge sur `root` dans un

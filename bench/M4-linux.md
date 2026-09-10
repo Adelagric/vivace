@@ -52,5 +52,6 @@ Non comparé au harness (référence disponible générée sans `app/`).
 
 `.github/workflows/ci.yml` (ubuntu-latest + macos-latest, PHP 8.4 via
 setup-php, extensions incluant exif/gd/intl) rejoue exactement la chaîne du
-conteneur. **Pas encore exécutée à distance** : le dépôt n'est pas publié —
-le premier run distant sera la preuve, pas cette page.
+conteneur. **Exécutée à distance le 2026-09-10** (run #2, après un premier
+échec dû aux répertoires vides non versionnés des squelettes → `.gitkeep`) :
+verte sur ubuntu-latest (x86_64, 5 min 48) et macos-latest (11 min 51).
