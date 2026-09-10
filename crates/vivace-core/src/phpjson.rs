@@ -141,6 +141,29 @@ fn encode_number(n: &serde_json::Number, out: &mut String) -> Result<()> {
 /// shortest-round-trip, notation fixe ssi le point décimal est dans (-4, 17]
 /// (bornes relevées empiriquement sur PHP 8.5, cf. tests différentiels),
 /// sinon exponentielle `d[.ddd|.0]e±X`. Pas de `.0` sur les entiers en fixe.
+/// Chiffres significatifs les plus courts qui round-trippent, et exposant
+/// décimal, comme `zend_gcvt` mode 0 (dtoa). `{:e}` de Rust donne la même
+/// chaîne sauf sur une égalité exacte entre deux candidats (la valeur est à
+/// mi-chemin, ex. 2124202659384827.25 → « …27.2 » ou « …27.3 ») : dtoa
+/// arrondit au chiffre pair, Rust vers le haut. Le formatage à précision
+/// fixe de Rust (exact, demi-pair) tranche comme dtoa ; on le garde s'il
+/// round-trippe encore (toujours vrai hors bord d'intervalle asymétrique).
+fn shortest_digits(a: f64) -> (String, String) {
+    let sci = format!("{:e}", a);
+    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let exact = format!("{:.*e}", digits.len().saturating_sub(1), a);
+    if exact != sci && exact.parse::<f64>() == Ok(a) {
+        let (m, e) = exact.split_once('e').unwrap_or((exact.as_str(), "0"));
+        let mut d: String = m.chars().filter(|c| *c != '.').collect();
+        while d.len() > 1 && d.ends_with('0') {
+            d.pop();
+        }
+        return (d, e.to_owned());
+    }
+    (digits, exp.to_owned())
+}
+
 fn encode_double(f: f64, out: &mut String) -> Result<()> {
     if !f.is_finite() {
         return Err(Error::NonFiniteFloat(f));
@@ -152,12 +175,8 @@ fn encode_double(f: f64, out: &mut String) -> Result<()> {
     if f.is_sign_negative() {
         out.push('-');
     }
-    // `{:e}` produit `d[.ddd]e±X` avec la mantisse shortest round-trip —
-    // les mêmes chiffres que PHP (double-conversion).
-    let sci = format!("{:e}", f.abs());
-    let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let (digits, exp) = shortest_digits(f.abs());
     let exp: i32 = exp.parse().map_err(|_| Error::NonFiniteFloat(f))?;
-    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
     let dec_point = exp + 1; // valeur = 0.digits × 10^dec_point
 
     if dec_point > -4 && dec_point <= 17 {

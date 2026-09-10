@@ -268,3 +268,14 @@ les runners). `action-test.yml` teste l'action contre le binaire du commit
 courant (`binary:`), puis un vrai `vivace install` réseau de la fixture
 Laravel. L'attestation de provenance des binaires est notée pour plus tard :
 le README dit « sha256-verified download », pas « verified binary ».
+
+## 2026-09-11 — Doubles : égalités exactes arrondies au chiffre pair (dtoa)
+
+Le property test a tiré `-2124202659384827.2` (double exact `…27.25`, à
+mi-chemin entre « .2 » et « .3 ») : PHP (`zend_gcvt` mode 0 = dtoa) arrondit
+au chiffre pair, `{:e}` de Rust vers le haut. Correctif dans `phpjson` :
+recalcul des mêmes n chiffres par le formatage à précision fixe de Rust
+(exact, demi-pair), gardé s'il round-trippe encore. Régression déterministe
+figée dans `prop_phpjson_oracle.rs`, 400 cas rejoués sans divergence. Second
+piège de formatage trouvé par le même test après `float_roundtrip` : la
+parité à l'octet sur les flottants ne se devine pas, elle se fuzze.

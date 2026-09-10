@@ -74,3 +74,22 @@ proptest! {
         prop_assert_eq!(ours, theirs);
     }
 }
+
+/// Cas d'égalité exacte trouvés par le property test (CI 2026-09-11) :
+/// la valeur est à mi-chemin entre deux chaînes shortest, dtoa arrondit au
+/// chiffre pair. Figés comme régression déterministe.
+#[test]
+fn exact_ties_round_to_even_like_dtoa() {
+    for text in [
+        "{\"\":-2124202659384827.2}",
+        "[2124202659384827.25]",
+        "[4503599627370497.5]",
+        "[1125899906842624.5]",
+        "[-1.0287745609898322e+201]",
+        "[2.5,3.5,0.125,1e23,9.5e-5,5e-324,1.7976931348623157e308]",
+    ] {
+        let v: Value = serde_json::from_str(text).expect("parse");
+        let ours = vivace_core::phpjson::php_json_encode(&v).expect("encode");
+        assert_eq!(ours, php_oracle_encode(text), "divergence sur {text}");
+    }
+}
