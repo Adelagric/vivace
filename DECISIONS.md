@@ -109,3 +109,22 @@ Comme InstallCommand : `-o`/`-a` ou `config.optimize-autoloader` /
 `config.classmap-authoritative` du composer.json (Laravel active le premier
 par défaut). Le suffixe des classes d'init est le content-hash du lock
 (Composer ≥ 2.2), donc déterministe et identique entre les deux outils.
+
+## 2026-09-10 — M5 : mesurer avant d'optimiser a évité deux fausses pistes
+
+La décomposition (bench/M5-perf.md) a montré que le « scan plus lent que
+Composer » était un cache de pages froid, et que paralléliser la LECTURE est
+contre-productif sur APFS (3-4× plus lent). Optimisations retenues : détection
+parallèle sur le CPU (threads scoped std, pas de dépendance rayon), `realpath`
+seulement sous symlink, et surtout un cache de classmap par entrée de store.
+
+## 2026-09-10 — Cache de classmap : classes brutes par fichier, sémantique rejouée
+
+Le cache ne stocke que la sortie de `find_classes` par fichier (ordre de
+parcours) ; exclusions, dédoublonnage, filtre PSR et ambiguïtés sont rejoués à
+chaque dump. Ainsi le cache ne dépend ni du projet ni des règles d'autoload,
+seulement de l'entrée de store (immuable) et du sous-répertoire. Un arbre avec
+symlink n'est jamais caché. Contrat assumé : vendor/ immuable entre installs
+(documenté ; `VIVACE_NO_CLASSMAP_CACHE=1` pour l'ignorer). Alternative écartée :
+mettre en cache la classmap finale par projet — dépendante des exclusions et
+des chemins, plus fragile pour un gain identique.

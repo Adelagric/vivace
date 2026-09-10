@@ -1966,6 +1966,7 @@ dependencies = [
  "md-5",
  "pcre2",
  "serde_json",
+ "sha1",
  "tempfile",
  "thiserror",
  "vivace-core",

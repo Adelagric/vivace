@@ -27,12 +27,12 @@ message explicite (jamais de skip silencieux).
 | M2 fetch + store + clone + état + proxies + CLI | terminé (`--no-autoloader`) | harness/diff-vendor.sh : 0 diff × 3 fixtures ; bench/M2-install.md |
 | M3 autoload (normal, -o, -a, --no-dev) | terminé | harness --with-autoloader : 0 diff × 3 fixtures ; oracle classmap ~50k fichiers ; bench/M3-autoload.md |
 | M4 harness formel (normalisations, boot, CI Linux) | à faire (script shell en place) | — |
-| M5 benchmarks + perf classmap | à faire (mesures M0/M2/M3 faites ; scan -o à optimiser : cache par entrée de store, parallélisme) | bench/M3-autoload.md « lecture honnête » |
+| M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
 | M6 sortie publique | à faire | — |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
-- **Perf du scan de classmap optimisé** : plus lent que Composer sur Sylius `-o` (~3,5 s vs ~1,8 s) et no-op Laravel à 449 ms (config optimize-autoloader). Plan M5 dans bench/M3-autoload.md.
+- **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. No-op Laravel à 54 ms (objectif 50).
 - **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
 
 - **Linux** : jamais exécuté. Le clone y passera par hardlinks (clone.rs) —

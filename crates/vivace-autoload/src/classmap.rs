@@ -334,6 +334,120 @@ impl ClassFinder {
     }
 }
 
+/// Détection en parallèle (threads scoped, un `ClassFinder` par thread —
+/// les regex pcre2 ne se partagent pas), résultats dans l'ordre d'entrée
+/// pour préserver « le premier gagne ».
+fn find_all_parallel(
+    todo: &[(PathBuf, PathBuf, Vec<u8>)],
+) -> Result<Vec<Vec<Vec<u8>>>, ClassMapError> {
+    if todo.is_empty() {
+        return Ok(Vec::new());
+    }
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(todo.len())
+        .max(1);
+    let chunk_size = todo.len().div_ceil(threads);
+    let results: Vec<Result<Vec<Vec<Vec<u8>>>, ClassMapError>> = std::thread::scope(|s| {
+        let handles: Vec<_> = todo
+            .chunks(chunk_size)
+            .map(|chunk| {
+                s.spawn(move || {
+                    let finder = ClassFinder::new()?;
+                    chunk
+                        .iter()
+                        .map(|(_, _, contents)| finder.find_classes(contents))
+                        .collect::<Result<Vec<_>, _>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    Err(ClassMapError::Regex("thread de scan interrompu".into()))
+                })
+            })
+            .collect()
+    });
+    let mut out = Vec::with_capacity(todo.len());
+    for r in results {
+        out.extend(r?);
+    }
+    Ok(out)
+}
+
+/// Version du format/algorithme de scan : à incrémenter dès que la détection
+/// change, pour invalider les caches existants.
+const CACHE_FORMAT: &str = "v1";
+
+/// Emplacement de cache pour le scan d'un répertoire d'une entrée de store :
+/// clé = entrée (nom/version/ref) + sous-répertoire relatif + version du format.
+pub struct CacheSlot {
+    file: PathBuf,
+}
+
+impl CacheSlot {
+    pub fn new(cache_root: &Path, store_entry: &Path, rel_subdir: &Path) -> CacheSlot {
+        use sha1::{Digest, Sha1};
+        let mut h = Sha1::new();
+        h.update(CACHE_FORMAT.as_bytes());
+        h.update(b"\0");
+        h.update(store_entry.to_string_lossy().as_bytes());
+        h.update(b"\0");
+        h.update(rel_subdir.to_string_lossy().as_bytes());
+        let key: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        CacheSlot {
+            file: cache_root.join("classmap").join(format!("{key}.json")),
+        }
+    }
+
+    /// Entrées (chemin relatif, classes brutes) dans l'ordre de parcours.
+    fn load(&self) -> Option<Vec<(PathBuf, Vec<Vec<u8>>)>> {
+        use base64::Engine as _;
+        let text = std::fs::read(&self.file).ok()?;
+        let raw: Vec<(String, Vec<String>)> = serde_json::from_slice(&text).ok()?;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut out = Vec::with_capacity(raw.len());
+        for (rel, classes) in raw {
+            let mut decoded = Vec::with_capacity(classes.len());
+            for c in classes {
+                decoded.push(engine.decode(c).ok()?);
+            }
+            out.push((PathBuf::from(rel), decoded));
+        }
+        Some(out)
+    }
+
+    fn store(&self, base: &Path, files: &[(PathBuf, PathBuf, Vec<Vec<u8>>)]) {
+        use base64::Engine as _;
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut raw: Vec<(String, Vec<String>)> = Vec::with_capacity(files.len());
+        for (file, _, classes) in files {
+            let Ok(rel) = file.strip_prefix(base) else {
+                return; // hors de la base : on ne cache pas
+            };
+            raw.push((
+                rel.to_string_lossy().into_owned(),
+                classes.iter().map(|c| engine.encode(c)).collect(),
+            ));
+        }
+        let Ok(json) = serde_json::to_vec(&raw) else {
+            return;
+        };
+        if let Some(parent) = self.file.parent() {
+            if std::fs::create_dir_all(parent).is_err() {
+                return;
+            }
+        }
+        let tmp = self.file.with_extension("json.tmp");
+        if std::fs::write(&tmp, json).is_ok() {
+            let _ = std::fs::rename(&tmp, &self.file);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AutoloadType {
     ClassMap,
@@ -351,7 +465,6 @@ pub struct ClassMap {
 }
 
 pub struct Scanner {
-    finder: ClassFinder,
     pub class_map: ClassMap,
     scanned: BTreeSet<PathBuf>,
 }
@@ -370,8 +483,8 @@ const VCS_DIRS: [&str; 9] = [
 
 impl Scanner {
     pub fn new() -> Result<Scanner, ClassMapError> {
+        ClassFinder::new()?; // valide les regex tôt
         Ok(Scanner {
-            finder: ClassFinder::new()?,
             class_map: ClassMap::default(),
             scanned: BTreeSet::new(),
         })
@@ -394,44 +507,55 @@ impl Scanner {
         autoload_type: AutoloadType,
         namespace: &str,
     ) -> Result<(), ClassMapError> {
+        self.scan_path_cached(path, excluded, autoload_type, namespace, None)
+    }
+
+    /// `scan_path` avec, pour un répertoire d'une entrée de store (immuable),
+    /// un cache des classes brutes par fichier : la lecture et la détection
+    /// sont sautées, tout le reste (exclusions, dédoublonnage, filtre PSR,
+    /// ambiguïtés) est rejoué à l'identique.
+    pub fn scan_path_cached(
+        &mut self,
+        path: &Path,
+        excluded: Option<&pcre2::bytes::Regex>,
+        autoload_type: AutoloadType,
+        namespace: &str,
+        cache: Option<&CacheSlot>,
+    ) -> Result<(), ClassMapError> {
         let base_path = normalize_path(&path.to_string_lossy());
-        let mut files: Vec<PathBuf> = Vec::new();
-        if path.is_file() {
-            files.push(path.to_path_buf());
-        } else if path.is_dir() {
-            for entry in walkdir::WalkDir::new(path)
-                .follow_links(true)
-                .sort_by_file_name()
-                .into_iter()
-                .filter_entry(|e| {
-                    if e.depth() == 0 {
-                        return true;
-                    }
-                    let name = e.file_name().to_string_lossy();
-                    !(name.starts_with('.') || VCS_DIRS.contains(&name.as_ref()))
-                })
-                .filter_map(Result::ok)
-            {
-                if entry.file_type().is_file() {
-                    files.push(entry.into_path());
-                }
+
+        // (chemin, chemin réel, classes brutes) dans l'ordre de parcours.
+        let mut scanned_files: Vec<(PathBuf, PathBuf, Vec<Vec<u8>>)> = Vec::new();
+
+        let cached = cache.and_then(|c| c.load());
+        if let Some(entries) = cached {
+            let base_real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            for (rel, classes) in entries {
+                scanned_files.push((path.join(&rel), base_real.join(&rel), classes));
             }
         } else {
-            return Err(ClassMapError::MissingPath(
-                path.to_string_lossy().into_owned(),
-            ));
+            let (files, saw_symlink) = self.collect_files(path)?;
+            // Lecture séquentielle (la lecture parallèle est plus lente sur
+            // APFS), détection en parallèle sur le CPU.
+            let mut todo: Vec<(PathBuf, PathBuf, Vec<u8>)> = Vec::new();
+            for (file, real) in files {
+                let contents =
+                    std::fs::read(&file).map_err(|_| ClassMapError::Read(file.clone()))?;
+                todo.push((file, real, contents));
+            }
+            let found = find_all_parallel(&todo)?;
+            for ((file, real, _), classes) in todo.into_iter().zip(found) {
+                scanned_files.push((file, real, classes));
+            }
+            if let Some(c) = cache {
+                if !saw_symlink {
+                    c.store(path, &scanned_files);
+                }
+            }
         }
 
-        for file in files {
-            let ext = file
-                .extension()
-                .map(|e| e.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if !matches!(ext.as_str(), "php" | "inc" | "hh") {
-                continue;
-            }
+        for (file, real, classes) in scanned_files {
             let file_path = normalize_path(&file.to_string_lossy());
-            let real = std::fs::canonicalize(&file).unwrap_or_else(|_| file.clone());
             if self.scanned.contains(&real) {
                 continue;
             }
@@ -443,8 +567,7 @@ impl Scanner {
                     continue;
                 }
             }
-            let contents = std::fs::read(&file).map_err(|_| ClassMapError::Read(file.clone()))?;
-            let mut classes = self.finder.find_classes(&contents)?;
+            let mut classes = classes;
             if autoload_type != AutoloadType::ClassMap {
                 classes = self.filter_by_namespace(
                     classes,
@@ -474,6 +597,69 @@ impl Scanner {
             }
         }
         Ok(())
+    }
+
+    /// Parcours à la Finder : (chemin, chemin réel) des fichiers php/inc/hh,
+    /// et si un symlink a été traversé (le cache est alors désactivé).
+    fn collect_files(&self, path: &Path) -> Result<(Vec<(PathBuf, PathBuf)>, bool), ClassMapError> {
+        let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut saw_symlink = false;
+        if path.is_file() {
+            let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            files.push((path.to_path_buf(), real));
+        } else if path.is_dir() {
+            let base_real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let mut symlinked_dirs: Vec<PathBuf> = Vec::new();
+            for entry in walkdir::WalkDir::new(path)
+                .follow_links(true)
+                .sort_by_file_name()
+                .into_iter()
+                .filter_entry(|e| {
+                    if e.depth() == 0 {
+                        return true;
+                    }
+                    let name = e.file_name().to_string_lossy();
+                    !(name.starts_with('.') || VCS_DIRS.contains(&name.as_ref()))
+                })
+                .filter_map(Result::ok)
+            {
+                if entry.path_is_symlink() {
+                    saw_symlink = true;
+                }
+                if entry.file_type().is_dir() {
+                    if entry.path_is_symlink() {
+                        symlinked_dirs.push(entry.path().to_path_buf());
+                    }
+                    continue;
+                }
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let p = entry.into_path();
+                let ext = p
+                    .extension()
+                    .map(|e| e.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if !matches!(ext.as_str(), "php" | "inc" | "hh") {
+                    continue;
+                }
+                let under_symlink = symlinked_dirs.iter().any(|d| p.starts_with(d));
+                let real = if under_symlink {
+                    std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone())
+                } else {
+                    match p.strip_prefix(path) {
+                        Ok(rel) => base_real.join(rel),
+                        Err(_) => std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone()),
+                    }
+                };
+                files.push((p, real));
+            }
+        } else {
+            return Err(ClassMapError::MissingPath(
+                path.to_string_lossy().into_owned(),
+            ));
+        }
+        Ok((files, saw_symlink))
     }
 
     fn filter_by_namespace(
@@ -620,5 +806,74 @@ final class Last implements Qux {}
     fn no_php_tag_means_nothing() {
         assert!(classes("class Foo {}").is_empty());
         assert!(classes("   \n").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn write(p: &Path, content: &[u8]) {
+        std::fs::create_dir_all(p.parent().expect("parent")).expect("mkdir");
+        std::fs::write(p, content).expect("write");
+    }
+
+    /// Un scan servi par le cache doit produire exactement la même classmap
+    /// (classes, chemins, ambiguïtés) qu'un scan direct — y compris pour les
+    /// noms non-UTF-8 et les fichiers sans classe.
+    #[test]
+    fn cached_scan_equals_direct_scan() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let pkg = tmp.path().join("store/acme/lib/1.0.0-abc");
+        write(
+            &pkg.join("src/A.php"),
+            b"<?php\nnamespace Acme;\nclass A {}\n",
+        );
+        write(
+            &pkg.join("src/Sub/B.php"),
+            b"<?php\nnamespace Acme\\Sub;\nclass B {}\ninterface I {}\n",
+        );
+        write(&pkg.join("src/raw.php"), b"<?php\nclass \x7f {}\n");
+        write(&pkg.join("src/nothing.php"), b"<?php\n// rien\n");
+        write(
+            &pkg.join("src/dup.php"),
+            b"<?php\nnamespace Acme;\nclass A {}\n",
+        );
+        let cache_root = tmp.path().join("cache");
+        let slot = CacheSlot::new(&cache_root, &pkg, Path::new("src"));
+
+        let run = |slot: Option<&CacheSlot>| {
+            let mut s = Scanner::new().expect("scanner");
+            s.scan_path_cached(&pkg.join("src"), None, AutoloadType::ClassMap, "", slot)
+                .expect("scan");
+            (s.class_map.map, s.class_map.ambiguous)
+        };
+        let direct = run(None);
+        let first = run(Some(&slot)); // remplit le cache
+        assert!(slot.file.is_file(), "cache non écrit");
+        let cached = run(Some(&slot)); // servi par le cache
+        assert_eq!(direct, first);
+        assert_eq!(direct, cached);
+        assert_eq!(direct.0.len(), 4);
+        assert!(direct.0.contains_key(&vec![0x7fu8]));
+        assert_eq!(direct.1.len(), 1, "l'ambiguïté Acme\\A doit être rejouée");
+    }
+
+    #[test]
+    fn symlinked_tree_is_not_cached() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let pkg = tmp.path().join("pkg");
+        write(&pkg.join("real/X.php"), b"<?php\nclass X {}\n");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(pkg.join("real"), pkg.join("link")).expect("ln");
+        let slot = CacheSlot::new(tmp.path(), &pkg, Path::new(""));
+        let mut s = Scanner::new().expect("scanner");
+        s.scan_path_cached(&pkg, None, AutoloadType::ClassMap, "", Some(&slot))
+            .expect("scan");
+        #[cfg(unix)]
+        assert!(
+            !slot.file.exists(),
+            "un arbre avec symlink ne doit pas être caché"
+        );
     }
 }

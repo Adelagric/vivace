@@ -56,6 +56,15 @@ pub struct DumpOptions {
     pub ignore_all_platform_reqs: bool,
     pub ignored_platform_reqs: Vec<String>,
     pub suffix: Option<String>,
+    /// Racine du store + racine du cache : active le cache de classmap par
+    /// entrée de store (None = scan complet à chaque fois).
+    pub classmap_cache: Option<ClassmapCacheConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClassmapCacheConfig {
+    pub store_root: PathBuf,
+    pub cache_root: PathBuf,
 }
 
 #[derive(Debug, Default)]
@@ -223,6 +232,41 @@ pub fn dump(
         });
     }
 
+    // Cache de classmap : chemin d'installation absolu → entrée de store.
+    let store_entries: Vec<(String, PathBuf)> = match &opts.classmap_cache {
+        Some(cfg) => {
+            let store = vivace_core::store::Store::at(cfg.store_root.clone());
+            lock.wanted_packages(opts.dev_mode)
+                .filter(|p| !p.is_metapackage())
+                .map(|p| {
+                    (
+                        format!("{vendor_path}/{}", p.install_subpath()),
+                        store.entry_path(p.name(), p.version(), p.dist_reference()),
+                    )
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let cache_slot = |abs: &str| -> Option<crate::classmap::CacheSlot> {
+        let cfg = opts.classmap_cache.as_ref()?;
+        let (install, entry) = store_entries
+            .iter()
+            .find(|(install, _)| abs == install || abs.starts_with(&format!("{install}/")))?;
+        if !entry.is_dir() {
+            return None;
+        }
+        let rel = abs
+            .strip_prefix(install)
+            .unwrap_or("")
+            .trim_start_matches('/');
+        Some(crate::classmap::CacheSlot::new(
+            &cfg.cache_root,
+            entry,
+            Path::new(rel),
+        ))
+    };
+
     let autoloads = parse_autoloads(&packages, opts.dev_mode, &base_path);
 
     // autoload_namespaces.php / autoload_psr4.php
@@ -247,7 +291,14 @@ pub fn dump(
     for dir in &autoloads.classmap {
         let abs = absolute(&base_path, dir);
         let excl = build_exclusion_regex(&abs, &autoloads.exclude, &base_path)?;
-        scanner.scan_path(Path::new(&abs), excl.as_ref(), AutoloadType::ClassMap, "")?;
+        let slot = cache_slot(&normalize_path(&abs));
+        scanner.scan_path_cached(
+            Path::new(&abs),
+            excl.as_ref(),
+            AutoloadType::ClassMap,
+            "",
+            slot.as_ref(),
+        )?;
     }
     if opts.optimize || opts.authoritative {
         // krsort des namespaces, psr-4 puis psr-0 dans chaque groupe
@@ -276,7 +327,14 @@ pub fn dump(
                         excluded.push(format!("{vendor_path}/"));
                     }
                     let excl = build_exclusion_regex(&abs, &excluded, &base_path)?;
-                    scanner.scan_path(Path::new(&abs), excl.as_ref(), *ty, ns)?;
+                    let slot = cache_slot(&abs);
+                    scanner.scan_path_cached(
+                        Path::new(&abs),
+                        excl.as_ref(),
+                        *ty,
+                        ns,
+                        slot.as_ref(),
+                    )?;
                 }
             }
         }

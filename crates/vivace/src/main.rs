@@ -263,6 +263,14 @@ fn dump_autoload(
         ignore_all_platform_reqs: ignore_all || ignored.iter().any(|p| p == "*"),
         ignored_platform_reqs: ignored.to_vec(),
         suffix: None,
+        classmap_cache: if std::env::var_os("VIVACE_NO_CLASSMAP_CACHE").is_some() {
+            None
+        } else {
+            Some(vivace_autoload::ClassmapCacheConfig {
+                store_root: vivace_core::platform::cache_dir().join("store"),
+                cache_root: vivace_core::platform::cache_dir(),
+            })
+        },
     };
     let report = vivace_autoload::dump(project, lock, manifest, &opts)?;
     for w in &report.warnings {

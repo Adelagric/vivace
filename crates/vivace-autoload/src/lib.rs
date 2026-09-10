@@ -7,4 +7,6 @@ pub mod pathutil;
 pub mod sorter;
 pub mod templates;
 
-pub use generator::{dump, AutoloadError, DumpOptions, DumpReport, PlatformCheckMode};
+pub use generator::{
+    dump, AutoloadError, ClassmapCacheConfig, DumpOptions, DumpReport, PlatformCheckMode,
+};
