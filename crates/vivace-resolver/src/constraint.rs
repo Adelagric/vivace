@@ -706,7 +706,8 @@ fn parse_constraint(input: &str) -> Result<Vec<Constraint>, VersionError> {
         }
         let low = normalize(at(1), None)?;
         let lower = Constraint::new(Op::Ge, format!("{low}{low_suffix}"));
-        let php_empty = |s: &str| !(s == "0") && (s.is_empty());
+        // `$empty` : "0" n'est pas vide, "" l'est.
+        let php_empty = |s: &str| s.is_empty();
         let upper = if (!php_empty(at(12)) && !php_empty(at(13)))
             || !empty(at(15))
             || !empty(at(17))
