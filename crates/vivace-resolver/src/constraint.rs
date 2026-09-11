@@ -165,9 +165,10 @@ impl Constraint {
         version_compare_op(a, b, op.as_str())
     }
 
-    /// `Constraint::matchSpecific($provider)` : `self` est la contrainte,
-    /// `provider` la version proposée (ou une autre contrainte simple).
-    fn match_specific(&self, provider: &Constraint, compare_branches: bool) -> bool {
+    /// `Constraint::matchSpecific($provider, $compareBranches)` : `self` est
+    /// la contrainte, `provider` la version proposée (ou une autre
+    /// contrainte simple).
+    pub fn match_specific(&self, provider: &Constraint, compare_branches: bool) -> bool {
         let (
             Constraint::Single { op, version },
             Constraint::Single {

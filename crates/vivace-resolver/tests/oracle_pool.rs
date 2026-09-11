@@ -11,7 +11,17 @@ use std::process::Command;
 use vivace_resolver::package::{Links, Origin, Package};
 use vivace_resolver::session::UpdateSession;
 
-const FIXTURES: &[&str] = &["laravel", "symfony", "sylius", "rector", "drupal"];
+const FIXTURES: &[&str] = &[
+    "laravel",
+    "symfony",
+    "sylius",
+    "rector",
+    "drupal",
+    "solver-backtrack",
+    "solver-conflict",
+    "solver-aliases",
+    "solver-providers",
+];
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -64,7 +74,7 @@ fn entry(arena: &[Package], idx: usize) -> Value {
         "name": p.name,
         "version": p.version,
         "pretty": p.pretty_version,
-        "repo": match p.origin { Origin::Root => "root", Origin::Platform => "platform", Origin::Locked => "locked", Origin::Repository(_) => "repo" },
+        "repo": match p.origin { Origin::Root => "root", Origin::Platform => "platform", Origin::Locked => "locked", Origin::Repository(_) => "repo", Origin::Detached => "none" },
         "alias_of": p.alias_of.map(|b| arena[b].version.clone()),
         "root_alias": p.alias_of.map(|_| p.root_package_alias),
         "default_branch": p.is_default_branch,
@@ -154,10 +164,13 @@ fn setup(fx: &str) -> Setup {
     }
 }
 
-fn oracle(s: &Setup) -> Value {
-    let out = Command::new("php")
-        .arg(root().join("tools/oracle-pool.php"))
-        .arg(phar())
+fn oracle(s: &Setup, solve: bool) -> Value {
+    let mut cmd = Command::new("php");
+    cmd.arg(root().join("tools/oracle-pool.php")).arg(phar());
+    if solve {
+        cmd.arg("--solve");
+    }
+    let out = cmd
         .current_dir(&s.project)
         .env("COMPOSER_HOME", &s.home)
         .env("COMPOSER_CACHE_DIR", s.home.join("cache"))
@@ -211,7 +224,7 @@ fn pool_matches_composer_on_snapshots() {
             continue;
         }
         let s = setup(fx);
-        let expected = oracle(&s);
+        let expected = oracle(&s, false);
         // Même variable d'environnement que l'oracle (lue par la détection de
         // version racine) ; les fixtures s'enchaînent dans un seul test.
         std::env::set_var("COMPOSER_ROOT_VERSION", &s.root_version);
@@ -228,4 +241,161 @@ fn pool_matches_composer_on_snapshots() {
         total += compare(fx, &expected, &got);
     }
     assert_eq!(total, 0, "pool ≠ Composer");
+}
+
+/// R2 : pool optimisé, règles, décisions dans l'ordre, opérations et paquets
+/// du lock identiques à Composer.
+#[test]
+fn solve_matches_composer_on_snapshots() {
+    use vivace_resolver::platform_filter::PlatformRequirementFilter;
+    use vivace_resolver::transaction::Operation;
+    let only: Option<String> = std::env::var("VIVACE_ORACLE_FIXTURE").ok();
+    let mut total = 0;
+    for fx in FIXTURES {
+        if only.as_deref().is_some_and(|o| o != *fx) {
+            continue;
+        }
+        let s = setup(fx);
+        let expected = oracle(&s, true);
+        std::env::set_var("COMPOSER_ROOT_VERSION", &s.root_version);
+        let mut session = UpdateSession::prepare(&s.project, Some(&s.home), true)
+            .unwrap_or_else(|e| panic!("{fx}: {e}"));
+        let mut policy = session.policy();
+        let pool = session
+            .create_optimized_pool(&mut policy)
+            .unwrap_or_else(|e| panic!("{fx}: {e}"));
+        let got: Vec<Value> = pool
+            .packages
+            .iter()
+            .map(|idx| entry(&session.arena, *idx))
+            .collect();
+        let pool_divergences = compare(fx, &expected, &got);
+        total += pool_divergences;
+        if pool_divergences > 0 {
+            continue;
+        }
+        let solved = session.solve(
+            &pool,
+            &mut policy,
+            &PlatformRequirementFilter::IgnoreNothing,
+        );
+        if let Some(problems) = expected.get("problems") {
+            match solved {
+                Err(vivace_resolver::solver::SolveError::Problems(p)) => {
+                    eprintln!(
+                        "{fx}: insoluble des deux côtés ({} problème(s) chez vivace)",
+                        p.len()
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{fx}: Composer n'a pas de solution, vivace échoue autrement : {e:?}"
+                    );
+                    total += 1;
+                }
+                Ok(_) => {
+                    eprintln!(
+                        "{fx}: Composer n'a pas de solution, vivace en trouve une :\n{problems}"
+                    );
+                    total += 1;
+                }
+            }
+            continue;
+        }
+        let report = match solved {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{fx}: vivace n'a pas de solution : {e:?}");
+                total += 1;
+                continue;
+            }
+        };
+        let (transaction, decisions, rules, learned) = (
+            report.transaction,
+            report.decisions,
+            report.rules,
+            report.learned,
+        );
+        let arena = &session.arena;
+        let exp_rules = expected["rules"].as_u64().unwrap_or(0) as usize;
+        let exp_learned = expected["learned"].as_u64().unwrap_or(0) as usize;
+        let exp_decisions: Vec<i64> = expected["decisions"]
+            .as_array()
+            .expect("decisions")
+            .iter()
+            .map(|v| v.as_i64().expect("int"))
+            .collect();
+        let exp_ops: Vec<Value> = expected["operations"]
+            .as_array()
+            .expect("operations")
+            .clone();
+        let exp_lock: Vec<Value> = expected["lock"].as_array().expect("lock").clone();
+        let ops: Vec<Value> = transaction
+            .transaction
+            .operations
+            .iter()
+            .map(|op| match op {
+                Operation::Install(p) => json!(["install", arena[*p].name, arena[*p].version]),
+                Operation::Update(i, t) => json!([
+                    "update",
+                    arena[*i].name,
+                    arena[*i].version,
+                    arena[*t].version
+                ]),
+                Operation::Uninstall(p) => json!(["uninstall", arena[*p].name, arena[*p].version]),
+                Operation::MarkAliasInstalled(p) => {
+                    json!(["markAliasInstalled", arena[*p].name, arena[*p].version])
+                }
+                Operation::MarkAliasUninstalled(p) => {
+                    json!(["markAliasUninstalled", arena[*p].name, arena[*p].version])
+                }
+            })
+            .collect();
+        let lock: Vec<Value> = transaction
+            .new_lock_packages(arena, false)
+            .iter()
+            .map(|&p| json!([arena[p].name, arena[p].version]))
+            .collect();
+        let mut d = 0;
+        if rules != exp_rules || learned != exp_learned {
+            eprintln!("{fx}: règles composer {exp_rules} (apprises {exp_learned}), vivace {rules} (apprises {learned})");
+            d += 1;
+        }
+        if decisions != exp_decisions {
+            let first = decisions
+                .iter()
+                .zip(&exp_decisions)
+                .position(|(a, b)| a != b);
+            eprintln!(
+                "{fx}: décisions composer {} / vivace {}, première divergence à {:?} (composer {:?}, vivace {:?})",
+                exp_decisions.len(),
+                decisions.len(),
+                first,
+                first.map(|i| exp_decisions[i]),
+                first.map(|i| decisions[i])
+            );
+            d += 1;
+        }
+        if ops != exp_ops {
+            eprintln!("{fx}: opérations composer {exp_ops:?}\n  vivace {ops:?}");
+            d += 1;
+        }
+        if lock != exp_lock {
+            eprintln!(
+                "{fx}: lock composer {} paquets, vivace {} paquets",
+                exp_lock.len(),
+                lock.len()
+            );
+            d += 1;
+        }
+        eprintln!(
+            "{fx}: pool optimisé {} paquets, {rules} règles ({learned} apprises), {} décisions, {} opérations, {} paquets de lock — {d} divergence(s)",
+            pool.len(),
+            decisions.len(),
+            ops.len(),
+            lock.len()
+        );
+        total += d;
+    }
+    assert_eq!(total, 0, "solve ≠ Composer");
 }

@@ -1,0 +1,8 @@
+{
+    "name": "vivace/solver-conflict",
+    "description": "Solver case: unsolvable (monolog 3 needs psr/log 2 or 3)",
+    "require": {
+        "monolog/monolog": "^3",
+        "psr/log": "^1.0"
+    }
+}

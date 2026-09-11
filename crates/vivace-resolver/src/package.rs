@@ -124,6 +124,8 @@ pub enum Origin {
     Locked,
     /// Index du dépôt distant dans la liste des dépôts.
     Repository(usize),
+    /// Aucun dépôt : alias racine créé par `PoolBuilder::loadPackage`.
+    Detached,
 }
 
 #[derive(Debug, Clone)]

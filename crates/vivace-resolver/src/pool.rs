@@ -258,6 +258,9 @@ impl RepositorySet {
 /// de construction.
 #[derive(Debug, Clone, Default)]
 pub struct Pool {
+    /// Identité du pool (`spl_object_id($pool)` chez Composer) : les caches
+    /// de la politique sont indexés par pool.
+    pub identity: u64,
     /// id - 1 → index d'arène.
     pub packages: Vec<usize>,
     id_of: HashMap<usize, usize>,
@@ -268,7 +271,9 @@ pub struct Pool {
 
 impl Pool {
     pub fn new(packages: Vec<usize>, unacceptable: Vec<usize>, arena: &[Package]) -> Pool {
+        static NEXT_IDENTITY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let mut pool = Pool {
+            identity: NEXT_IDENTITY.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             packages: Vec::with_capacity(packages.len()),
             id_of: HashMap::new(),
             package_by_name: HashMap::new(),
@@ -730,6 +735,7 @@ impl<'a> PoolBuilder<'a> {
                 let base = arena[idx].alias_of.unwrap_or(idx);
                 let mut alias_package = arena[base].alias(base, alias_normalized, alias);
                 alias_package.root_package_alias = true;
+                alias_package.origin = Origin::Detached;
                 arena.push(alias_package);
                 let alias_idx = arena.len() - 1;
                 let new_index = self.packages.len();

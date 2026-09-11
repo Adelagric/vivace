@@ -1,0 +1,11 @@
+{
+    "name": "vivace/solver-aliases",
+    "description": "Solver case: dev branches with root aliases (`as`) and branch aliases, prefer-stable on a dev minimum stability",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "nesbot/carbon": "dev-master as 3.99.0",
+        "symfony/translation": "^7.0",
+        "symfony/clock": "7.4.x-dev"
+    }
+}

@@ -33,8 +33,15 @@ for fx in "$@"; do
   # côtés du harness.
   root_version=""
   [ "$fx" = "rector" ] && root_version="dev-main"
-  ( cd "$work" && COMPOSER_CACHE_DIR="$work/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      composer update --no-install --no-scripts --no-plugins --no-interaction --no-audit --quiet )
+  # Une fixture volontairement insoluble (cas de test du solveur) est
+  # acceptée : le cache est rempli avant l'échec, et le rejeu doit échouer de
+  # la même façon ; elle n'a pas de lock de référence.
+  unsolvable=0
+  if ! ( cd "$work" && COMPOSER_CACHE_DIR="$work/cache" COMPOSER_ROOT_VERSION="$root_version" \
+      composer update --no-install --no-scripts --no-plugins --no-interaction --no-audit --quiet 2>"$work/update.log" ); then
+    grep -q "could not be resolved to an installable set of packages" "$work/update.log" || { echo "update failed for $fx:"; tail -20 "$work/update.log"; exit 1; }
+    unsolvable=1
+  fi
   cache="$work/cache/repo/https---repo.packagist.org"
   out="$work/registry"
   mkdir -p "$out/p2"
@@ -60,6 +67,10 @@ for fx in "$@"; do
   for _ in 1 2 3 4 5 6 7 8; do
     if (cd "$replay" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
           composer update --no-install --no-scripts --no-plugins --no-interaction --no-audit --quiet 2>"$work/replay.log"); then
+      [ "$unsolvable" = 0 ] || { echo "replay of $fx succeeded although Packagist resolution failed"; exit 1; }
+      break
+    fi
+    if [ "$unsolvable" = 1 ] && grep -q "could not be resolved to an installable set of packages" "$work/replay.log"; then
       break
     fi
     missing=$(tr -d '\n ' < "$work/replay.log" | grep -o "file://$out/p2/[^\"]*\.json" | sed "s|file://$out/p2/||; s|\.json$||" | head -1 || true)
@@ -69,19 +80,26 @@ for fx in "$@"; do
     virtual+=("$missing")
     rm -rf "$home/cache"
   done
-  diff -q "$replay/composer.lock" "$work/composer.lock" >/dev/null || { echo "replay lock differs for $fx"; exit 1; }
   rm -f "$out/packages.json"
-  # Lock de référence : résolu contre Packagist au moment de la capture, avec
-  # le composer.json intact (le harness injecte le dépôt local par la config
-  # globale, pas dans le manifeste : le content-hash fait partie de la parité).
-  cp "$work/composer.lock" "$out/composer.lock.expected"
+  if [ "$unsolvable" = 0 ]; then
+    diff -q "$replay/composer.lock" "$work/composer.lock" >/dev/null || { echo "replay lock differs for $fx"; exit 1; }
+    # Lock de référence : résolu contre Packagist au moment de la capture, avec
+    # le composer.json intact (le harness injecte le dépôt local par la config
+    # globale, pas dans le manifeste : le content-hash fait partie de la parité).
+    cp "$work/composer.lock" "$out/composer.lock.expected"
+  fi
   date -u +%Y-%m-%dT%H:%M:%SZ > "$out/SNAPSHOT"
   echo "composer $(composer --version --no-ansi 2>/dev/null | sed -n 's/^Composer version \([^ ]*\).*/\1/p')" >> "$out/SNAPSHOT"
+  [ "$unsolvable" = 1 ] && echo "unsolvable" >> "$out/SNAPSHOT"
   [ ${#virtual[@]} -gt 0 ] && printf 'virtual %s\n' "${virtual[@]}" >> "$out/SNAPSHOT"
   mkdir -p "$ROOT/fixtures/registry"
   # Sans métadonnées macOS : bsdtar stocke sinon les xattrs en entrées
   # AppleDouble `._*` que GNU tar extrait comme des fichiers (CI Linux).
   COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$out" -czf "$ROOT/fixtures/registry/$fx.tar.gz" .
-  echo "$fx : $n fichiers p2, ${#virtual[@]} virtuels, $(du -h "$ROOT/fixtures/registry/$fx.tar.gz" | cut -f1) — lock de référence : $(jq '.packages | length' "$work/composer.lock") paquets"
+  if [ "$unsolvable" = 1 ]; then
+    echo "$fx : $n fichiers p2, ${#virtual[@]} virtuels, $(du -h "$ROOT/fixtures/registry/$fx.tar.gz" | cut -f1) — insoluble (pas de lock de référence)"
+  else
+    echo "$fx : $n fichiers p2, ${#virtual[@]} virtuels, $(du -h "$ROOT/fixtures/registry/$fx.tar.gz" | cut -f1) — lock de référence : $(jq '.packages | length' "$work/composer.lock") paquets"
+  fi
   rm -rf "$work"
 done

@@ -5,11 +5,16 @@
 //! tools/oracle-pool.php côté Rust.
 
 use crate::constraint::{Constraint, Op};
+use crate::optimizer::PoolOptimizer;
 use crate::package::Package;
 use crate::platform::{platform_packages, probe};
+use crate::platform_filter::PlatformRequirementFilter;
+use crate::policy::DefaultPolicy;
 use crate::pool::{OrderedMap, Pool, PoolError, Repository, RepositorySet, Request};
 use crate::repository::{locked_repository, ComposerRepository, FileTransport};
 use crate::root::RootPackage;
+use crate::solver::{SolveError, Solver};
+use crate::transaction::LockTransaction;
 use crate::version::{parse_stability, regex, stability_rank};
 use pcre2::bytes::Regex;
 use serde_json::{Map, Value};
@@ -196,6 +201,17 @@ impl MergedConfig {
     }
 }
 
+/// Résultat d'un `solve` : la transaction et de quoi le comparer à Composer.
+pub struct SolveReport {
+    pub transaction: LockTransaction,
+    /// Littéraux décidés, dans l'ordre.
+    pub decisions: Vec<i64>,
+    /// `getRuleSetSize()`.
+    pub rules: usize,
+    /// Règles apprises (conflits rencontrés).
+    pub learned: usize,
+}
+
 /// Tout ce que `Installer::doUpdate` a en main juste avant `createPool`.
 pub struct UpdateSession {
     pub arena: Vec<Package>,
@@ -367,6 +383,47 @@ impl UpdateSession {
 
     pub fn create_pool(&mut self) -> Result<Pool, SessionError> {
         Ok(self.set.create_pool(&mut self.request, &mut self.arena)?)
+    }
+
+    /// `Installer::createPolicy(true, …)` sans `--prefer-lowest` ni
+    /// `--minimal-changes`.
+    pub fn policy(&self) -> DefaultPolicy {
+        DefaultPolicy::new(self.root.prefer_stable, false, None)
+    }
+
+    /// `createPool` avec le PoolOptimizer (sauf `COMPOSER_POOL_OPTIMIZER=0`),
+    /// comme `Installer::doUpdate`.
+    pub fn create_optimized_pool(
+        &mut self,
+        policy: &mut DefaultPolicy,
+    ) -> Result<Pool, SessionError> {
+        let pool = self.create_pool()?;
+        if std::env::var("COMPOSER_POOL_OPTIMIZER").as_deref() == Ok("0") {
+            return Ok(pool);
+        }
+        Ok(PoolOptimizer::new().optimize(&self.request, &pool, &self.arena, policy))
+    }
+
+    /// `Solver::solve` sur ce pool ; rend la transaction et les décisions
+    /// (littéraux du pool, dans l'ordre) avec la taille du jeu de règles.
+    pub fn solve(
+        &self,
+        pool: &Pool,
+        policy: &mut DefaultPolicy,
+        filter: &PlatformRequirementFilter,
+    ) -> Result<SolveReport, SolveError> {
+        let mut solver = Solver::new(pool, &self.arena);
+        let transaction = solver.solve(&self.request, policy, filter)?;
+        let decisions = solver.decisions.queue.iter().map(|d| d.literal).collect();
+        Ok(SolveReport {
+            learned: solver
+                .rules
+                .ids_of_type(crate::rule::RuleType::Learned)
+                .len(),
+            rules: solver.rule_set_size(),
+            decisions,
+            transaction,
+        })
     }
 }
 

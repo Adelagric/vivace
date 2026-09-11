@@ -1,0 +1,8 @@
+{
+    "name": "vivace/solver-backtrack",
+    "description": "Solver case: the highest phpunit needs a newer sebastian/version than the root allows, forcing conflict analysis and backtracking",
+    "require": {
+        "phpunit/phpunit": "^10 || ^11 || ^12",
+        "sebastian/version": "^4"
+    }
+}

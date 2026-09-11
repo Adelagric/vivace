@@ -6,7 +6,12 @@
 // requirePackagesForUpdate). Sortie JSON sur stdout : les paquets du pool
 // dans l'ordre (l'ordre est celui que le solveur verra).
 //
-// Usage : COMPOSER_HOME=… COMPOSER_ROOT_VERSION=… php tools/oracle-pool.php <composer.phar> [--no-dev]
+// Avec `--solve` (R2) : le pool passe par le PoolOptimizer comme dans
+// Installer::doUpdate, puis Solver::solve ; la sortie ajoute les décisions
+// dans l'ordre (littéraux du pool optimisé), la taille du jeu de règles,
+// les opérations de la LockTransaction et ses paquets pour le lock.
+//
+// Usage : COMPOSER_HOME=… COMPOSER_ROOT_VERSION=… php tools/oracle-pool.php <composer.phar> [--solve]
 declare(strict_types=1);
 ini_set("memory_limit", "-1");
 
@@ -17,7 +22,16 @@ if ($phar === null || !is_file($phar)) {
 }
 require "phar://$phar/vendor/autoload.php";
 
+use Composer\DependencyResolver\Operation\InstallOperation;
+use Composer\DependencyResolver\Operation\MarkAliasInstalledOperation;
+use Composer\DependencyResolver\Operation\MarkAliasUninstalledOperation;
+use Composer\DependencyResolver\Operation\UninstallOperation;
+use Composer\DependencyResolver\Operation\UpdateOperation;
+use Composer\DependencyResolver\DefaultPolicy;
+use Composer\DependencyResolver\PoolOptimizer;
 use Composer\DependencyResolver\Request;
+use Composer\DependencyResolver\Solver;
+use Composer\DependencyResolver\SolverProblemsException;
 use Composer\Factory;
 use Composer\IO\NullIO;
 use Composer\Package\AliasPackage;
@@ -76,7 +90,9 @@ foreach ($requires as $link) {
     $request->requireName($link->getTarget(), $link->getConstraint());
 }
 
-$pool = $repositorySet->createPool($request, $io);
+$solve = in_array('--solve', $argv, true);
+$policy = new DefaultPolicy($package->getPreferStable(), false, null);
+$pool = $repositorySet->createPool($request, $io, null, $solve ? new PoolOptimizer($policy) : null);
 
 // Indexé par la clé PHP du lien (cible en général, nom nu pour les lib-* de
 // la plateforme, numérique pour les liens self.version d'un alias) : c'est
@@ -94,7 +110,8 @@ foreach ($pool->getPackages() as $p) {
         'name' => $p->getName(),
         'version' => $p->getVersion(),
         'pretty' => $p->getPrettyVersion(),
-        'repo' => $p->getRepository() === $platformRepo ? 'platform' : ($p->getRepository() instanceof RootPackageRepository ? 'root' : ($p->getRepository() === $lockedRepository ? 'locked' : 'repo')),
+        // Un alias racine créé par PoolBuilder::loadPackage n'a pas de dépôt.
+        'repo' => $p->getRepository() === null ? 'none' : ($p->getRepository() === $platformRepo ? 'platform' : ($p->getRepository() instanceof RootPackageRepository ? 'root' : ($p->getRepository() === $lockedRepository ? 'locked' : 'repo'))),
         'alias_of' => $p instanceof AliasPackage ? $p->getAliasOf()->getVersion() : null,
         'root_alias' => $p instanceof AliasPackage ? $p->isRootPackageAlias() : null,
         'default_branch' => $p->isDefaultBranch(),
@@ -108,4 +125,45 @@ foreach ($pool->getPackages() as $p) {
     ];
     $out[] = $entry;
 }
-echo json_encode(['count' => count($out), 'packages' => $out], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
+$result = ['count' => count($out), 'packages' => $out];
+if ($solve) {
+    $solver = new Solver($policy, $pool, $io);
+    try {
+        $transaction = $solver->solve($request);
+    } catch (SolverProblemsException $e) {
+        $result['problems'] = $e->getPrettyString($repositorySet, $request, $pool, false);
+        echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";
+        exit(0);
+    }
+    $ref = new ReflectionProperty(Solver::class, 'decisions');
+    $decisions = $ref->getValue($solver);
+    $literals = [];
+    for ($i = 0; $i < count($decisions); $i++) {
+        $literals[] = $decisions->atOffset($i)[0];
+    }
+    $result['rules'] = $solver->getRuleSetSize();
+    $rulesRef = new ReflectionProperty(Solver::class, 'rules');
+    $result['learned'] = count($rulesRef->getValue($solver)->getRules()[Composer\DependencyResolver\RuleSet::TYPE_LEARNED]);
+    $result['decisions'] = $literals;
+    $ops = [];
+    foreach ($transaction->getOperations() as $op) {
+        if ($op instanceof InstallOperation) {
+            $ops[] = ['install', $op->getPackage()->getName(), $op->getPackage()->getVersion()];
+        } elseif ($op instanceof UpdateOperation) {
+            $ops[] = ['update', $op->getInitialPackage()->getName(), $op->getInitialPackage()->getVersion(), $op->getTargetPackage()->getVersion()];
+        } elseif ($op instanceof UninstallOperation) {
+            $ops[] = ['uninstall', $op->getPackage()->getName(), $op->getPackage()->getVersion()];
+        } elseif ($op instanceof MarkAliasInstalledOperation) {
+            $ops[] = ['markAliasInstalled', $op->getPackage()->getName(), $op->getPackage()->getVersion()];
+        } elseif ($op instanceof MarkAliasUninstalledOperation) {
+            $ops[] = ['markAliasUninstalled', $op->getPackage()->getName(), $op->getPackage()->getVersion()];
+        }
+    }
+    $result['operations'] = $ops;
+    $lock = [];
+    foreach ($transaction->getNewLockPackages(false) as $p) {
+        $lock[] = [$p->getName(), $p->getVersion()];
+    }
+    $result['lock'] = $lock;
+}
+echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), "\n";

@@ -15,3 +15,10 @@ The metadata is public Packagist data (package manifests published by their
 authors); it is test data, not part of vivace. `wordpress` has no snapshot:
 wpackagist speaks the Composer v1 provider protocol, out of scope for the
 resolver.
+
+The `solver-*` archives back the manifests in `fixtures/projects/solver-*`:
+small cases written for the solver oracle (`tests/oracle_pool.rs`) —
+backtracking, an unsolvable set (no reference lock, `unsolvable` in
+`SNAPSHOT`), root aliases on dev branches, virtual packages with several
+providers. They are resolved by `tools/oracle-pool.php --solve` and by
+vivace on the same snapshot; the decision sequences must be identical.

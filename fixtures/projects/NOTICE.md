@@ -42,3 +42,13 @@ locks five plugins: composer/installers and drupal/core-composer-scaffold
 (emulated), symfony/runtime (emulated), drupal/core-project-message and
 drupal/core-recipe-unpack (inert at install time). Boot check:
 `vendor/bin/dr --version`.
+
+`solver-*` are four small manifests written for the resolver oracle, with
+no lock and no vendor: `solver-backtrack` (phpunit `^10 || ^11 || ^12`
+against `sebastian/version ^4`), `solver-conflict` (monolog 3 with
+psr/log 1, deliberately unsolvable), `solver-aliases` (a `dev-master as
+3.99.0` root alias, a `7.4.x-dev` branch, `minimum-stability: dev` with
+`prefer-stable`), `solver-providers` (virtual packages with several
+providers, `symfony/polyfill-mbstring`). Their Packagist snapshots live in
+`fixtures/registry/solver-*.tar.gz`; `harness/update.sh` does not run them
+(they have nothing to install), `tests/oracle_pool.rs` does.
