@@ -34,7 +34,7 @@ pub struct Layout {
 /// Verdict d'`allow-plugins` pour un paquet, comme PluginManager en mode non
 /// interactif.
 #[derive(Debug, PartialEq, Eq)]
-enum PluginVerdict {
+pub enum PluginVerdict {
     Allowed,
     /// Explicitement refusé : Composer saute le plugin avec un avertissement.
     Blocked,
@@ -115,6 +115,15 @@ fn plugin_verdict(allow: Option<&Value>, package: &str) -> PluginVerdict {
         }
         _ => PluginVerdict::Unlisted,
     }
+}
+
+/// Verdict pour `package` sous la config du projet fusionnée avec la globale.
+pub fn plugin_allowed(manifest: &Value, package: &str) -> PluginVerdict {
+    let allow = merged_allow_plugins(
+        manifest.get("config").and_then(|c| c.get("allow-plugins")),
+        global_allow_plugins().as_ref(),
+    );
+    plugin_verdict(allow.as_ref(), package)
 }
 
 fn global_allow_plugins() -> Option<Value> {

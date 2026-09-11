@@ -13,8 +13,13 @@ use serde_json::Value;
 use std::path::Path;
 
 /// Plugins émulés nativement par vivace (sortie identique, test de drift).
-/// composer/installers l'est aussi, sous conditions (voir `layout`).
-pub const EMULATED_PLUGINS: &[&str] = &["symfony/runtime", "composer/installers"];
+/// composer/installers (voir `layout`) et drupal/core-composer-scaffold (voir
+/// `scaffold`) le sont sous conditions vérifiées avant toute écriture.
+pub const EMULATED_PLUGINS: &[&str] = &[
+    "symfony/runtime",
+    "composer/installers",
+    "drupal/core-composer-scaffold",
+];
 
 /// Plugins dont l'inaction est prouvée sans effet sur le contenu de vendor/
 /// nécessaire au boot (fixtures qualifiées avec `--no-plugins`). Installés
@@ -27,6 +32,12 @@ pub const BENIGN_PLUGINS: &[&str] = &[
     "phpstan/extension-installer",
     "rector/extension-installer",
     "pestphp/pest-plugin",
+    // N'écoute que POST_CREATE_PROJECT_CMD / POST_INSTALL_CMD pour afficher
+    // un message (MessagePlugin::getSubscribedEvents) : aucun effet disque.
+    "drupal/core-project-message",
+    // N'écoute que POST_UPDATE_CMD / POST_CREATE_PROJECT_CMD, et n'agit que
+    // dans un contexte `require` (Plugin::getSubscribedEvents) : inerte à l'install.
+    "drupal/core-recipe-unpack",
 ];
 
 /// Plugins connus pour modifier le layout d'installation ou le contenu des
@@ -73,6 +84,9 @@ pub struct ScopeReport {
     pub skipped_plugins: Vec<String>,
     /// Disposition résolue (None si une issue de layout bloque).
     pub layout: Option<Layout>,
+    /// drupal/core-composer-scaffold verrouillé et autorisé : l'installeur
+    /// vérifie l'empreinte de sa source et planifie le scaffold.
+    pub scaffold: bool,
 }
 
 impl ScopeReport {
@@ -94,6 +108,20 @@ pub fn analyze(
 
     for p in lock.wanted_packages(with_dev) {
         classify_package(p, &mut report);
+    }
+    if plugins_enabled
+        && lock
+            .wanted_packages(with_dev)
+            .any(|p| p.name() == crate::scaffold::PLUGIN)
+    {
+        match crate::layout::plugin_allowed(root_manifest, crate::scaffold::PLUGIN) {
+            crate::layout::PluginVerdict::Allowed => report.scaffold = true,
+            crate::layout::PluginVerdict::Blocked => {}
+            crate::layout::PluginVerdict::Unlisted => report.issues.push(ScopeIssue::Layout(format!(
+                "{} is a plugin not covered by config.allow-plugins (Composer would refuse to run it)",
+                crate::scaffold::PLUGIN
+            ))),
+        }
     }
     match Layout::resolve(project_dir, lock, root_manifest, with_dev, plugins_enabled) {
         Ok(layout) => report.layout = Some(layout),

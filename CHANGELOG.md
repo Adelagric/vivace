@@ -4,6 +4,29 @@ All notable changes to vivace. The format follows [Keep a Changelog](https://kee
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [0.3.0] — 2026-09-11
+
+### Added
+- **`drupal/core-composer-scaffold` emulated natively**: a stock
+  `drupal/recommended-project` installs with vivace alone — scaffolded web
+  root files, `web/autoload.php` / `autoload_runtime.php`, `.gitignore`
+  management, and the plugin's autoload-time additions (classmap entries,
+  `vendor/drupal/DrupalInstalled.php` with its xxh3 hash). Plugin versions
+  are recognised by the fingerprint of their source (116 of the 120
+  releases from 10.3.0 to 12.0.0-alpha1). Checked against the real plugin on
+  15 synthetic projects (whole trees compared) and on the whole Drupal fixture.
+- `drupal/core-project-message` and `drupal/core-recipe-unpack` classified
+  as inert at install time (installed as plain libraries).
+- Frozen fixture `drupal`; `harness/transitions.sh` (a plugin upgrade in
+  progress is handed to Composer before anything is written).
+
+### Fixed
+- `installed.json` no longer carries `installation-source` for
+  metapackages (Composer omits it).
+- `include_paths.php` (PEAR `include-path`) is written in `installed.json`
+  order, the order `composer dump-autoload` produces; `composer install`'s
+  own order depends on asynchronous extraction and varies between runs.
+
 ## [0.2.0] — 2026-09-10
 
 ### Added

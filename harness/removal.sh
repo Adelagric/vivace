@@ -18,6 +18,7 @@ removed_for() {
   case "$1" in
     wordpress) echo "wpackagist-plugin/hello-dolly monolog/monolog" ;;
     laravel)   echo "fakerphp/faker" ;;
+    drupal)    echo "drupal/core-project-message" ;;
   esac
 }
 
@@ -34,12 +35,12 @@ drop_packages() { # project-dir names... — retirés du lock ET du require de
 }
 
 status=0
-for fx in wordpress laravel; do
+for fx in wordpress laravel drupal; do
   src="$ROOT/fixtures/work/$fx"
   ref="$WORK/ref-$fx"; viv="$WORK/viv-$fx"
   rm -rf "$ref" "$viv"; mkdir -p "$ref" "$viv"
   for d in "$ref" "$viv"; do
-    (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var -cf - .) | (cd "$d" && tar -xf -)
+    (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var --exclude=./web --exclude=./wp-content --exclude=./recipes --exclude=./.editorconfig --exclude=./.gitattributes -cf - .) | (cd "$d" && tar -xf -)
     (cd "$d" && git init -q -b main && git add -A >/dev/null && \
       GIT_AUTHOR_NAME=vivace GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
       GIT_COMMITTER_NAME=vivace GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \

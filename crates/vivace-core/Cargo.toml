@@ -19,6 +19,7 @@ sha2.workspace = true
 tempfile.workspace = true
 md-5.workspace = true
 thiserror.workspace = true
+xxhash-rust.workspace = true
 hex = "=0.4.3"
 
 [dev-dependencies]

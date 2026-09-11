@@ -47,10 +47,11 @@ Packagist.
 Every claim above comes from a differential harness, not from unit tests
 alone: [`harness/diff-vendor.sh`](harness/diff-vendor.sh) runs `composer install`
 and `vivace install` on the same projects and `diff -r`s the two `vendor/`
-trees. It passes with **zero differences** on all five fixtures (Laravel, the
-Symfony demo, Sylius, rector-src, and a WordPress project laid out by
-`composer/installers` — compared as a whole project, since packages live
-outside `vendor/`), with and
+trees. It passes with **zero differences** on all six fixtures (Laravel, the
+Symfony demo, Sylius, rector-src, a WordPress project laid out by
+`composer/installers`, and a Drupal `recommended-project` — the last two
+compared as whole projects, since packages and scaffolded files live outside
+`vendor/`), with and
 without the autoloader, in normal, `-o`, `-a` and `--no-dev` modes, with a
 cold and a warm classmap cache. Class detection was checked against
 Composer's own `PhpFileParser::findClasses` on ~50 000 real PHP files. Every
@@ -78,12 +79,31 @@ naming logic (CakePHP, Grav, October/Winter, Shopware, Mautic, Matomo, …) and
 anything vivace would have to guess (absolute or out-of-project targets, two
 packages on one path) fall back to Composer with a message naming the reason.
 
+## Drupal
+
+`drupal/recommended-project` works out of the box: `drupal/core-composer-scaffold`
+is emulated — the files it copies into the web root (`index.php`,
+`.htaccess`, `sites/default/default.settings.php`, …), `web/autoload.php`
+and `autoload_runtime.php`, its `.gitignore` management, and the classmap
+additions plus `vendor/drupal/DrupalInstalled.php` it makes at autoload time.
+The port is checked against the real plugin on 15 synthetic projects (whole
+trees compared) and on the whole Drupal fixture (`vendor/bin/dr --version` boots on a vendor written by
+vivace alone). Any plugin version whose source vivace has not verified, a
+plugin upgrade in progress (vendor at one version, lock at another), a
+`file-mapping` that would overwrite a directory, and `symlink: true` fall
+back to Composer with a message. `drupal/core-project-message` and
+`drupal/core-recipe-unpack` do nothing at install time and are installed as
+plain libraries. Not yet: `cweagans/composer-patches` and
+`drupal/legacy-project` (`core-vendor-hardening`).
+
 ## What vivace does not do (v1)
 
 - **Resolve dependencies.** No `update`, no `require`: you need a
   `composer.lock`. (A PubGrub-based resolver is the natural next step.)
-- **Run scripts or plugins.** vivace never executes PHP. `symfony/runtime` is
-  emulated natively (its `autoload_runtime.php` stub); a short list of plugins
+- **Run scripts or plugins.** vivace never executes PHP. `symfony/runtime`,
+  `composer/installers` and `drupal/core-composer-scaffold` are emulated
+  natively; root `scripts` (including `pre/post-drupal-scaffold-cmd` hooks)
+  are never run; a short list of plugins
   proven harmless at install time (`symfony/flex`, `php-http/discovery`,
   `phpstan/extension-installer`, …) is installed as plain libraries with a
   notice. Post-install scripts such as Laravel's `package:discover` are yours
@@ -121,10 +141,11 @@ if you want the fallback.
 ## Development
 
 ```bash
-fixtures/make.sh        # once: creates and qualifies the five fixture projects (php + composer needed)
+fixtures/make.sh        # once: creates and qualifies the six fixture projects (php + composer needed)
 cargo test              # unit tests + differential tests against the real Composer phar
 harness/diff-vendor.sh --with-autoloader
 harness/removal.sh      # packages dropped from the lock disappear like with Composer
+harness/transitions.sh  # a plugin upgrade in progress is handed to Composer, disk untouched
 harness/boot.sh
 harness/drift-reference.sh   # docs/reference/ still matches the installed Composer
 harness/linux.sh        # the whole chain in a Linux container (Docker)

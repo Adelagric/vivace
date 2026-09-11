@@ -68,6 +68,8 @@ pub struct RootPackage {
     pub dev: bool,
     /// Alias de branche (`extra.branch-alias`) : version jolie de l'alias.
     pub aliases: Vec<String>,
+    /// Le même alias, normalisé (`RootAliasPackage::getVersion()`).
+    pub alias_normalized: Option<String>,
 }
 
 impl RootPackage {
@@ -86,9 +88,7 @@ impl RootPackage {
             .unwrap_or("library")
             .to_owned();
         let rv = crate::root_version::detect(manifest, project_dir);
-        let aliases = crate::root_version::branch_alias(manifest, &rv)
-            .map(|(_, pretty)| vec![pretty])
-            .unwrap_or_default();
+        let alias = crate::root_version::branch_alias(manifest, &rv);
         RootPackage {
             name,
             pretty_version: rv.pretty_version,
@@ -96,7 +96,8 @@ impl RootPackage {
             reference: rv.reference,
             package_type,
             dev,
-            aliases,
+            aliases: alias.iter().map(|(_, pretty)| pretty.clone()).collect(),
+            alias_normalized: alias.map(|(n, _)| n),
         }
     }
 
@@ -112,6 +113,7 @@ impl RootPackage {
             r.version = "1.0.0.0".to_owned();
             r.reference = None;
             r.aliases = Vec::new();
+            r.alias_normalized = None;
         }
         r
     }
@@ -141,10 +143,14 @@ pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<St
             "version_normalized".to_owned(),
             Value::String(normalize_pretty(p.version()).unwrap_or_else(|_| p.version().to_owned())),
         );
-        src.insert(
-            "installation-source".to_owned(),
-            Value::String("dist".to_owned()),
-        );
+        // ArrayDumper : la clé n'existe que si une source d'installation a
+        // été choisie — jamais pour un metapackage (rien n'est installé).
+        if !p.is_metapackage() {
+            src.insert(
+                "installation-source".to_owned(),
+                Value::String("dist".to_owned()),
+            );
+        }
         for key in ENTRY_KEY_ORDER {
             if let Some(v) = src.remove(key) {
                 entry.insert(key.to_owned(), v);
@@ -552,6 +558,7 @@ mod tests {
             package_type: "project".to_owned(),
             dev: true,
             aliases: Vec::new(),
+            alias_normalized: None,
         };
         let lock = sample_lock();
         let layout = Layout::vendor_only(std::path::Path::new("/proj"), &lock, true);

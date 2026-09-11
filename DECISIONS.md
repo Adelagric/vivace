@@ -279,3 +279,52 @@ recalcul des mêmes n chiffres par le formatage à précision fixe de Rust
 figée dans `prop_phpjson_oracle.rs`, 400 cas rejoués sans divergence. Second
 piège de formatage trouvé par le même test après `float_roundtrip` : la
 parité à l'octet sur les flottants ne se devine pas, elle se fuzze.
+
+## 2026-09-11 — drupal/core-composer-scaffold émulé nativement (v0.3)
+
+Fait vérifié : `--no-scripts` ne coupe que les scripts du composer.json
+racine ; les écouteurs des plugins s'exécutent, et le scaffold écrit
+web/index.php, .htaccess, sites/default/default.settings.php,
+web/autoload.php, autoload_runtime.php — ignorés par git dans un projet
+Drupal type. Sans émulation, `vivace install` ne donne pas un Drupal qui
+démarre. Port complet dans `scaffold.rs` : paquets autorisés (implicites +
+récursifs, racine en dernier), opérations replace/append/skip avec surcharge
+entre paquets, `checkUnchanged`, fichiers autoload de référence (sauf si
+trackés par git), `.gitignore` (règle exacte : option, sinon dépôt git ET
+`vendor` ignoré), et `preAutoloadDump` (entrées de classmap Symfony/PSR +
+`vendor/drupal/DrupalInstalled.php`, hash xxh3 des noms uniques triés —
+d'où la seule dépendance nouvelle, `xxhash-rust`, égalité vérifiée avec
+`hash('xxh3')`).
+
+Version du plugin : **empreinte de la source** (sha256 des PHP hors tests)
+plutôt qu'un tag — le cœur est identique de 10.3.0 à 12.0.0-alpha1, seules
+trois fonctionnalités s'ajoutent (preAutoloadDump en 11.3.0, hash trié en
+11.3.4, autoload_runtime.php en 11.4.0) : 11 empreintes, 120 versions, un
+port paramétré par profil. Refusé (fallback) : 11.3.0–11.3.3 (hash dans
+l'ordre de la transaction Composer, non reproductible), `symlink: true`,
+destination existante qui n'est pas un fichier régulier (Composer
+l'effacerait récursivement), source hors du paquet, destination hors du
+projet, et une copie installée du plugin dont la source diffère de celle du
+lock (Composer exécute alors l'ancien Handler avec le nouveau Plugin — cas
+réel de toute montée de version du cœur, testé par harness/transitions.sh).
+Le plan est calculé après le fetch et **avant** toute suppression : un
+refus laisse vendor/ intact. `core-project-message` et `core-recipe-unpack`
+sont BENIGN (événements écoutés cités dans scope.rs).
+
+Vérité : oracle bout en bout `tests/oracle_scaffold.rs` (15 mini-projets,
+Composer avec le plugin contre Composer `--no-plugins` + le port, arbres
+entiers comparés, trois versions du plugin) ; fixture `drupal` comparée
+projet entier ; `harness/removal.sh` et `harness/transitions.sh`.
+Non-objectif assumé : `cweagans/composer-patches` (modifie les dists →
+clé de store à définir), chantier suivant.
+
+## 2026-09-11 — Deux écarts découverts par la fixture Drupal, hors scaffold
+
+- `installed.json` : `installation-source` n'existe pas pour un metapackage
+  (ArrayDumper n'écrit la clé que si une source a été choisie) — première
+  fixture avec un metapackage (drupal/core-recommended).
+- `include_paths.php` (paquets PEAR à `include-path`) : Composer l'écrit dans
+  l'ordre d'achèvement de ses extractions asynchrones — trois
+  `composer install` successifs, trois ordres — et `composer dump-autoload`
+  le réécrit dans l'ordre d'installed.json. vivace produit ce dernier ; le
+  harness compare ce seul fichier trié, avec la raison dans le script.

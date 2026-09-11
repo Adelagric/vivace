@@ -65,6 +65,8 @@ jobs:
 
       - name: Removals (inside and outside vendor/)
         run: harness/removal.sh
+      - name: Transitions left to Composer (plugin upgrade)
+        run: harness/transitions.sh
 
       - name: Boot on vivace vendor
         run: harness/boot.sh

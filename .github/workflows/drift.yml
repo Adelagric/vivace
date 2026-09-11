@@ -72,6 +72,7 @@ jobs:
           harness/diff-vendor.sh
           harness/diff-vendor.sh --with-autoloader
           harness/removal.sh
+          harness/transitions.sh
           harness/boot.sh
 
       - name: Report

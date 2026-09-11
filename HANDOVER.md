@@ -5,13 +5,14 @@
 ## Validation (toutes plateformes de dev)
 
 ```bash
-fixtures/make.sh                         # une fois : crée + qualifie laravel/symfony/sylius/rector (php+composer requis)
+fixtures/make.sh                         # une fois : crée + qualifie les 6 fixtures (php+composer requis)
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 cargo test                               # inclut les tests oracle (php + composer dans le PATH)
 cargo build --release
-harness/diff-vendor.sh [--with-autoloader]   # parité vs Composer sur les 5 fixtures (projet entier pour wordpress)
+harness/diff-vendor.sh [--with-autoloader]   # parité vs Composer sur les 6 fixtures (projet entier pour wordpress et drupal)
 harness/removal.sh                       # paquets retirés du lock : même projet que Composer après
-harness/boot.sh                          # les 5 fixtures démarrent sur un vendor 100 % vivace
+harness/transitions.sh                   # montée de version d'un plugin émulé → main rendue à Composer, disque intact
+harness/boot.sh                          # les 6 fixtures démarrent sur un vendor 100 % vivace
 harness/drift-reference.sh [phar]        # docs/reference/ == fichiers du phar (2.10.3 ou autre)
 php tools/gen-installers-table.php /tmp/composer.phar [src] [tag]   # régénère assets/installers/<tag>.json
 harness/linux.sh                         # toute la chaîne dans un conteneur Linux (Docker)
@@ -34,7 +35,8 @@ message explicite (jamais de skip silencieux).
 | M4 harness (parité + boot), Linux en conteneur, CI GitHub Actions | terminé : chaîne verte dans le conteneur Linux arm64 (copie ET hardlinks) ET sur GitHub Actions ubuntu-latest x86_64 + macos-latest (run #2, 2026-09-10) ; réseau réel exercé | bench/M4-linux.md, harness/*.sh, .github/workflows/ci.yml |
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
 | M6 sortie publique | terminé : v0.1.0/v0.1.1 publiées, annonce r/PHP | .github/workflows/release.yml |
-| v0.2 composer/installers natif, drift, action | terminé localement (2026-09-10) ; tag v0.2.0 après feu vert | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
+| v0.2 composer/installers natif, drift, action | publié (v0.2.0, 2026-09-11) | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
+| v0.3 drupal/core-composer-scaffold natif | terminé localement (2026-09-11) ; tag v0.3.0 après feu vert | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
@@ -73,6 +75,19 @@ message explicite (jamais de skip silencieux).
   (test unitaire, pas de fixture). Non porté : `realpath()` de BinaryInstaller
   sur un vendor/ symlinké avec un `bin` hors vendor/ (Composer écrirait un
   chemin absolu) ; `installer-name` contenant `{` refusé plutôt qu'imité.
+- **drupal/core-composer-scaffold** : émulé pour 116 des 120 versions
+  (10.3.0 → 12.0.0-alpha1 ; 11.3.0–11.3.3 refusées : hash non trié). Exercé
+  par diff : la fixture drupal (file-mapping de drupal/core, locations
+  `web/`, autoload de référence, DrupalInstalled.php, .gitignore sur un dépôt
+  ignorant vendor/) ; par oracle : surcharges, append/prepend/default,
+  overwrite false, allowed-packages récursifs, locations personnalisées,
+  fichiers trackés, gitignore forcé, profils 11.3.16 et 11.2.14. Non
+  couvert : `symlink: true` (refusé), git absent du PATH (traité comme
+  « ni ignoré ni tracké »), un `.gitignore` global (`core.excludesFile`)
+  différent entre deux machines, `[web-root]` symlinké (accepté si la
+  location déclarée se résout), perms des fichiers scaffoldés (contenu et
+  présence comparés, pas les modes). Les hooks `pre/post-drupal-scaffold-cmd`
+  du composer.json racine ne sont pas exécutés (comme tout script).
 - **Extraction** : strip du dossier racine seulement s'il est unique
   (règle ArchiveDownloader) ; un zip avec un `.DS_Store` de premier niveau
   et rien d'autre à côté du dossier est traité comme mono-dossier, comme Composer.

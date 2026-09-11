@@ -13,6 +13,7 @@ and independent of upstream churn. They are test data, not part of vivace.
 | sylius | sylius/sylius-standard | MIT |
 | rector | rectorphp/rector-src | MIT |
 | wordpress | (own manifest, see below) | MIT for the manifest; packages have their own licenses |
+| drupal | drupal/recommended-project 11.4.6 | GPL-2.0-or-later (composer.json/lock only; Drupal core and modules are downloaded, never committed) |
 
 `wordpress` is not a copy of an upstream template: it is a small manifest
 written for the harness (`composer.json` + the lock resolved on 2026-09-10)
@@ -31,3 +32,13 @@ autoload entry points (the `files` entries verbatim, the psr-4/classmap
 directories as empty placeholders). It covers `dev-main` packages flagged
 `default-branch`, `phpstan/extension-installer` + `rector/extension-installer`
 and `platform-check: false`. Its boot check is `vendor/bin/phpstan --version`.
+
+`drupal` is the `drupal/recommended-project` template as `create-project`
+leaves it (composer.json, the lock resolved on 2026-09-11, LICENSE.txt), plus
+`web/example.gitignore` copied to `.gitignore` the way the template's own
+instructions suggest — so the harness exercises the scaffold plugin's
+`.gitignore` management on a git repository that ignores `vendor/`. It
+locks five plugins: composer/installers and drupal/core-composer-scaffold
+(emulated), symfony/runtime (emulated), drupal/core-project-message and
+drupal/core-recipe-unpack (inert at install time). Boot check:
+`vendor/bin/dr --version`.

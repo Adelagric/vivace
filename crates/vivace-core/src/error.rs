@@ -45,6 +45,11 @@ pub enum Error {
 
     #[error("cannot encode non-finite float ({0}) as JSON (PHP json_encode would fail too)")]
     NonFiniteFloat(f64),
+
+    /// Émulation d'un plugin impossible à reproduire à l'octet près, détectée
+    /// avant toute modification de vendor/ : la CLI délègue à Composer.
+    #[error("{0}")]
+    Unsupported(String),
 }
 
 impl Error {

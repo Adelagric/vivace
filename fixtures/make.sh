@@ -85,5 +85,8 @@ create rector   rectorphp/rector-src     php vendor/bin/phpstan --version
 # WordPress via composer/installers (wpackagist + roots/soil) : le boot doit
 # trouver une classe d'un plugin installé HORS vendor/ (web/app/plugins/soil).
 create wordpress vivace/wordpress-fixture php -r 'require "vendor/autoload.php"; exit(class_exists("Roots\\Soil\\Options") ? 0 : 1);'
+# Drupal recommended-project : composer/installers + core-composer-scaffold
+# (fichiers scaffoldés dans web/, autoload de référence, DrupalInstalled.php).
+create drupal   drupal/recommended-project php vendor/bin/dr --version
 
-echo "Fixtures qualifiées : laravel, symfony, sylius, rector, wordpress"
+echo "Fixtures qualifiées : laravel, symfony, sylius, rector, wordpress, drupal"

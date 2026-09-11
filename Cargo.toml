@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/vivace", "crates/vivace-core", "crates/vivace-autoload"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Adelagric/vivace"
@@ -19,6 +19,7 @@ sha1 = "=0.10.7"
 sha2 = "=0.10.9"
 md-5 = "=0.10.6"
 thiserror = "=2.0.20"
+xxhash-rust = { version = "=0.8.18", features = ["xxh3"] }
 clap = { version = "=4.6.6", features = ["derive"] }
 pcre2 = "=0.2.11"
 walkdir = "=2.5.0"

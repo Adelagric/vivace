@@ -20,6 +20,9 @@ pub struct InstallOptions {
     pub offline: bool,
     /// Parallélisme des téléchargements/extractions.
     pub jobs: usize,
+    /// drupal/core-composer-scaffold verrouillé et autorisé (scope) : vérifier
+    /// sa source et planifier le scaffold avant toute écriture.
+    pub scaffold: bool,
 }
 
 impl Default for InstallOptions {
@@ -28,8 +31,19 @@ impl Default for InstallOptions {
             with_dev: true,
             offline: false,
             jobs: 16,
+            scaffold: false,
         }
     }
+}
+
+/// Ce que la CLI applique après la transaction et l'autoloader quand le
+/// scaffold Drupal est émulé.
+#[derive(Debug, Clone)]
+pub struct ScaffoldOutcome {
+    pub profile: crate::scaffold::Profile,
+    pub plan: crate::scaffold::Plan,
+    /// Racine canonique du projet (`getcwd()` physique du plugin).
+    pub root: PathBuf,
 }
 
 #[derive(Debug, Default)]
@@ -42,6 +56,8 @@ pub struct InstallReport {
     pub store_hits: usize,
     /// Paquets inchangés extraits dans le store (vendor préexistant).
     pub store_warmed: usize,
+    /// Plan du scaffold Drupal, à appliquer après l'autoloader.
+    pub scaffold: Option<ScaffoldOutcome>,
 }
 
 /// Identité installée d'un paquet : version + référence de dist.
@@ -89,20 +105,6 @@ pub async fn install(
     let wanted: Vec<&LockPackage> = lock.wanted_packages(opts.with_dev).collect();
     let wanted_names: std::collections::BTreeSet<&str> = wanted.iter().map(|p| p.name()).collect();
     let previous = installed_identities(&vendor);
-
-    // Suppressions : présents avant, plus voulus — au chemin qu'a validé le
-    // layout (ancien install-path = chemin recalculé, comme LibraryInstaller).
-    for name in previous.keys() {
-        if !wanted_names.contains(name.as_str()) {
-            report.removed += 1;
-        }
-    }
-    for (_, dir) in layout.removals() {
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(Error::io(&dir))?;
-            prune_empty_parent(project_dir, &dir);
-        }
-    }
 
     // À poser : identité changée, ou répertoire absent. Les paquets inchangés
     // dont l'entrée de store manque (vendor/ posé par Composer avant vivace)
@@ -194,6 +196,35 @@ pub async fn install(
     }
     report.store_warmed = to_warm.len();
 
+    // Scaffold Drupal : source du plugin vérifiée (lock ET copie installée),
+    // plan calculé sur l'état actuel du disque — avant toute suppression,
+    // pour qu'un refus laisse vendor/ intact et la main à Composer.
+    if opts.scaffold {
+        report.scaffold = Some(plan_scaffold(
+            lock,
+            root_manifest,
+            layout,
+            &store,
+            &wanted,
+            &previous,
+            opts.with_dev,
+        )?);
+    }
+
+    // Suppressions : présents avant, plus voulus — au chemin qu'a validé le
+    // layout (ancien install-path = chemin recalculé, comme LibraryInstaller).
+    for name in previous.keys() {
+        if !wanted_names.contains(name.as_str()) {
+            report.removed += 1;
+        }
+    }
+    for (_, dir) in layout.removals() {
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(Error::io(&dir))?;
+            prune_empty_parent(project_dir, &dir);
+        }
+    }
+
     // Pose : suppression de l'ancienne version puis clone depuis le store.
     for p in &to_install {
         let (Some(pkg_root), Some(dest)) = (layout.package_root(p.name()), layout.abs(p.name()))
@@ -234,6 +265,102 @@ pub async fn install(
     }
 
     Ok(report)
+}
+
+/// Répertoire contenant la source d'un paquet voulu : l'entrée de store si
+/// elle existe, sinon son chemin d'installation actuel.
+fn source_dir(store: &Store, layout: &Layout, p: &LockPackage) -> Option<PathBuf> {
+    if store.contains(p.name(), p.version(), p.dist_reference()) {
+        Some(store.entry_path(p.name(), p.version(), p.dist_reference()))
+    } else {
+        layout.abs(p.name()).filter(|d| d.is_dir())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_scaffold(
+    lock: &Lock,
+    root_manifest: &Value,
+    layout: &Layout,
+    store: &Store,
+    wanted: &[&LockPackage],
+    previous: &BTreeMap<String, (String, String)>,
+    with_dev: bool,
+) -> Result<ScaffoldOutcome> {
+    use crate::scaffold::{self, PLUGIN};
+    let unsupported = |m: String| Error::Unsupported(m);
+    let plugin = wanted
+        .iter()
+        .find(|p| p.name() == PLUGIN)
+        .ok_or_else(|| unsupported(format!("{PLUGIN}: not in the lock")))?;
+    let plugin_dir = source_dir(store, layout, plugin).ok_or_else(|| {
+        unsupported(format!(
+            "{PLUGIN}: source not available (offline and absent from the store)"
+        ))
+    })?;
+    let fp = scaffold::fingerprint(&plugin_dir).map_err(Error::io(&plugin_dir))?;
+    let profile = scaffold::profile_for(&fp).ok_or_else(|| {
+        unsupported(format!(
+            "{PLUGIN} {}: this plugin source is not emulated (fingerprint {}…)",
+            plugin.version(),
+            &fp[..12]
+        ))
+    })?;
+    // Version installée différente : Composer exécuterait l'ancien Handler
+    // avec le nouveau Plugin — reproductible seulement si les sources sont
+    // identiques.
+    if let Some((prev_version, _)) = previous.get(PLUGIN) {
+        if prev_version != plugin.version() {
+            let installed = layout.abs(PLUGIN).filter(|d| d.is_dir());
+            let same = match installed {
+                Some(dir) => scaffold::fingerprint(&dir).map_err(Error::io(&dir))? == fp,
+                None => true,
+            };
+            if !same {
+                return Err(unsupported(format!(
+                    "{PLUGIN} is being upgraded from {prev_version} to {} with a different source: let Composer handle this transition",
+                    plugin.version()
+                )));
+            }
+        }
+    }
+    let root = std::fs::canonicalize(layout.root()).map_err(Error::io(layout.root()))?;
+    // Les metapackages restent visibles (findPackage les trouve et récurse
+    // dans leurs allowed-packages) ; leur chemin d'installation est vide chez
+    // Composer, d'où une source `/…` introuvable s'ils déclaraient un mapping.
+    let packages: Vec<scaffold::ScaffoldPackage> = wanted
+        .iter()
+        .filter_map(|p| {
+            let dir = if p.is_metapackage() {
+                PathBuf::from("/")
+            } else {
+                source_dir(store, layout, p)?
+            };
+            Some(scaffold::ScaffoldPackage {
+                name: p.name().to_owned(),
+                dir,
+                extra: p.raw.get("extra").cloned(),
+            })
+        })
+        .collect();
+    let root_name = root_manifest
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("__root__");
+    let plan = scaffold::plan(
+        profile,
+        &root,
+        root_name,
+        root_manifest.get("extra"),
+        &packages,
+    )
+    .map_err(unsupported)?;
+    let _ = (lock, with_dev);
+    Ok(ScaffoldOutcome {
+        profile,
+        plan,
+        root,
+    })
 }
 
 /// `LibraryInstaller::uninstall` : le répertoire parent du paquet retiré
