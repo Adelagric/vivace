@@ -328,3 +328,27 @@ clé de store à définir), chantier suivant.
   `composer install` successifs, trois ordres — et `composer dump-autoload`
   le réécrit dans l'ordre d'installed.json. vivace produit ce dernier ; le
   harness compare ce seul fichier trié, avec la raison dans le script.
+
+## 2026-09-11 — Résolveur : port du solveur de Composer, et le juge d'abord (R0)
+
+Décision utilisateur (option A du cadrage `docs/plans/v0.4-resolver.md`) :
+porter `Composer\DependencyResolver\*`, `ComposerRepository`/`PoolBuilder`
+et `Installer::doUpdate` plutôt qu'adopter PubGrub. Raison : quand plusieurs
+solutions existent, le lock dépend de la politique **et** de l'ordre de
+décision du solveur ; un autre algorithme donne un lock valide mais
+différent, invérifiable — contraire à la promesse et à tout ce qui a été
+prouvé jusqu'ici. Coût assumé : 6-7 000 lignes de PHP, 3 à 5 semaines,
+livrées en jalons (R0 juge, R1 métadonnées, R2 solveur, R3 `update`, puis
+`require`/`remove`/messages).
+
+R0 : Packagist bouge, deux `update` à une heure d'écart ne sont pas
+comparables. `tools/snapshot-packagist.sh` capture le cache Composer d'un
+`update --no-install` vierge (toutes les réponses p2 chargées par
+PoolBuilder), le rejoue en `file://` jusqu'à ce que Composer n'échoue plus
+(paquets virtuels 404 → stub « aucune version ») et archive le lock de
+référence. `harness/update.sh` injecte le dépôt local par la config globale
+(composer.json intact → content-hash comparé) et vérifie d'abord que
+Composer lui-même reproduit le lock de référence sur l'instantané (vrai sur
+les cinq fixtures), puis compare le lock de vivace. Découverte : Composer
+tolère un 404 de métadonnées en HTTP mais pas un fichier absent en
+`file://`. wpackagist (protocole v1) hors périmètre.

@@ -12,6 +12,8 @@ cargo build --release
 harness/diff-vendor.sh [--with-autoloader]   # parité vs Composer sur les 6 fixtures (projet entier pour wordpress et drupal)
 harness/removal.sh                       # paquets retirés du lock : même projet que Composer après
 harness/transitions.sh                   # montée de version d'un plugin émulé → main rendue à Composer, disque intact
+harness/update.sh                        # (résolveur, R0) locks identiques sur l'instantané Packagist figé — rouge tant que `vivace update` n'existe pas
+tools/snapshot-packagist.sh <fixture>    # (re)capture un instantané Packagist + lock de référence
 harness/boot.sh                          # les 6 fixtures démarrent sur un vendor 100 % vivace
 harness/drift-reference.sh [phar]        # docs/reference/ == fichiers du phar (2.10.3 ou autre)
 php tools/gen-installers-table.php /tmp/composer.phar [src] [tag]   # régénère assets/installers/<tag>.json
@@ -36,7 +38,9 @@ message explicite (jamais de skip silencieux).
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
 | M6 sortie publique | terminé : v0.1.0/v0.1.1 publiées, annonce r/PHP | .github/workflows/release.yml |
 | v0.2 composer/installers natif, drift, action | publié (v0.2.0, 2026-09-11) | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
-| v0.3 drupal/core-composer-scaffold natif | terminé localement (2026-09-11) ; tag v0.3.0 après feu vert | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
+| v0.3 drupal/core-composer-scaffold natif | publié (v0.3.0, 2026-09-11) | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
+
+| v0.4 résolveur (option A : port du solveur) | R0 fait : instantanés + harness update.sh (Composer reproduit le lock de référence sur 5 fixtures) ; R1 métadonnées, R2 solveur, R3 `update` à faire | docs/plans/v0.4-resolver.md, fixtures/registry/, harness/update.sh |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
