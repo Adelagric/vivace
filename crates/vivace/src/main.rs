@@ -619,8 +619,11 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     let mut session = UpdateSession::prepare_with(&project, home.as_deref(), true, Some(http))
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     trace("prepare", t0);
-    session.prefer_stable = args.prefer_stable;
-    session.prefer_lowest = args.prefer_lowest;
+    // BaseCommand : COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST valent
+    // les options.
+    let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
+    session.prefer_stable = args.prefer_stable || env_flag("COMPOSER_PREFER_STABLE");
+    session.prefer_lowest = args.prefer_lowest || env_flag("COMPOSER_PREFER_LOWEST");
     let filter = if args.ignore_platform_reqs {
         PlatformRequirementFilter::IgnoreAll
     } else if !args.ignore_platform_req.is_empty() {
@@ -639,16 +642,17 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     let mut text =
         vivace_core::phpjson::php_json_encode_with(&lock, vivace_core::phpjson::FLAGS_JSONFILE)?;
     text.push('\n');
-    // `Locker::setLockData` : réécrit seulement si les données changent
-    // (comparées après un même ré-encodage, comme `$lock !== getLockData()`).
-    let unchanged = std::fs::read_to_string(&lock_path)
+    // `JsonFile::write` passe par `filePutContentsIfModified` : le fichier
+    // n'est réécrit que si ses octets changent. (`Locker::setLockData`
+    // compare aussi les données décodées, mais `{}` contre `[]` y rend la
+    // comparaison toujours fausse pour un lock ordinaire ; les octets sont
+    // le critère observable.)
+    let unchanged = std::fs::read_to_string(&lock_path).is_ok_and(|old| old == text);
+    // `config.lock: false` : Composer résout sans écrire de lock.
+    let write_lock = serde_json::from_str::<serde_json::Value>(&manifest_text)
         .ok()
-        .and_then(|old| serde_json::from_str::<serde_json::Value>(&old).ok())
-        .and_then(|old| {
-            vivace_core::phpjson::php_json_encode_with(&old, vivace_core::phpjson::FLAGS_JSONFILE)
-                .ok()
-        })
-        .is_some_and(|old| old + "\n" == text);
+        .and_then(|m| m.get("config")?.get("lock").cloned())
+        != Some(serde_json::Value::Bool(false));
     if report.transaction.transaction.operations.is_empty() {
         eprintln!("Nothing to modify in lock file");
     } else {
@@ -667,10 +671,12 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
             if removals == 1 { "" } else { "s" }
         );
     }
-    if !unchanged {
+    if write_lock {
         eprintln!("Writing lock file");
-        std::fs::write(&lock_path, &text)
-            .with_context(|| format!("cannot write {}", lock_path.display()))?;
+        if !unchanged {
+            std::fs::write(&lock_path, &text)
+                .with_context(|| format!("cannot write {}", lock_path.display()))?;
+        }
     }
     trace("write lock", t0);
     if args.no_install {

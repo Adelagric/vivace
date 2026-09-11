@@ -91,17 +91,30 @@ struct RootData {
     /// `partialPackagesByName` : paquets en ligne de packages.json, par nom
     /// (ordre d'apparition).
     partial_packages: Vec<(String, Vec<Value>)>,
+    /// `mirrors` de packages.json : `sourceMirrors[type]` et `distMirrors`
+    /// (`[{url, preferred}]`).
+    source_mirrors: BTreeMap<String, Vec<Value>>,
+    dist_mirrors: Vec<Value>,
+    /// Dépôt sans `metadata-url` ni providers : toutes les métadonnées
+    /// (`packages` + `includes`), dans l'ordre de `loadIncludes`.
+    plain: Option<Vec<Value>>,
 }
 
 pub struct ComposerRepository {
     pub url: String,
     pub base_url: String,
+    /// `options` de la définition du dépôt (transport-options des paquets
+    /// dont une URL de dist est sous `base_url`).
+    pub options: Value,
     packages_json_url: String,
     transport: Box<dyn Transport>,
     /// Chargé au premier `loadPackages`, comme chez Composer.
     root: std::cell::OnceCell<RootData>,
     /// `provider-<name>.json` déjà lus (cache mémoire du run).
     fetched: std::cell::RefCell<BTreeMap<String, Option<std::rc::Rc<Value>>>>,
+    /// Dépôt plein : index d'arène de ses paquets une fois chargés
+    /// (`getPackages()`), [alias, base] par version aliasée.
+    members: std::cell::OnceCell<Vec<usize>>,
 }
 
 /// `empty()` PHP sur une valeur JSON.
@@ -171,10 +184,12 @@ impl ComposerRepository {
         Ok(ComposerRepository {
             url,
             base_url,
+            options: Value::Object(Map::new()),
             packages_json_url,
             transport,
             root: std::cell::OnceCell::new(),
             fetched: std::cell::RefCell::new(BTreeMap::new()),
+            members: std::cell::OnceCell::new(),
         })
     }
 
@@ -197,6 +212,25 @@ impl ComposerRepository {
                 .map(|s| self.canonicalize_url(s));
         } else if non_empty("notify") {
             r.notify_url = data["notify"].as_str().map(|s| self.canonicalize_url(s));
+        }
+        if let Some(mirrors) = data.get("mirrors").and_then(Value::as_array) {
+            for mirror in mirrors {
+                let preferred = !php_empty(mirror.get("preferred"));
+                for (key, kind) in [("git-url", "git"), ("hg-url", "hg")] {
+                    if let Some(u) = mirror.get(key).filter(|u| !php_empty(Some(u))) {
+                        r.source_mirrors
+                            .entry(kind.to_owned())
+                            .or_default()
+                            .push(serde_json::json!({"url": u, "preferred": preferred}));
+                    }
+                }
+                if let Some(u) = mirror.get("dist-url").and_then(Value::as_str) {
+                    if !php_empty(Some(&Value::String(u.to_owned()))) {
+                        r.dist_mirrors
+                            .push(serde_json::json!({"url": self.canonicalize_url(u), "preferred": preferred}));
+                    }
+                }
+            }
         }
         let mut has_providers = false;
         let mut has_partial = false;
@@ -267,13 +301,58 @@ impl ComposerRepository {
                 }
             }
         } else if r.lazy_providers_url.is_none() {
-            return Err(RepoError(format!(
-                "{}: no metadata-url in packages.json (only v2 repositories are supported)",
-                self.url
-            )));
+            // Dépôt « plein » (Satis, `packages.json` statique) : tous les
+            // paquets viennent de `packages` et des `includes`
+            // (`loadIncludes`), chargés d'un bloc comme `initialize()`.
+            r.plain = Some(self.load_includes(&data)?);
         }
         let _ = self.root.set(r);
         Ok(self.root.get().expect("just set"))
+    }
+
+    /// `loadIncludes($data)` : métadonnées de `packages` (par nom, par
+    /// version) puis des fichiers `includes`, récursivement.
+    fn load_includes(&self, data: &Value) -> Result<Vec<Value>, RepoError> {
+        let mut out = Vec::new();
+        let has_packages = data.get("packages").is_some();
+        let has_includes = data.get("includes").is_some();
+        if !has_packages && !has_includes {
+            for (_, pkg) in data.as_object().into_iter().flatten() {
+                if let Some(Value::Array(versions)) = pkg.get("versions") {
+                    out.extend(versions.iter().cloned());
+                } else if let Some(Value::Object(versions)) = pkg.get("versions") {
+                    out.extend(versions.values().cloned());
+                }
+            }
+            return Ok(out);
+        }
+        if let Some(packages) = data.get("packages").and_then(Value::as_object) {
+            for (_, versions) in packages {
+                match versions {
+                    Value::Array(a) => out.extend(a.iter().cloned()),
+                    Value::Object(o) => out.extend(o.values().cloned()),
+                    _ => {}
+                }
+            }
+        }
+        if let Some(includes) = data.get("includes").and_then(Value::as_object) {
+            for (include, _) in includes {
+                let url = self.canonicalize_url(include);
+                let url = if url.contains("://") {
+                    url
+                } else {
+                    format!("{}/{}", self.base_url, url.trim_start_matches('/'))
+                };
+                let bytes = self
+                    .transport
+                    .fetch(&url)?
+                    .ok_or_else(|| RepoError(format!("{url} not found")))?;
+                let included: Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| RepoError(format!("{url}: invalid JSON: {e}")))?;
+                out.extend(self.load_includes(&included)?);
+            }
+        }
+        Ok(out)
     }
 
     pub fn notify_url(&self) -> Result<Option<String>, RepoError> {
@@ -435,8 +514,9 @@ impl ComposerRepository {
         let mut out = Vec::new();
         for (_, config) in &to_load {
             let config = Self::with_notification_url(config, root);
-            let (package, alias) =
+            let (mut package, alias) =
                 loader::load(&config, origin, true).map_err(|e| RepoError(e.0))?;
+            self.configure_package(root, &mut package);
             let idx = arena.len();
             arena.push(package);
             out.push(idx);
@@ -447,6 +527,48 @@ impl ComposerRepository {
             }
         }
         Ok(out)
+    }
+
+    /// Suite de `createPackages` : `setSourceMirrors` (par type),
+    /// `setDistMirrors` (toujours, écrase ceux des métadonnées),
+    /// `configurePackageTransportOptions` (les `options` du dépôt si une
+    /// URL de dist est sous `baseUrl`) ; et les `transport-options` des
+    /// métadonnées ne sont pas chargées (`loadOptions` faux).
+    fn configure_package(&self, root: &RootData, p: &mut Package) {
+        let Some(obj) = p.raw.as_object_mut() else {
+            return;
+        };
+        obj.shift_remove("transport-options");
+        if let Some(src) = &p.source {
+            if let Some(mirrors) = root.source_mirrors.get(&src.kind) {
+                if let Some(Value::Object(s)) = obj.get_mut("source") {
+                    s.insert("mirrors".into(), Value::Array(mirrors.clone()));
+                }
+            }
+        }
+        if let Some(Value::Object(d)) = obj.get_mut("dist") {
+            if root.dist_mirrors.is_empty() {
+                d.shift_remove("mirrors");
+            } else {
+                d.insert("mirrors".into(), Value::Array(root.dist_mirrors.clone()));
+            }
+        }
+        if let Some(dist) = &p.dist {
+            let urls = dist_urls(
+                dist,
+                &root.dist_mirrors,
+                &p.name,
+                &p.version,
+                &p.pretty_version,
+            );
+            if urls.iter().any(|u| u.starts_with(&self.base_url)) {
+                let empty = self.options.as_object().is_some_and(Map::is_empty)
+                    || self.options.as_array().is_some_and(Vec::is_empty);
+                if !empty {
+                    obj.insert("transport-options".into(), self.options.clone());
+                }
+            }
+        }
     }
 
     /// `createPackages` : `$data['notification-url'] ??= $this->notifyUrl`.
@@ -506,6 +628,32 @@ impl ComposerRepository {
         arena: &mut Vec<Package>,
     ) -> Result<(Vec<String>, Vec<usize>), RepoError> {
         let root = self.root_data()?;
+        if let Some(plain) = &root.plain {
+            // `parent::loadPackages` (ArrayRepository) sur `getPackages()`.
+            if self.members.get().is_none() {
+                let configs: Vec<Value> = plain
+                    .iter()
+                    .map(|c| Self::with_notification_url(c, root))
+                    .collect();
+                let ids = loader::load_packages(&configs, origin, arena, true)
+                    .map_err(|e| RepoError(e.0))?;
+                for &id in &ids {
+                    let mut p = std::mem::replace(&mut arena[id], Package::new("", "", "", origin));
+                    self.configure_package(root, &mut p);
+                    arena[id] = p;
+                }
+                let _ = self.members.set(ids);
+            }
+            let members = self.members.get().expect("just set");
+            return Ok(crate::pool::array_repository_load_packages(
+                members,
+                package_name_map,
+                acceptable,
+                flags,
+                already_loaded,
+                arena,
+            ));
+        }
         let mut map: Vec<(String, Constraint)> = package_name_map.to_vec();
         let mut packages: Vec<usize> = Vec::new();
         let mut names_found: Vec<String> = Vec::new();
@@ -631,6 +779,17 @@ impl ComposerRepository {
             }
             let ids =
                 loader::load_packages(&to_load, origin, arena, true).map_err(|e| RepoError(e.0))?;
+            for &id in &ids {
+                let base = arena[id].alias_of.unwrap_or(id);
+                let mut p = std::mem::replace(&mut arena[base], Package::new("", "", "", origin));
+                self.configure_package(root, &mut p);
+                arena[base] = p;
+                if base != id {
+                    let mut a = std::mem::replace(&mut arena[id], Package::new("", "", "", origin));
+                    self.configure_package(root, &mut a);
+                    arena[id] = a;
+                }
+            }
             packages.extend(ids);
         }
         Ok((names_found, packages))
@@ -689,4 +848,87 @@ pub fn locked_repository(lock: &Value, arena: &mut Vec<Package>) -> Result<Vec<u
         }
     }
     Ok(out)
+}
+
+/// `ComposerMirror::processUrl`.
+fn process_mirror_url(
+    mirror_url: &str,
+    name: &str,
+    version: &str,
+    reference: Option<&str>,
+    kind: &str,
+    pretty_version: &str,
+) -> String {
+    static HEX: OnceLock<Regex> = OnceLock::new();
+    let reference = reference.map(|r| {
+        if r.is_empty() {
+            String::new()
+        } else if regex(&HEX, r"^([a-f0-9]*|%reference%)$", false)
+            .is_match(r.as_bytes())
+            .unwrap_or(false)
+        {
+            r.to_owned()
+        } else {
+            vivace_core::content_hash::md5_hex(r.as_bytes())
+        }
+    });
+    let version = if version.contains('/') {
+        vivace_core::content_hash::md5_hex(version.as_bytes())
+    } else {
+        version.to_owned()
+    };
+    mirror_url
+        .replace("%package%", name)
+        .replace("%version%", &version)
+        .replace("%reference%", reference.as_deref().unwrap_or(""))
+        .replace("%type%", kind)
+        .replace("%prettyVersion%", pretty_version)
+}
+
+/// `Package::getDistUrls` : l'URL (placeholders traités) puis les miroirs,
+/// les préférés devant.
+fn dist_urls(
+    dist: &crate::package::SourceRef,
+    mirrors: &[Value],
+    name: &str,
+    version: &str,
+    pretty: &str,
+) -> Vec<String> {
+    if dist.url.is_empty() {
+        return Vec::new();
+    }
+    let url = if dist.url.contains('%') {
+        process_mirror_url(
+            &dist.url,
+            name,
+            version,
+            dist.reference.as_deref(),
+            &dist.kind,
+            pretty,
+        )
+    } else {
+        dist.url.clone()
+    };
+    let mut urls = vec![url];
+    for m in mirrors {
+        let Some(mu) = m.get("url").and_then(Value::as_str) else {
+            continue;
+        };
+        let mirror_url = process_mirror_url(
+            mu,
+            name,
+            version,
+            dist.reference.as_deref(),
+            &dist.kind,
+            pretty,
+        );
+        if !urls.contains(&mirror_url) {
+            if m.get("preferred") == Some(&Value::Bool(true)) {
+                urls.insert(0, mirror_url);
+            } else {
+                urls.push(mirror_url);
+            }
+        }
+    }
+    urls
 }

@@ -19,6 +19,11 @@ byte-identical-output promise are the public API.
   from frozen Packagist snapshots; remote `composer` repositories over HTTPS
   are supported. `--no-install`, `--no-dev`, `--prefer-stable`,
   `--prefer-lowest`, `--ignore-platform-reqs`, `--ignore-platform-req`.
+  Plain (Satis-style) `composer` repositories without `metadata-url`,
+  repository `mirrors` and `options` (written as `dist.mirrors`,
+  `source.mirrors`, `transport-options`) are handled like Composer does;
+  solved packages go through the same security validation as
+  Composer's `ValidatingArrayLoader::validatePackage`.
   Not yet: `require`/`remove`, partial updates, `--with`, `vcs`/`path`
   repositories, Composer's problem messages on an unsolvable set.
 - Oracles for the port: `tools/oracle-pool.php` (pool, and with `--solve`

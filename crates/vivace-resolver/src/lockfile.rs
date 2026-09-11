@@ -2,11 +2,12 @@
 //! brutes et le modèle, avec les normalisations d'`ArrayLoader`), de
 //! `Locker::lockPackages` et de `Locker::setLockData` ; encodage JsonFile.
 
-use crate::package::{Origin, Package};
+use crate::package::Package;
 use crate::root::RootAlias;
 use crate::version::DEFAULT_BRANCH_ALIAS;
 use serde_json::{Map, Value};
 use std::cmp::Ordering;
+use std::sync::OnceLock;
 
 /// `empty()` PHP.
 pub fn php_empty(v: Option<&Value>) -> bool {
@@ -49,9 +50,40 @@ pub fn php_compare_strings(a: &str, b: &str) -> Ordering {
     }
 }
 
+/// Tri par insertion stable (zend_insert_sort pour n ≤ 16 ; au-delà
+/// zend_sort devient hybride et un ordre non total peut différer).
+fn insertion_sort<T>(items: &mut [T], cmp: impl Fn(&T, &T) -> Ordering) {
+    for i in 1..items.len() {
+        let mut j = i;
+        while j > 0 && cmp(&items[j - 1], &items[j]) == Ordering::Greater {
+            items.swap(j - 1, j);
+            j -= 1;
+        }
+    }
+}
+
+/// `Package::getTargetDir()`.
+fn normalize_target_dir(dir: &str) -> String {
+    static RE: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
+    let re = crate::version::regex(
+        &RE,
+        r"(?:^|[\\/]+)\.\.?(?:[\\/]+|$)(?:\.\.?(?:[\\/]+|$))*",
+        false,
+    );
+    let mut out = String::new();
+    let mut last = 0;
+    for m in re.find_iter(dir.as_bytes()).flatten() {
+        out.push_str(&dir[last..m.start()]);
+        out.push('/');
+        last = m.end();
+    }
+    out.push_str(&dir[last..]);
+    out.trim_start_matches('/').to_owned()
+}
+
 fn ksort(map: &Map<String, Value>) -> Map<String, Value> {
     let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-    entries.sort_by(|(a, _), (b, _)| php_compare_strings(a, b));
+    insertion_sort(&mut entries, |(a, _), (b, _)| php_compare_strings(a, b));
     entries
         .into_iter()
         .map(|(k, v)| (k.clone(), v.clone()))
@@ -157,11 +189,11 @@ fn parse_datetime(text: &str) -> Option<String> {
             }
         }
     }
-    let rest = &t[pos..];
+    let rest = t[pos..].trim_start();
     let offset = match rest {
         "" => "+00:00".to_owned(),
         "Z" | "z" | "UTC" | "GMT" => "+00:00".to_owned(),
-        r if (r.starts_with('+') || r.starts_with('-')) && r.len() >= 3 => {
+        r if (r.starts_with('+') || r.starts_with('-')) && r.len() >= 3 && r.len() <= 6 => {
             let sign = &r[..1];
             let digits: String = r[1..].chars().filter(|c| *c != ':').collect();
             if !digits.bytes().all(|c| c.is_ascii_digit()) {
@@ -193,7 +225,16 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         Value::String(p.version.clone()),
     );
     if let Some(td) = raw.get("target-dir").filter(|v| !v.is_null()) {
-        data.insert("target-dir".into(), td.clone());
+        // `Package::getTargetDir()` : segments `.`/`..` et slashes de tête
+        // retirés.
+        let text = match td {
+            Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        data.insert(
+            "target-dir".into(),
+            Value::String(normalize_target_dir(&text)),
+        );
     }
     if let Some(src) = &p.source {
         let mut s = Map::new();
@@ -212,7 +253,15 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
     if let Some(dist) = &p.dist {
         let mut d = Map::new();
         d.insert("type".into(), Value::String(dist.kind.clone()));
-        d.insert("url".into(), Value::String(dist.url.clone()));
+        // `setDistUrl('')` range null.
+        d.insert(
+            "url".into(),
+            if dist.url.is_empty() {
+                Value::Null
+            } else {
+                Value::String(dist.url.clone())
+            },
+        );
         if let Some(r) = &dist.reference {
             d.insert("reference".into(), Value::String(r.clone()));
         }
@@ -244,19 +293,26 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         }
         data.insert(key.into(), Value::Object(ksort(&m)));
     }
-    if let Some(Value::Object(suggest)) = raw.get("suggest") {
-        if !suggest.is_empty() {
-            let mut m = Map::new();
-            for (k, v) in suggest {
-                let v = match v {
-                    Value::String(s) if s.trim() == "self.version" => {
-                        Value::String(p.pretty_version.clone())
-                    }
-                    other => other.clone(),
-                };
-                m.insert(k.clone(), v);
+    if let Some(suggest) = raw.get("suggest").filter(|v| is_array(v)) {
+        let self_version = |v: &Value| match v {
+            Value::String(s) if s.trim() == "self.version" => {
+                Value::String(p.pretty_version.clone())
             }
-            data.insert("suggest".into(), Value::Object(ksort(&m)));
+            other => other.clone(),
+        };
+        let value = match suggest {
+            Value::Object(o) => {
+                let m: Map<String, Value> = o
+                    .iter()
+                    .map(|(k, v)| (k.clone(), self_version(v)))
+                    .collect();
+                Value::Object(ksort(&m))
+            }
+            Value::Array(a) => Value::Array(a.iter().map(self_version).collect()),
+            _ => Value::Null,
+        };
+        if !php_empty(Some(&value)) {
+            data.insert("suggest".into(), value);
         }
     }
     if let Some(time) = raw.get("time").and_then(release_date) {
@@ -268,23 +324,33 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
     // dumpValues : bin, type, extra, installation-source, autoload,
     // autoload-dev, notification-url, include-path, php-ext.
     if let Some(bin) = raw.get("bin").filter(|v| !v.is_null()) {
-        let list: Vec<Value> = match bin {
-            Value::Array(a) => a.clone(),
-            Value::Object(o) => o.values().cloned().collect(),
-            other => vec![other.clone()],
+        // Tableau PHP : les clés d'un objet sont conservées.
+        let ltrim = |v: Value| match v {
+            Value::String(s) => Value::String(s.trim_start_matches('/').to_owned()),
+            other => other,
         };
-        let list: Vec<Value> = list
-            .into_iter()
-            .map(|v| match v {
-                Value::String(s) => Value::String(s.trim_start_matches('/').to_owned()),
-                other => other,
-            })
-            .collect();
-        if !list.is_empty() {
-            data.insert("bin".into(), Value::Array(list));
+        let value = match bin {
+            Value::Array(a) => Value::Array(a.iter().cloned().map(ltrim).collect()),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, v)| (k.clone(), ltrim(v.clone())))
+                    .collect(),
+            ),
+            other => Value::Array(vec![ltrim(other.clone())]),
+        };
+        if !php_empty(Some(&value)) {
+            data.insert("bin".into(), value);
         }
     }
-    data.insert("type".into(), Value::String(p.package_type.clone()));
+    // `getType()` : `$this->type ?: 'library'`.
+    data.insert(
+        "type".into(),
+        Value::String(if p.package_type.is_empty() || p.package_type == "0" {
+            "library".to_owned()
+        } else {
+            p.package_type.clone()
+        }),
+    );
     if let Some(extra) = raw.get("extra") {
         if is_array(extra) && !php_empty(Some(extra)) {
             data.insert("extra".into(), extra.clone());
@@ -330,19 +396,23 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
     if !archive.is_empty() {
         data.insert("archive".into(), Value::Object(archive));
     }
-    if let Some(Value::Object(scripts)) = raw.get("scripts") {
-        if !scripts.is_empty() {
-            let mut m = Map::new();
-            for (event, listeners) in scripts {
-                let list = match listeners {
-                    Value::Array(a) => Value::Array(a.clone()),
-                    Value::Object(o) => Value::Array(o.values().cloned().collect()),
-                    Value::Null => Value::Array(Vec::new()),
-                    other => Value::Array(vec![other.clone()]),
-                };
-                m.insert(event.clone(), list);
+    if let Some(scripts) = raw.get("scripts").filter(|v| is_array(v)) {
+        // `(array) $listeners` : un tableau garde ses clés, un scalaire est
+        // enveloppé, null devient vide.
+        let cast = |listeners: &Value| match listeners {
+            Value::Array(_) | Value::Object(_) => listeners.clone(),
+            Value::Null => Value::Array(Vec::new()),
+            other => Value::Array(vec![other.clone()]),
+        };
+        let value = match scripts {
+            Value::Object(o) => {
+                Value::Object(o.iter().map(|(k, v)| (k.clone(), cast(v))).collect())
             }
-            data.insert("scripts".into(), Value::Object(m));
+            Value::Array(a) => Value::Array(a.iter().map(cast).collect()),
+            _ => Value::Null,
+        };
+        if !php_empty(Some(&value)) {
+            data.insert("scripts".into(), value);
         }
     }
     if let Some(license) = raw.get("license") {
@@ -383,10 +453,19 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
                     Value::String(s) => s.clone(),
                     Value::Bool(true) => "1".to_owned(),
                     Value::Bool(false) | Value::Null => String::new(),
+                    Value::Number(n) => match n.as_f64() {
+                        Some(f) if n.is_f64() && f.fract() == 0.0 && f.abs() < 1e15 => {
+                            format!("{}", f as i64)
+                        }
+                        _ => n.to_string(),
+                    },
                     other => other.to_string(),
                 })
                 .collect();
-            strings.sort_by(|a, b| php_compare_strings(a, b));
+            // `sort()` : la comparaison PHP n'est pas un ordre total sur des
+            // chaînes mixtes ; un tri par insertion (celui de zend_sort en
+            // dessous de 17 éléments) ne suppose rien et ne panique pas.
+            insertion_sort(&mut strings, |a, b| php_compare_strings(a, b));
             data.insert(
                 "keywords".into(),
                 Value::Array(strings.into_iter().map(Value::String).collect()),
@@ -412,13 +491,12 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         }
         _ => {}
     }
-    // `transport-options` : chargées seulement avec `loadOptions` (lock,
-    // rechargement des dumps), pas par les dépôts composer.
-    if !matches!(p.origin, Origin::Repository(_)) {
-        if let Some(t) = raw.get("transport-options") {
-            if is_array(t) && !php_empty(Some(t)) {
-                data.insert("transport-options".into(), t.clone());
-            }
+    // `transport-options` : celles du lock (`loadOptions`) ou posées par le
+    // dépôt (`configurePackageTransportOptions`) ; le dépôt a déjà retiré
+    // celles des métadonnées.
+    if let Some(t) = raw.get("transport-options") {
+        if is_array(t) && !php_empty(Some(t)) {
+            data.insert("transport-options".into(), t.clone());
         }
     }
     data
@@ -432,7 +510,9 @@ pub fn lock_packages(arena: &[Package], packages: &[usize]) -> Result<Vec<Value>
         if p.is_alias() {
             continue;
         }
-        if p.pretty_name.is_empty() || p.pretty_version.is_empty() {
+        if php_empty(Some(&Value::String(p.pretty_name.clone())))
+            || php_empty(Some(&Value::String(p.pretty_version.clone())))
+        {
             return Err(format!(
                 "Package \"{}\" has no version or name and can not be locked",
                 p.pretty_string()
@@ -561,6 +641,120 @@ pub fn lock_data(input: LockInput<'_>) -> Value {
     Value::Object(lock)
 }
 
+/// `ValidatingArrayLoader::validatePackage` (appelé sur chaque paquet
+/// retenu par le solveur) : refuse les noms invalides ou réservés, les
+/// URL/références commençant par `-` (injection d'arguments) et les `bin`
+/// avec `..`.
+pub fn validate_package(p: &Package) -> Result<(), String> {
+    static DASH: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
+    static DOTDOT: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
+    if matches!(p.origin, crate::package::Origin::Root) {
+        return Ok(());
+    }
+    if let Some(err) = package_naming_error(&p.name) {
+        return Err(format!(
+            "Invalid package found during dependency resolution, aborting: {err}"
+        ));
+    }
+    let dash = crate::version::regex(&DASH, r"^\s*-", false);
+    let fields: [(&str, Option<&str>); 4] = [
+        ("source.url", p.source.as_ref().map(|s| s.url.as_str())),
+        (
+            "source.reference",
+            p.source.as_ref().and_then(|s| s.reference.as_deref()),
+        ),
+        (
+            "dist.url",
+            p.dist
+                .as_ref()
+                .map(|d| d.url.as_str())
+                .filter(|u| !u.is_empty()),
+        ),
+        (
+            "dist.reference",
+            p.dist.as_ref().and_then(|d| d.reference.as_deref()),
+        ),
+    ];
+    for (field, value) in fields {
+        if let Some(v) = value {
+            if dash.is_match(v.as_bytes()).unwrap_or(false) {
+                return Err(format!(
+                    "{} has an invalid {field}, it must not start with a \"-\": {v}",
+                    p.name
+                ));
+            }
+        }
+    }
+    let dotdot = crate::version::regex(&DOTDOT, r"(?:^|[\\/])\.\.(?:[\\/]|$)", false);
+    if let Some(bins) = p.raw.get("bin") {
+        let list: Vec<String> = match bins {
+            Value::String(s) => vec![s.clone()],
+            Value::Array(a) => a
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
+            Value::Object(o) => o
+                .values()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect(),
+            _ => Vec::new(),
+        };
+        for bin in list {
+            if dotdot.is_match(bin.as_bytes()).unwrap_or(false) {
+                return Err(format!(
+                    "{} has an invalid bin {bin}, it must not contain \"..\" path segments",
+                    p.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `ValidatingArrayLoader::hasPackageNamingError($name)` (hors liens).
+fn package_naming_error(name: &str) -> Option<String> {
+    static NAME: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
+    if crate::platform::is_platform_package(name) {
+        return None;
+    }
+    let re = crate::version::regex(
+        &NAME,
+        r"^[a-z0-9](?:[_.-]?[a-z0-9]++)*+/[a-z0-9](?:(?:[_.]|-{1,2})?[a-z0-9]++)*+\z",
+        true,
+    );
+    if !re.is_match(name.as_bytes()).unwrap_or(false) {
+        return Some(format!(
+            "{name} is invalid, it should have a vendor name, a forward slash, and a package name. The vendor and package name can be words separated by -, . or _. The complete name should match \"^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]?|-{{0,2}})[a-z0-9]+)*$\"."
+        ));
+    }
+    const RESERVED: &[&str] = &[
+        "nul", "con", "prn", "aux", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+        "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+    ];
+    let lower = name.to_lowercase();
+    let mut bits = lower.splitn(2, '/');
+    let vendor = bits.next().unwrap_or("");
+    let package = bits.next().unwrap_or("");
+    if RESERVED.contains(&vendor) || RESERVED.contains(&package) {
+        return Some(format!(
+            "{name} is reserved, package and vendor names can not match any of: {}.",
+            RESERVED.join(", ")
+        ));
+    }
+    if name.ends_with(".json") {
+        return Some(format!(
+            "{name} is invalid, package names can not end in .json, consider renaming it or perhaps using a -json suffix instead."
+        ));
+    }
+    if name.bytes().any(|b| b.is_ascii_uppercase()) {
+        return Some(format!(
+            "{name} is invalid, it should not contain uppercase characters. We suggest using {} instead.",
+            name.to_lowercase()
+        ));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,8 +785,39 @@ mod tests {
             release_date(&Value::String("1605260450".into())).as_deref(),
             Some("2020-11-13T09:40:50+00:00")
         );
+        assert_eq!(
+            release_date(&Value::String("2020-11-13 09:40:50 UTC".into())).as_deref(),
+            Some("2020-11-13T09:40:50+00:00")
+        );
+        assert_eq!(
+            release_date(&Value::String("2020-11-13 09:40:50 +0100".into())).as_deref(),
+            Some("2020-11-13T09:40:50+01:00")
+        );
+        assert_eq!(normalize_target_dir("../foo/./bar/"), "foo/bar/");
+        assert_eq!(normalize_target_dir("/Foo"), "Foo");
         assert_eq!(release_date(&Value::String("yesterday".into())), None);
         assert_eq!(release_date(&Value::String(String::new())), None);
+    }
+
+    #[test]
+    fn validates_packages_like_composer() {
+        use crate::package::{Origin, Package, SourceRef};
+        let mut p = Package::new("acme/lib", "1.0.0.0", "1.0.0", Origin::Repository(0));
+        assert!(validate_package(&p).is_ok());
+        p.dist = Some(SourceRef {
+            kind: "zip".into(),
+            url: " -evil".into(),
+            reference: None,
+        });
+        assert!(validate_package(&p).unwrap_err().contains("dist.url"));
+        p.dist = None;
+        p.raw = serde_json::json!({"bin": ["../x"]});
+        assert!(validate_package(&p).unwrap_err().contains("bin"));
+        assert!(package_naming_error("Acme/Lib").is_some());
+        assert!(package_naming_error("acme/lib.json").is_some());
+        assert!(package_naming_error("con/lib").is_some());
+        assert!(package_naming_error("acme/lib--x").is_none());
+        assert!(package_naming_error("php").is_none());
     }
 
     #[test]

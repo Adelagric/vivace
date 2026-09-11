@@ -32,12 +32,17 @@ pub fn content_hash(composer_json_text: &str) -> Result<String> {
 
     let mut relevant = Map::new();
     if let Value::Object(obj) = &content {
+        // `isset($content[$key])` : une valeur null compte comme absente.
         for key in RELEVANT_KEYS {
-            if let Some(v) = obj.get(key) {
+            if let Some(v) = obj.get(key).filter(|v| !v.is_null()) {
                 relevant.insert(key.to_owned(), v.clone());
             }
         }
-        if let Some(platform) = obj.get("config").and_then(|c| c.get("platform")) {
+        if let Some(platform) = obj
+            .get("config")
+            .and_then(|c| c.get("platform"))
+            .filter(|v| !v.is_null())
+        {
             let mut config = Map::new();
             config.insert("platform".to_owned(), platform.clone());
             relevant.insert("config".to_owned(), Value::Object(config));
@@ -55,6 +60,13 @@ pub fn content_hash(composer_json_text: &str) -> Result<String> {
     let mut hasher = Md5::new();
     hasher.update(encoded.as_bytes());
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// `hash('md5', $s)` en hexadécimal.
+pub fn md5_hex(data: &[u8]) -> String {
+    let mut h = Md5::new();
+    h.update(data);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

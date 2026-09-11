@@ -591,6 +591,12 @@ impl UpdateSession {
             SolveError::Bug(b) => SessionError(b),
         })?;
         lap("solve", &t);
+        // `ValidatingArrayLoader::validatePackage` sur chaque paquet retenu
+        // (`LockTransaction::setResultPackages`) : une SecurityException
+        // arrête l'update.
+        for &idx in &report.transaction.all {
+            crate::lockfile::validate_package(&self.arena[idx]).map_err(SessionError)?;
+        }
         drop(pool);
         let mut transaction = std::mem::replace(&mut report.transaction, LockTransaction::empty());
         self.extract_dev_packages(&mut transaction, &mut policy, filter)?;
@@ -682,7 +688,10 @@ fn open_repository(
             "unsupported repository url scheme ({url})"
         )));
     };
-    let repo = ComposerRepository::open(url, transport).map_err(|e| SessionError(e.0))?;
+    let mut repo = ComposerRepository::open(url, transport).map_err(|e| SessionError(e.0))?;
+    if let Some(options) = def.get("options") {
+        repo.options = options.clone();
+    }
     Ok(Repository::Composer(Box::new(repo)))
 }
 

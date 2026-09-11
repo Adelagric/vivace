@@ -1042,7 +1042,7 @@ impl<'a> PoolBuilder<'a> {
 }
 
 /// `ArrayRepository::loadPackages` (dépôt racine).
-fn array_repository_load_packages(
+pub fn array_repository_load_packages(
     members: &[usize],
     package_name_map: &[(String, Constraint)],
     acceptable: &BTreeMap<String, i32>,
