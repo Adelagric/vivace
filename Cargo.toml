@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vivace", "crates/vivace-core", "crates/vivace-autoload"]
+members = ["crates/vivace", "crates/vivace-core", "crates/vivace-autoload", "crates/vivace-resolver"]
 
 [workspace.package]
 version = "0.3.0"

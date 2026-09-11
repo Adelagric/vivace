@@ -1952,6 +1952,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vivace-resolver"
+version = "0.3.0"
+dependencies = [
+ "pcre2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "vivace-core",
+]
+
+[[package]]
 name = "wait-timeout"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

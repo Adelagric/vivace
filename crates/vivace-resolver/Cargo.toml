@@ -1,0 +1,17 @@
+[package]
+name = "vivace-resolver"
+description = "Port of Composer's dependency resolver (metadata, pool, solver) for vivace"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vivace-core = { path = "../vivace-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+pcre2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
