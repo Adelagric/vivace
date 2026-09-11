@@ -81,7 +81,11 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
             let p = e.path();
             if p.is_dir() {
                 out.extend(walk(&p));
-            } else if p.extension().is_some_and(|x| x == "json") {
+            } else if p.extension().is_some_and(|x| x == "json")
+                && !p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("._"))
+            {
                 out.push(p);
             }
         }

@@ -79,7 +79,9 @@ for fx in "$@"; do
   echo "composer $(composer --version --no-ansi 2>/dev/null | sed -n 's/^Composer version \([^ ]*\).*/\1/p')" >> "$out/SNAPSHOT"
   [ ${#virtual[@]} -gt 0 ] && printf 'virtual %s\n' "${virtual[@]}" >> "$out/SNAPSHOT"
   mkdir -p "$ROOT/fixtures/registry"
-  tar -C "$out" -czf "$ROOT/fixtures/registry/$fx.tar.gz" .
+  # Sans métadonnées macOS : bsdtar stocke sinon les xattrs en entrées
+  # AppleDouble `._*` que GNU tar extrait comme des fichiers (CI Linux).
+  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "$out" -czf "$ROOT/fixtures/registry/$fx.tar.gz" .
   echo "$fx : $n fichiers p2, ${#virtual[@]} virtuels, $(du -h "$ROOT/fixtures/registry/$fx.tar.gz" | cut -f1) — lock de référence : $(jq '.packages | length' "$work/composer.lock") paquets"
   rm -rf "$work"
 done
