@@ -8,6 +8,7 @@
 //
 // Usage : COMPOSER_HOME=… COMPOSER_ROOT_VERSION=… php tools/oracle-pool.php <composer.phar> [--no-dev]
 declare(strict_types=1);
+ini_set("memory_limit", "-1");
 
 $phar = $argv[1] ?? null;
 if ($phar === null || !is_file($phar)) {
@@ -77,10 +78,13 @@ foreach ($requires as $link) {
 
 $pool = $repositorySet->createPool($request, $io);
 
+// Indexé par la clé PHP du lien (cible en général, nom nu pour les lib-* de
+// la plateforme, numérique pour les liens self.version d'un alias) : c'est
+// la clé que Pool::match consulte.
 $links = static function (array $links): array {
     $out = [];
-    foreach ($links as $target => $link) {
-        $out[$target] = $link->getPrettyConstraint();
+    foreach ($links as $key => $link) {
+        $out[$key] = $link->getPrettyConstraint();
     }
     return $out;
 };

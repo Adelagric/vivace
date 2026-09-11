@@ -5,5 +5,12 @@
 
 pub mod constraint;
 pub mod intervals;
+pub mod loader;
+pub mod package;
 pub mod phpver;
+pub mod platform;
+pub mod pool;
+pub mod repository;
+pub mod root;
+pub mod session;
 pub mod version;
