@@ -20,6 +20,48 @@ enum Cli {
     /// Régénère l'autoloader (drop-in `composer dump-autoload`).
     #[command(name = "dump-autoload", alias = "dumpautoload")]
     DumpAutoload(DumpArgs),
+    /// Résout les dépendances et écrit composer.lock (drop-in `composer update`).
+    #[command(alias = "upgrade")]
+    Update(UpdateArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct UpdateArgs {
+    /// Écrire le lock sans installer.
+    #[arg(long)]
+    no_install: bool,
+    /// Ne pas installer les paquets de require-dev (ils sont quand même résolus).
+    #[arg(long)]
+    no_dev: bool,
+    /// Ne pas générer l'autoloader.
+    #[arg(long)]
+    no_autoloader: bool,
+    #[arg(short = 'o', long)]
+    optimize_autoloader: bool,
+    #[arg(short = 'a', long)]
+    classmap_authoritative: bool,
+    /// Accepté pour compatibilité : vivace n'exécute jamais les scripts.
+    #[arg(long)]
+    no_scripts: bool,
+    #[arg(long)]
+    no_plugins: bool,
+    /// Accepté pour compatibilité : vivace n'audite pas (encore).
+    #[arg(long)]
+    no_audit: bool,
+    #[arg(long)]
+    prefer_stable: bool,
+    #[arg(long)]
+    prefer_lowest: bool,
+    #[arg(long)]
+    ignore_platform_reqs: bool,
+    #[arg(long = "ignore-platform-req", value_name = "REQ")]
+    ignore_platform_req: Vec<String>,
+    #[arg(long)]
+    no_fallback: bool,
+    #[arg(long)]
+    offline: bool,
+    #[arg(long, value_name = "DIR")]
+    working_dir: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -96,6 +138,7 @@ fn main() -> anyhow::Result<()> {
     let code = match Cli::parse() {
         Cli::Install(args) => run_install(&args)?,
         Cli::DumpAutoload(args) => run_dump(&args)?,
+        Cli::Update(args) => run_update(&args)?,
     };
     if code != 0 {
         std::process::exit(code);
@@ -540,4 +583,110 @@ fn which_composer() -> Option<PathBuf> {
     std::env::split_paths(&path)
         .map(|d| d.join("composer"))
         .find(|c| c.is_file())
+}
+
+/// `composer update` : résolution (port exact du solveur de Composer),
+/// écriture du lock si ses données changent, puis `install`.
+fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
+    use vivace_resolver::platform_filter::PlatformRequirementFilter;
+    use vivace_resolver::session::UpdateSession;
+    let t0 = std::time::Instant::now();
+    let project = project_dir(args.working_dir.as_deref())?;
+    let manifest_path = project.join("composer.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .with_context(|| format!("cannot read {}", manifest_path.display()))?;
+    let home = vivace_core::fetch::composer_home();
+    // Transport réseau des dépôts composer distants : le Fetcher de
+    // vivace-core (auth de Composer, retries), rendu synchrone.
+    let runtime =
+        Arc::new(tokio::runtime::Runtime::new().context("cannot start the async runtime")?);
+    let fetcher = Arc::new(vivace_core::fetch::Fetcher::new(
+        vivace_core::fetch::composer_cache_dir(),
+        vivace_core::fetch::Auth::load(&project),
+    )?);
+    let offline = args.offline;
+    let http: vivace_resolver::repository::HttpFetch = {
+        let runtime = runtime.clone();
+        Arc::new(move |url: &str| {
+            if offline {
+                return Err(format!("offline: cannot fetch {url}"));
+            }
+            runtime
+                .block_on(fetcher.metadata_bytes(url))
+                .map_err(|e| e.to_string())
+        })
+    };
+    let mut session = UpdateSession::prepare_with(&project, home.as_deref(), true, Some(http))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    trace("prepare", t0);
+    session.prefer_stable = args.prefer_stable;
+    session.prefer_lowest = args.prefer_lowest;
+    let filter = if args.ignore_platform_reqs {
+        PlatformRequirementFilter::IgnoreAll
+    } else if !args.ignore_platform_req.is_empty() {
+        PlatformRequirementFilter::from_list(&args.ignore_platform_req)
+    } else {
+        PlatformRequirementFilter::IgnoreNothing
+    };
+    eprintln!("Loading composer repositories with package information");
+    eprintln!("Updating dependencies");
+    let (lock, report) = session
+        .update(&manifest_text, &filter)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    trace("resolve", t0);
+
+    let lock_path = project.join("composer.lock");
+    let mut text =
+        vivace_core::phpjson::php_json_encode_with(&lock, vivace_core::phpjson::FLAGS_JSONFILE)?;
+    text.push('\n');
+    // `Locker::setLockData` : réécrit seulement si les données changent
+    // (comparées après un même ré-encodage, comme `$lock !== getLockData()`).
+    let unchanged = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|old| serde_json::from_str::<serde_json::Value>(&old).ok())
+        .and_then(|old| {
+            vivace_core::phpjson::php_json_encode_with(&old, vivace_core::phpjson::FLAGS_JSONFILE)
+                .ok()
+        })
+        .is_some_and(|old| old + "\n" == text);
+    if report.transaction.transaction.operations.is_empty() {
+        eprintln!("Nothing to modify in lock file");
+    } else {
+        let ops = &report.transaction.transaction.operations;
+        let count = |f: &dyn Fn(&vivace_resolver::transaction::Operation) -> bool| {
+            ops.iter().filter(|o| f(o)).count()
+        };
+        use vivace_resolver::transaction::Operation;
+        let installs = count(&|o| matches!(o, Operation::Install(_)));
+        let updates = count(&|o| matches!(o, Operation::Update(..)));
+        let removals = count(&|o| matches!(o, Operation::Uninstall(_)));
+        eprintln!(
+            "Lock file operations: {installs} install{}, {updates} update{}, {removals} removal{}",
+            if installs == 1 { "" } else { "s" },
+            if updates == 1 { "" } else { "s" },
+            if removals == 1 { "" } else { "s" }
+        );
+    }
+    if !unchanged {
+        eprintln!("Writing lock file");
+        std::fs::write(&lock_path, &text)
+            .with_context(|| format!("cannot write {}", lock_path.display()))?;
+    }
+    trace("write lock", t0);
+    if args.no_install {
+        return Ok(0);
+    }
+    run_install(&InstallArgs {
+        no_dev: args.no_dev,
+        no_autoloader: args.no_autoloader,
+        optimize_autoloader: args.optimize_autoloader,
+        classmap_authoritative: args.classmap_authoritative,
+        no_scripts: args.no_scripts,
+        no_plugins: args.no_plugins,
+        ignore_platform_reqs: args.ignore_platform_reqs,
+        ignore_platform_req: args.ignore_platform_req.clone(),
+        no_fallback: args.no_fallback,
+        offline: args.offline,
+        working_dir: args.working_dir.clone(),
+    })
 }

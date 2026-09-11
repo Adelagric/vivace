@@ -48,6 +48,10 @@ impl<V> IndexedMap<V> {
 }
 
 pub struct PoolOptimizer {
+    /// Forme textuelle d'une contrainte → ses morceaux disjonctifs
+    /// (`expandDisjunctiveMultiConstraints`), mémoïsés : le même texte de
+    /// lien revient des milliers de fois dans un pool.
+    expansion_cache: HashMap<String, Vec<(String, Constraint)>>,
     irremovable: HashSet<usize>,
     /// name → contraintes (dédoublonnées par forme textuelle, ordre d'insertion).
     require_constraints: HashMap<String, IndexedMap<Constraint>>,
@@ -60,6 +64,7 @@ pub struct PoolOptimizer {
 impl PoolOptimizer {
     pub fn new() -> PoolOptimizer {
         PoolOptimizer {
+            expansion_cache: HashMap::new(),
             irremovable: HashSet::new(),
             require_constraints: HashMap::new(),
             conflict_constraints: HashMap::new(),
@@ -98,18 +103,33 @@ impl PoolOptimizer {
         }
     }
 
+    /// `extractRequireConstraintsPerPackage` / `…Conflict…` : `pretty` est
+    /// la clé de mémoïsation (même texte → même contrainte parsée).
     fn extract(
+        cache: &mut HashMap<String, Vec<(String, Constraint)>>,
         map: &mut HashMap<String, IndexedMap<Constraint>>,
         package: &str,
+        pretty: &str,
         constraint: &Constraint,
     ) {
-        for expanded in Self::expand_disjunctive(constraint) {
-            let key = expanded.to_string();
-            let per_name = map.entry(package.to_owned()).or_default();
+        // `self.version` : même texte, contrainte différente par paquet.
+        let pretty = if pretty == "self.version" {
+            format!("\u{0}{constraint}")
+        } else {
+            pretty.to_owned()
+        };
+        let expansions = cache.entry(pretty).or_insert_with(|| {
+            Self::expand_disjunctive(constraint)
+                .into_iter()
+                .map(|c| (c.to_string(), c))
+                .collect()
+        });
+        let per_name = map.entry(package.to_owned()).or_default();
+        for (key, expanded) in expansions {
             // `$map[$package][(string) $expanded] = $expanded` : réécriture
             // en place, même forme textuelle → même contrainte.
-            if !per_name.contains(&key) {
-                per_name.entry_or_insert_with(&key, || expanded);
+            if !per_name.contains(key) {
+                per_name.entry_or_insert_with(key, || expanded.clone());
             }
         }
     }
@@ -126,21 +146,34 @@ impl PoolOptimizer {
             }
         }
         for (name, constraint) in request.requires.iter() {
-            Self::extract(&mut self.require_constraints, name, constraint);
+            // Les contraintes racine n'ont pas de texte stable sous la main :
+            // leur forme affichée sert de clé.
+            let pretty = format!("\u{0}{constraint}");
+            Self::extract(
+                &mut self.expansion_cache,
+                &mut self.require_constraints,
+                name,
+                &pretty,
+                constraint,
+            );
         }
         for id in 1..=pool.len() {
             let p = &arena[pool.package_by_id(id)];
             for link in p.requires.iter() {
                 Self::extract(
+                    &mut self.expansion_cache,
                     &mut self.require_constraints,
                     &link.target,
+                    &link.pretty_constraint,
                     &link.constraint,
                 );
             }
             for link in p.conflicts.iter() {
                 Self::extract(
+                    &mut self.expansion_cache,
                     &mut self.conflict_constraints,
                     &link.target,
+                    &link.pretty_constraint,
                     &link.constraint,
                 );
             }
@@ -232,31 +265,41 @@ impl PoolOptimizer {
             self.to_remove.insert(id);
             let p = &arena[pool.package_by_id(id)];
             let dependency_hash = Self::dependency_hash(p);
+            // Les morceaux `replace` ne dépendent pas de la contrainte
+            // examinée : une fois par paquet.
+            let replace_parts: String = p
+                .replaces
+                .iter()
+                .filter(|l| l.constraint.matches_version(&p.version))
+                .map(|l| format!("require:{}", l.constraint))
+                .collect();
             for name in p.names(false) {
                 let Some(requires) = self.require_constraints.get(&name) else {
                     continue;
                 };
-                for (_, require_constraint) in requires.iter() {
-                    let mut parts: Vec<String> = Vec::new();
-                    if require_constraint.matches_version(&p.version) {
-                        parts.push(format!("require:{require_constraint}"));
-                    }
-                    for link in p.replaces.iter() {
-                        if link.constraint.matches_version(&p.version) {
-                            parts.push(format!("require:{}", link.constraint));
-                        }
-                    }
-                    if let Some(conflicts) = self.conflict_constraints.get(&name) {
-                        for (_, c) in conflicts.iter() {
-                            if c.matches_version(&p.version) {
-                                parts.push(format!("conflict:{c}"));
-                            }
-                        }
-                    }
-                    if parts.is_empty() {
+                // Idem pour les conflits : une fois par nom.
+                let conflict_parts: String = match self.conflict_constraints.get(&name) {
+                    Some(conflicts) => conflicts
+                        .iter()
+                        .filter(|(_, c)| c.matches_version(&p.version))
+                        .map(|(key, _)| format!("conflict:{key}"))
+                        .collect(),
+                    None => String::new(),
+                };
+                for (key, require_constraint) in requires.iter() {
+                    let matched = require_constraint.matches_version(&p.version);
+                    if !matched && replace_parts.is_empty() && conflict_parts.is_empty() {
                         continue;
                     }
-                    let group_hash = parts.concat();
+                    let mut group_hash = String::with_capacity(
+                        key.len() + 8 + replace_parts.len() + conflict_parts.len(),
+                    );
+                    if matched {
+                        group_hash.push_str("require:");
+                        group_hash.push_str(key);
+                    }
+                    group_hash.push_str(&replace_parts);
+                    group_hash.push_str(&conflict_parts);
                     identical
                         .entry_or_insert_with(&name, IndexedMap::default)
                         .entry_or_insert_with(&group_hash, IndexedMap::default)

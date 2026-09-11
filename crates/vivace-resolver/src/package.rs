@@ -126,6 +126,9 @@ pub enum Origin {
     Repository(usize),
     /// Aucun dépôt : alias racine créé par `PoolBuilder::loadPackage`.
     Detached,
+    /// `$resultRepo` d'`extractDevPackages` : paquets du premier solve
+    /// rechargés depuis leur dump.
+    Result,
 }
 
 #[derive(Debug, Clone)]

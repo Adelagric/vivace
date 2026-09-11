@@ -15,13 +15,21 @@ fn is_special(c: u8) -> bool {
 /// puis `-`/`_`/`+` et tout non-alphanumérique deviennent `.` (sans
 /// doublon), et un `.` est inséré à chaque transition chiffre ↔ non-chiffre.
 pub fn canonicalize(version: &str) -> String {
+    let mut out = Vec::new();
+    canonicalize_into(version, &mut out);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `canonicalize` dans un tampon réutilisable (vidé d'abord).
+fn canonicalize_into(version: &str, out: &mut Vec<u8>) {
+    out.clear();
     let bytes = version.as_bytes();
     let Some((&first, rest)) = bytes.split_first() else {
-        return String::new();
+        return;
     };
     let is_dig = |c: u8| c.is_ascii_digit();
     let is_ndig = |c: u8| !c.is_ascii_digit() && c != b'.';
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() * 2);
+    out.reserve(bytes.len() * 2);
     out.push(first);
     let mut lp = first;
     for &c in rest {
@@ -43,7 +51,6 @@ pub fn canonicalize(version: &str) -> String {
         }
         lp = c;
     }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// `compare_special_version_forms` : rang par préfixe, -1 si inconnu.
@@ -73,9 +80,23 @@ fn compare_special(a: &str, b: &str) -> Ordering {
 }
 
 fn parse_num(s: &str) -> i64 {
-    // strtol : préfixe numérique, 0 sinon.
-    let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().unwrap_or(0)
+    // strtol : préfixe numérique, 0 sinon (saturé comme strtol sur long).
+    let mut n: i64 = 0;
+    for c in s.bytes().take_while(u8::is_ascii_digit) {
+        n = n.saturating_mul(10).saturating_add(i64::from(c - b'0'));
+    }
+    n
+}
+
+/// Chaîne de la forme `\d+(\.\d+)*` : la canonicalisation est l'identité
+/// et la comparaison est purement numérique par composant.
+fn is_plain_dotted(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && b[0].is_ascii_digit()
+        && b[b.len() - 1].is_ascii_digit()
+        && b.iter().all(|c| c.is_ascii_digit() || *c == b'.')
+        && !b.windows(2).any(|w| w == b"..")
 }
 
 fn starts_digit(s: &str) -> bool {
@@ -129,7 +150,36 @@ fn compare_canonical(a: &str, b: &str) -> Ordering {
 
 /// `version_compare($a, $b)` : -1 / 0 / 1.
 pub fn version_compare(a: &str, b: &str) -> Ordering {
-    compare_canonical(&canonicalize(a), &canonicalize(b))
+    if is_plain_dotted(a) && is_plain_dotted(b) {
+        // Chemin rapide sans allocation : mêmes règles (composant manquant
+        // face à un nombre → plus petit).
+        let mut pa = a.split('.');
+        let mut pb = b.split('.');
+        loop {
+            match (pa.next(), pb.next()) {
+                (Some(x), Some(y)) => {
+                    let c = parse_num(x).cmp(&parse_num(y));
+                    if c != Ordering::Equal {
+                        return c;
+                    }
+                }
+                (Some(_), None) => return Ordering::Greater,
+                (None, Some(_)) => return Ordering::Less,
+                (None, None) => return Ordering::Equal,
+            }
+        }
+    }
+    thread_local! {
+        static BUFS: std::cell::RefCell<(Vec<u8>, Vec<u8>)> = const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+    }
+    BUFS.with(|bufs| {
+        let mut bufs = bufs.borrow_mut();
+        let (ca, cb) = &mut *bufs;
+        canonicalize_into(a, ca);
+        canonicalize_into(b, cb);
+        // Entrées ASCII en pratique ; un octet non ASCII garde sa place.
+        compare_canonical(&String::from_utf8_lossy(ca), &String::from_utf8_lossy(cb))
+    })
 }
 
 /// `version_compare($a, $b, $op)`.

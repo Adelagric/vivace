@@ -5,7 +5,7 @@
 //! `providers-url`/`provider-includes` v1 → refus).
 
 use crate::constraint::Constraint;
-use crate::loader::{self, branch_alias, expand_minified};
+use crate::loader::{self, branch_alias, expand_minified_owned};
 use crate::package::{Origin, Package};
 use crate::platform::is_platform_package;
 use crate::version::{normalize, parse_stability, regex, stability_rank, DEFAULT_BRANCH_ALIAS};
@@ -22,6 +22,18 @@ pub struct RepoError(pub String);
 /// Composer en HTTP).
 pub trait Transport {
     fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError>;
+}
+
+/// Récupération réseau fournie par l'appelant (`https://`), `Ok(None)` sur
+/// 404.
+pub type HttpFetch = std::sync::Arc<dyn Fn(&str) -> Result<Option<Vec<u8>>, String> + Send + Sync>;
+
+pub struct HttpTransport(pub HttpFetch);
+
+impl Transport for HttpTransport {
+    fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError> {
+        (self.0)(url).map_err(RepoError)
+    }
 }
 
 /// `file://` : un fichier absent est fatal, comme chez Composer.
@@ -89,7 +101,7 @@ pub struct ComposerRepository {
     /// Chargé au premier `loadPackages`, comme chez Composer.
     root: std::cell::OnceCell<RootData>,
     /// `provider-<name>.json` déjà lus (cache mémoire du run).
-    fetched: std::cell::RefCell<BTreeMap<String, Option<Value>>>,
+    fetched: std::cell::RefCell<BTreeMap<String, Option<std::rc::Rc<Value>>>>,
 }
 
 /// `empty()` PHP sur une valeur JSON.
@@ -297,7 +309,11 @@ impl ComposerRepository {
 
     /// `startCachedAsyncDownload` : le JSON du fichier p2 d'un nom (avec
     /// `~dev`), None si 404 ou sans la clé attendue.
-    fn provider(&self, file_name: &str, package_name: &str) -> Result<Option<Value>, RepoError> {
+    fn provider(
+        &self,
+        file_name: &str,
+        package_name: &str,
+    ) -> Result<Option<std::rc::Rc<Value>>, RepoError> {
         let key = file_name.to_lowercase();
         if let Some(v) = self.fetched.borrow().get(&key) {
             return Ok(v.clone());
@@ -318,7 +334,7 @@ impl ComposerRepository {
                     || v.get("security-advisories").is_some()
                     || v.get("filter").is_some();
                 if has {
-                    Some(v)
+                    Some(std::rc::Rc::new(v))
                 } else {
                     None
                 }
@@ -418,8 +434,9 @@ impl ComposerRepository {
         }
         let mut out = Vec::new();
         for (_, config) in &to_load {
+            let config = Self::with_notification_url(config, root);
             let (package, alias) =
-                loader::load(config, origin, true).map_err(|e| RepoError(e.0))?;
+                loader::load(&config, origin, true).map_err(|e| RepoError(e.0))?;
             let idx = arena.len();
             arena.push(package);
             out.push(idx);
@@ -430,6 +447,27 @@ impl ComposerRepository {
             }
         }
         Ok(out)
+    }
+
+    /// `createPackages` : `$data['notification-url'] ??= $this->notifyUrl`.
+    fn add_notification_url(obj: &mut Map<String, Value>, root: &RootData) {
+        if !obj.contains_key("notification-url") {
+            obj.insert(
+                "notification-url".into(),
+                match &root.notify_url {
+                    Some(u) => Value::String(u.clone()),
+                    None => Value::Null,
+                },
+            );
+        }
+    }
+
+    fn with_notification_url(config: &Value, root: &RootData) -> Value {
+        let mut config = config.clone();
+        if let Some(obj) = config.as_object_mut() {
+            Self::add_notification_url(obj, root);
+        }
+        config
     }
 
     /// `version_normalized` absent ou égal à l'alias de branche par défaut
@@ -555,7 +593,7 @@ impl ComposerRepository {
                 };
             let versions: Vec<Value> =
                 if response.get("minified").and_then(Value::as_str) == Some("composer/2.0") {
-                    expand_minified(&versions)
+                    expand_minified_owned(versions)
                 } else {
                     versions
                 };
@@ -564,7 +602,10 @@ impl ComposerRepository {
             }
             let mut to_load: Vec<Value> = Vec::new();
             for v in versions {
-                let mut data = v.as_object().cloned().unwrap_or_default();
+                let mut data = match v {
+                    Value::Object(o) => o,
+                    _ => Map::new(),
+                };
                 Self::fill_version_normalized(&mut data)?;
                 let normalized = data
                     .get("version_normalized")
@@ -584,6 +625,7 @@ impl ComposerRepository {
                     acceptable,
                     flags,
                 ) {
+                    Self::add_notification_url(&mut data, root);
                     to_load.push(Value::Object(data));
                 }
             }

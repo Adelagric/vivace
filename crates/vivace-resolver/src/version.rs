@@ -39,6 +39,11 @@ pub(crate) fn group<'a>(caps: &pcre2::bytes::Captures<'a>, i: usize) -> &'a str 
 
 /// `VersionParser::parseStability`.
 pub fn parse_stability(version: &str) -> &'static str {
+    // Chemin rapide : une version purement numérique (`1.2.3.0`) est
+    // stable — aucun modificateur ne peut s'y trouver.
+    if !version.is_empty() && version.bytes().all(|c| c.is_ascii_digit() || c == b'.') {
+        return "stable";
+    }
     static HASH: OnceLock<Regex> = OnceLock::new();
     static MOD: OnceLock<Regex> = OnceLock::new();
     let hash = regex(&HASH, r"#.+$", false);

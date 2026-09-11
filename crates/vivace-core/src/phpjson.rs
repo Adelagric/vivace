@@ -43,6 +43,17 @@ pub fn php_json_encode(value: &Value) -> Result<String> {
     php_json_encode_with(value, FLAGS_ZERO)
 }
 
+/// Clé sentinelle : un objet réduit à cette clé s'encode `{}` (un
+/// `stdClass` vide côté PHP, que la sémantique tableau ne peut exprimer).
+pub const STDCLASS_MARKER: &str = "\u{0}stdClass";
+
+/// Un objet vide qui s'encodera `{}`.
+pub fn empty_stdclass() -> Value {
+    let mut m = serde_json::Map::new();
+    m.insert(STDCLASS_MARKER.to_owned(), Value::Null);
+    Value::Object(m)
+}
+
 pub fn php_json_encode_with(value: &Value, opts: EncodeOptions) -> Result<String> {
     let mut out = String::new();
     encode_into(value, &mut out, opts, 0)?;
@@ -65,7 +76,11 @@ fn encode_into(value: &Value, out: &mut String, opts: EncodeOptions, level: usiz
         Value::String(s) => encode_string_with(s, out, opts),
         Value::Array(items) => encode_list(items.iter(), out, opts, level)?,
         Value::Object(map) => {
-            if is_php_list(map) {
+            if map.len() == 1 && map.contains_key(STDCLASS_MARKER) {
+                // `new \stdClass` vide (Locker::fixupJsonDataType) : `{}` là
+                // où un tableau vide donnerait `[]`.
+                out.push_str("{}");
+            } else if is_php_list(map) {
                 encode_list(map.values(), out, opts, level)?;
             } else {
                 out.push('{');

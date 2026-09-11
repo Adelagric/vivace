@@ -17,10 +17,18 @@ pub struct LoadError(pub String);
 
 /// `MetadataMinifier::expand`.
 pub fn expand_minified(versions: &[Value]) -> Vec<Value> {
-    let mut expanded: Vec<Value> = Vec::new();
+    expand_minified_owned(versions.to_vec())
+}
+
+/// `expand` en consommant l'entrée (une copie de moins par version).
+pub fn expand_minified_owned(versions: Vec<Value>) -> Vec<Value> {
+    let mut expanded: Vec<Value> = Vec::with_capacity(versions.len());
     let mut current: Option<Map<String, Value>> = None;
     for v in versions {
-        let data = v.as_object().cloned().unwrap_or_default();
+        let data = match v {
+            Value::Object(o) => o,
+            _ => Map::new(),
+        };
         // `if (!$expandedVersion)` : un premier élément vide compte pour rien.
         if current.as_ref().is_some_and(Map::is_empty) {
             current = None;

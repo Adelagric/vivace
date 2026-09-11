@@ -61,7 +61,7 @@ impl Op {
 }
 
 /// `Bound`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Bound {
     pub version: String,
     pub inclusive: bool,
@@ -121,7 +121,7 @@ impl fmt::Display for Bound {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Constraint {
     /// `Constraint($op, $version)`.
     Single {
@@ -433,8 +433,25 @@ pub struct ParsedConstraint {
     pub pretty: String,
 }
 
-/// `VersionParser::parseConstraints`.
+/// `VersionParser::parseConstraints`, mémoïsé par texte (l'équivalent du
+/// `$linkCache` d'`ArrayLoader::loadPackages`, à l'échelle du processus :
+/// même entrée → même résultat, le parseur est pur).
 pub fn parse_constraints(input: &str) -> Result<ParsedConstraint, VersionError> {
+    thread_local! {
+        static CACHE: std::cell::RefCell<std::collections::HashMap<String, ParsedConstraint>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = CACHE.with(|c| c.borrow().get(input).cloned()) {
+        return Ok(hit);
+    }
+    let parsed = parse_constraints_uncached(input)?;
+    CACHE.with(|c| {
+        c.borrow_mut().insert(input.to_owned(), parsed.clone());
+    });
+    Ok(parsed)
+}
+
+fn parse_constraints_uncached(input: &str) -> Result<ParsedConstraint, VersionError> {
     static OR: OnceLock<Regex> = OnceLock::new();
     static AND: OnceLock<Regex> = OnceLock::new();
     let pretty = input.to_owned();

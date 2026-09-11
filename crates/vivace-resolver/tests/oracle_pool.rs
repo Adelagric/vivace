@@ -74,7 +74,7 @@ fn entry(arena: &[Package], idx: usize) -> Value {
         "name": p.name,
         "version": p.version,
         "pretty": p.pretty_version,
-        "repo": match p.origin { Origin::Root => "root", Origin::Platform => "platform", Origin::Locked => "locked", Origin::Repository(_) => "repo", Origin::Detached => "none" },
+        "repo": match p.origin { Origin::Root => "root", Origin::Platform => "platform", Origin::Locked => "locked", Origin::Repository(_) => "repo", Origin::Detached => "none", Origin::Result => "result" },
         "alias_of": p.alias_of.map(|b| arena[b].version.clone()),
         "root_alias": p.alias_of.map(|_| p.root_package_alias),
         "default_branch": p.is_default_branch,

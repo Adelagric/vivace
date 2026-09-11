@@ -289,6 +289,54 @@ impl Fetcher {
         })
     }
 
+    /// GET de métadonnées (packages.json, fichiers p2) : `Ok(None)` sur 404
+    /// (paquet inconnu, toléré par Composer), erreur sinon ; 3 tentatives
+    /// sur les erreurs de transport.
+    pub async fn metadata_bytes(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        let mut last_err = String::new();
+        for attempt in 0..3u32 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(250 * (1 << attempt))).await;
+            }
+            let mut req = self.client.get(url);
+            if let Ok(parsed) = reqwest::Url::parse(url) {
+                if let Some(host) = parsed.host_str() {
+                    if let Some(authz) = self.auth.authorization_for(host) {
+                        req = req.header(reqwest::header::AUTHORIZATION, authz);
+                    }
+                }
+            }
+            match req.send().await {
+                Ok(resp) => {
+                    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                        return Ok(None);
+                    }
+                    match resp.error_for_status() {
+                        Ok(resp) => match resp.bytes().await {
+                            Ok(b) => return Ok(Some(b.to_vec())),
+                            Err(e) => last_err = e.to_string(),
+                        },
+                        Err(e) => {
+                            // Les 4xx autres que 404 ne se retentent pas.
+                            if e.status().is_some_and(|s| s.is_client_error()) {
+                                return Err(Error::Http {
+                                    url: url.to_owned(),
+                                    message: e.to_string(),
+                                });
+                            }
+                            last_err = e.to_string();
+                        }
+                    }
+                }
+                Err(e) => last_err = e.to_string(),
+            }
+        }
+        Err(Error::Http {
+            url: url.to_owned(),
+            message: format!("échec après 3 tentatives: {last_err}"),
+        })
+    }
+
     async fn try_download(&self, url: &str) -> std::result::Result<Vec<u8>, String> {
         let mut req = self.client.get(url);
         if let Ok(parsed) = reqwest::Url::parse(url) {

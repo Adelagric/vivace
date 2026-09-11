@@ -272,6 +272,18 @@ pub struct LockTransaction {
 }
 
 impl LockTransaction {
+    pub fn empty() -> LockTransaction {
+        LockTransaction {
+            transaction: Transaction {
+                operations: Vec::new(),
+            },
+            all: Vec::new(),
+            non_dev: Vec::new(),
+            dev: Vec::new(),
+            present: Vec::new(),
+        }
+    }
+
     pub fn new(
         pool: &Pool,
         arena: &[Package],

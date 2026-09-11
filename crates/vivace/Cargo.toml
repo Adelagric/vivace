@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 vivace-core = { path = "../vivace-core" }
+vivace-resolver = { path = "../vivace-resolver" }
 vivace-autoload = { path = "../vivace-autoload" }
 anyhow.workspace = true
 clap.workspace = true

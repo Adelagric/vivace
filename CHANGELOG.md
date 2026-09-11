@@ -4,6 +4,27 @@ All notable changes to vivace. The format follows [Keep a Changelog](https://kee
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [0.4.0] — 2026-09-12
+
+### Added
+- **`vivace update`**: dependency resolution by a line-by-line port of
+  Composer 2.10.3's resolver — semver (`composer/semver`), `ComposerRepository`
+  (Packagist v2 protocol, `~dev` files, inline packages, `available-packages`),
+  `PoolBuilder`, `PoolOptimizer`, `RuleSetGenerator`, the CDCL `Solver` with
+  its learning and backtracking, `DefaultPolicy`, `Transaction` /
+  `LockTransaction`, `extractDevPackages` (the second solve that splits
+  `packages-dev`) and `Locker::setLockData` (`ArrayDumper`, content-hash,
+  root aliases, platform requirements). The lock it writes is byte-identical
+  to Composer's on the five application fixtures and four solver cases,
+  from frozen Packagist snapshots; remote `composer` repositories over HTTPS
+  are supported. `--no-install`, `--no-dev`, `--prefer-stable`,
+  `--prefer-lowest`, `--ignore-platform-reqs`, `--ignore-platform-req`.
+  Not yet: `require`/`remove`, partial updates, `--with`, `vcs`/`path`
+  repositories, Composer's problem messages on an unsolvable set.
+- Oracles for the port: `tools/oracle-pool.php` (pool, and with `--solve`
+  the solver's decisions read by reflection), frozen snapshots in
+  `fixtures/registry/`, `harness/update.sh`.
+
 ## [0.3.0] — 2026-09-11
 
 ### Added

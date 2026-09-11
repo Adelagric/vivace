@@ -5,13 +5,16 @@
 //! tools/oracle-pool.php côté Rust.
 
 use crate::constraint::{Constraint, Op};
+use crate::lockfile::{dump_package, lock_data, lock_packages, LockInput};
 use crate::optimizer::PoolOptimizer;
-use crate::package::Package;
+use crate::package::{Origin, Package};
 use crate::platform::{platform_packages, probe};
 use crate::platform_filter::PlatformRequirementFilter;
 use crate::policy::DefaultPolicy;
 use crate::pool::{OrderedMap, Pool, PoolError, Repository, RepositorySet, Request};
-use crate::repository::{locked_repository, ComposerRepository, FileTransport};
+use crate::repository::{
+    locked_repository, ComposerRepository, FileTransport, HttpFetch, HttpTransport,
+};
 use crate::root::RootPackage;
 use crate::solver::{SolveError, Solver};
 use crate::transaction::LockTransaction;
@@ -225,6 +228,9 @@ pub struct UpdateSession {
     pub request: Request,
     pub config: MergedConfig,
     pub dev_mode: bool,
+    /// `--prefer-stable` / `--prefer-lowest` de la ligne de commande.
+    pub prefer_stable: bool,
+    pub prefer_lowest: bool,
 }
 
 impl UpdateSession {
@@ -232,6 +238,16 @@ impl UpdateSession {
         project_dir: &Path,
         composer_home: Option<&Path>,
         dev_mode: bool,
+    ) -> Result<UpdateSession, SessionError> {
+        Self::prepare_with(project_dir, composer_home, dev_mode, None)
+    }
+
+    /// Comme `prepare`, avec un transport réseau pour les dépôts `https://`.
+    pub fn prepare_with(
+        project_dir: &Path,
+        composer_home: Option<&Path>,
+        dev_mode: bool,
+        http: Option<HttpFetch>,
     ) -> Result<UpdateSession, SessionError> {
         // Pas encore de mise à jour partielle par cette entrée (R3).
         let partial_update = false;
@@ -341,7 +357,7 @@ impl UpdateSession {
         set.add_repository(Repository::Root(root_members));
         set.add_repository(Repository::Platform(platform.clone()));
         for repo in &config.repositories {
-            set.add_repository(open_repository(repo)?);
+            set.add_repository(open_repository(repo, http.as_ref())?);
         }
         if let Some(ids) = &locked {
             set.add_repository(Repository::Locked(ids.clone()));
@@ -378,6 +394,8 @@ impl UpdateSession {
             request,
             config,
             dev_mode,
+            prefer_stable: false,
+            prefer_lowest: false,
         })
     }
 
@@ -385,10 +403,202 @@ impl UpdateSession {
         Ok(self.set.create_pool(&mut self.request, &mut self.arena)?)
     }
 
-    /// `Installer::createPolicy(true, …)` sans `--prefer-lowest` ni
-    /// `--minimal-changes`.
+    /// `Installer::createPolicy(true, …)` sans `--minimal-changes`.
     pub fn policy(&self) -> DefaultPolicy {
-        DefaultPolicy::new(self.root.prefer_stable, false, None)
+        DefaultPolicy::new(
+            self.prefer_stable || self.root.prefer_stable,
+            self.prefer_lowest,
+            None,
+        )
+    }
+
+    /// `Installer::extractDevPackages` : second solve sans les require-dev,
+    /// sur les seuls paquets retenus par le premier, pour classer
+    /// `packages` / `packages-dev`.
+    pub fn extract_dev_packages(
+        &mut self,
+        transaction: &mut LockTransaction,
+        policy: &mut DefaultPolicy,
+        filter: &PlatformRequirementFilter,
+    ) -> Result<(), SessionError> {
+        if self.root.package.dev_requires.is_empty() {
+            return Ok(());
+        }
+        // `$resultRepo` : chaque paquet rechargé depuis son dump (`load`, un
+        // par un), alias de branche recréés → [alias, base].
+        let dumps: Vec<Value> = transaction
+            .new_lock_packages(&self.arena, false)
+            .iter()
+            .map(|&idx| Value::Object(dump_package(&self.arena[idx])))
+            .collect();
+        let result_ids =
+            crate::loader::load_packages(&dumps, Origin::Result, &mut self.arena, false)
+                .map_err(|e| SessionError(e.0))?;
+        // createPoolWithAllPackages : racine, plateforme, résultat, avec les
+        // alias racine appliqués au passage.
+        let mut members: Vec<usize> = Vec::new();
+        members.extend(self.fixed_root_alias);
+        members.push(self.fixed_root);
+        members.extend(self.platform.iter().copied());
+        members.extend(result_ids);
+        let mut pool_packages: Vec<usize> = Vec::new();
+        for idx in members {
+            pool_packages.push(idx);
+            let (name, version) = (
+                self.arena[idx].name.clone(),
+                self.arena[idx].version.clone(),
+            );
+            if let Some((alias, alias_normalized)) = self
+                .set
+                .root_aliases
+                .get(&name)
+                .and_then(|m| m.get(&version))
+            {
+                let mut base = idx;
+                while let Some(b) = self.arena[base].alias_of {
+                    base = b;
+                }
+                let mut a = self.arena[base].alias(base, alias_normalized, alias);
+                a.root_package_alias = true;
+                a.origin = Origin::Detached;
+                self.arena.push(a);
+                pool_packages.push(self.arena.len() - 1);
+            }
+        }
+        let pool = Pool::new(pool_packages, Vec::new(), &self.arena);
+        // createRequest (sans lock) + requirePackagesForUpdate(…, false).
+        let mut request = Request::new(None);
+        if let Some(a) = self.fixed_root_alias {
+            request.fix_package(a);
+        }
+        request.fix_package(self.fixed_root);
+        for &p in &self.platform {
+            let provided = self.arena[self.fixed_root]
+                .provides
+                .get(&self.arena[p].name)
+                .map(|l| l.constraint.clone());
+            let provided_here = provided.is_some_and(|c| {
+                c.matches(&Constraint::new(Op::Eq, self.arena[p].version.clone()))
+            });
+            if !provided_here {
+                request.fix_package(p);
+            }
+        }
+        let requires = match &self.root.branch_alias {
+            Some((normalized, pretty)) => self.root.package.alias(0, normalized, pretty).requires,
+            None => self.root.package.requires.clone(),
+        };
+        for link in requires.iter() {
+            request.require_name(&link.target, Some(link.constraint.clone()))?;
+        }
+        let mut solver = Solver::new(&pool, &self.arena);
+        let non_dev = solver.solve(&request, policy, filter).map_err(|e| match e {
+            SolveError::Problems(_) => SessionError(
+                "Unable to find a compatible set of packages based on your non-dev requirements alone.\nYour requirements can be resolved successfully when require-dev packages are present.\nYou may need to move packages from require-dev or some of their dependencies to require.".into(),
+            ),
+            SolveError::Bug(b) => SessionError(b),
+        })?;
+        transaction.set_non_dev_packages(&self.arena, &non_dev);
+        Ok(())
+    }
+
+    /// `extractPlatformRequirements($links)`.
+    fn platform_requirements(links: &crate::package::Links) -> Map<String, Value> {
+        let mut out = Map::new();
+        for l in links.iter() {
+            if crate::platform::is_platform_package(&l.target) {
+                out.insert(l.target.clone(), Value::String(l.pretty_constraint.clone()));
+            }
+        }
+        out
+    }
+
+    /// `Locker::setLockData(...)` : le JSON du lock à écrire.
+    pub fn lock_json(
+        &self,
+        transaction: &LockTransaction,
+        manifest_text: &str,
+    ) -> Result<Value, SessionError> {
+        let content_hash = vivace_core::content_hash::content_hash(manifest_text)
+            .map_err(|e| SessionError(e.to_string()))?;
+        let packages = lock_packages(
+            &self.arena,
+            &transaction.new_lock_packages(&self.arena, false),
+        )
+        .map_err(SessionError)?;
+        let packages_dev = lock_packages(
+            &self.arena,
+            &transaction.new_lock_packages(&self.arena, true),
+        )
+        .map_err(SessionError)?;
+        let (requires, dev_requires) = match &self.root.branch_alias {
+            Some((normalized, pretty)) => {
+                let a = self.root.package.alias(0, normalized, pretty);
+                (a.requires, a.dev_requires)
+            }
+            None => (
+                self.root.package.requires.clone(),
+                self.root.package.dev_requires.clone(),
+            ),
+        };
+        Ok(lock_data(LockInput {
+            content_hash: &content_hash,
+            packages,
+            packages_dev: Some(packages_dev),
+            platform: Self::platform_requirements(&requires),
+            platform_dev: Self::platform_requirements(&dev_requires),
+            aliases: &transaction.aliases(&self.arena, &self.root.aliases),
+            minimum_stability: &self.root.minimum_stability,
+            stability_flags: &self.root.stability_flags,
+            prefer_stable: self.prefer_stable || self.root.prefer_stable,
+            prefer_lowest: self.prefer_lowest,
+            platform_overrides: &self.config.platform,
+        }))
+    }
+
+    /// `composer update --no-install` complet : solve, extraction des
+    /// paquets dev, données du lock. Rend le JSON du lock et le rapport du
+    /// premier solve.
+    pub fn update(
+        &mut self,
+        manifest_text: &str,
+        filter: &PlatformRequirementFilter,
+    ) -> Result<(Value, SolveReport), SessionError> {
+        let trace = std::env::var_os("VIVACE_TRACE").is_some();
+        let t = std::time::Instant::now();
+        let lap = |label: &str, t: &std::time::Instant| {
+            if trace {
+                eprintln!(
+                    "trace: {label:<22} {:>7.1} ms",
+                    t.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        };
+        let mut policy = self.policy();
+        let pool = self.create_pool()?;
+        lap("pool", &t);
+        let pool = if std::env::var("COMPOSER_POOL_OPTIMIZER").as_deref() == Ok("0") {
+            pool
+        } else {
+            PoolOptimizer::new().optimize(&self.request, &pool, &self.arena, &mut policy)
+        };
+        lap("optimize", &t);
+        let mut report = self.solve(&pool, &mut policy, filter).map_err(|e| match e {
+            SolveError::Problems(p) => SessionError(format!(
+                "Your requirements could not be resolved to an installable set of packages ({} problem(s)).",
+                p.len()
+            )),
+            SolveError::Bug(b) => SessionError(b),
+        })?;
+        lap("solve", &t);
+        drop(pool);
+        let mut transaction = std::mem::replace(&mut report.transaction, LockTransaction::empty());
+        self.extract_dev_packages(&mut transaction, &mut policy, filter)?;
+        lap("extract dev", &t);
+        let lock = self.lock_json(&transaction, manifest_text)?;
+        lap("lock data", &t);
+        report.transaction = transaction;
+        Ok((lock, report))
     }
 
     /// `createPool` avec le PoolOptimizer (sauf `COMPOSER_POOL_OPTIMIZER=0`),
@@ -429,7 +639,10 @@ impl UpdateSession {
 
 /// `RepositoryManager::createRepository` restreint aux dépôts `composer`
 /// joignables en `file://` (les autres types arrivent avec R3).
-fn open_repository(repo: &RepoConfig) -> Result<Repository, SessionError> {
+fn open_repository(
+    repo: &RepoConfig,
+    http: Option<&HttpFetch>,
+) -> Result<Repository, SessionError> {
     let def = &repo.definition;
     let kind = def.get("type").and_then(Value::as_str).ok_or_else(|| {
         SessionError(format!(
@@ -453,13 +666,23 @@ fn open_repository(repo: &RepoConfig) -> Result<Repository, SessionError> {
         .get("url")
         .and_then(Value::as_str)
         .ok_or_else(|| SessionError(format!("repository {} has no url", key_string(&repo.key))))?;
-    if !url.starts_with("file://") {
+    let transport: Box<dyn crate::repository::Transport> = if url.starts_with("file://") {
+        Box::new(FileTransport)
+    } else if url.starts_with("http://") || url.starts_with("https://") || !url.contains("://") {
+        match http {
+            Some(h) => Box::new(HttpTransport(h.clone())),
+            None => {
+                return Err(SessionError(format!(
+                    "remote composer repositories need a network transport ({url})"
+                )))
+            }
+        }
+    } else {
         return Err(SessionError(format!(
-            "remote composer repositories are not supported by vivace update yet ({url})"
+            "unsupported repository url scheme ({url})"
         )));
-    }
-    let repo =
-        ComposerRepository::open(url, Box::new(FileTransport)).map_err(|e| SessionError(e.0))?;
+    };
+    let repo = ComposerRepository::open(url, transport).map_err(|e| SessionError(e.0))?;
     Ok(Repository::Composer(Box::new(repo)))
 }
 

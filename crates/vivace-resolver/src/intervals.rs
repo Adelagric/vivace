@@ -242,6 +242,24 @@ pub fn compact_constraint(constraint: &Constraint) -> Constraint {
 
 /// `Intervals::get` / `generateIntervals`.
 pub fn generate(constraint: &Constraint, stop_on_first_valid: bool) -> Intervals {
+    // `Intervals::$intervalsCache` (par forme textuelle chez Composer) :
+    // ici par valeur structurelle, même résultat.
+    thread_local! {
+        static CACHE: std::cell::RefCell<std::collections::HashMap<(Constraint, bool), Intervals>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let key = (constraint.clone(), stop_on_first_valid);
+    if let Some(hit) = CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        return hit;
+    }
+    let out = generate_uncached(constraint, stop_on_first_valid);
+    CACHE.with(|c| {
+        c.borrow_mut().insert(key, out.clone());
+    });
+    out
+}
+
+fn generate_uncached(constraint: &Constraint, stop_on_first_valid: bool) -> Intervals {
     match constraint {
         Constraint::MatchAll => Intervals {
             numeric: vec![Interval {

@@ -2,7 +2,8 @@
 
 [![ci](https://github.com/Adelagric/vivace/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vivace/actions/workflows/ci.yml)
 
-A fast, drop-in replacement for `composer install`, written in Rust.
+A fast, drop-in replacement for `composer install` and `composer update`,
+written in Rust.
 
 vivace reads your `composer.json` and `composer.lock`, downloads the same
 dists, and produces a `vendor/` that is **byte-for-byte identical** to what
@@ -13,8 +14,16 @@ PHP, extracts every package once into a content-addressed store and clones
 it into `vendor/` (APFS `clonefile`, hardlinks elsewhere), and caches class
 maps per store entry.
 
+`vivace update` resolves dependencies with a line-by-line port of
+Composer's own solver (its pool builder, pool optimizer, rule set, CDCL
+solver and policy) and writes a `composer.lock` that is **byte-for-byte
+identical** to the one Composer 2.10.3 writes from the same metadata —
+same decisions in the same order, same `packages` / `packages-dev` split,
+same JSON.
+
 ```
 composer install       →  vivace install
+composer update        →  vivace update
 composer dump-autoload →  vivace dump-autoload
 ```
 
@@ -96,10 +105,34 @@ back to Composer with a message. `drupal/core-project-message` and
 plain libraries. Not yet: `cweagans/composer-patches` and
 `drupal/legacy-project` (`core-vendor-hardening`).
 
+## The resolver
+
+`vivace update` is not a new resolver: it is Composer's, ported function by
+function from the pinned 2.10.3 source (`PoolBuilder`, `PoolOptimizer`,
+`RuleSetGenerator`, `Solver`, `DefaultPolicy`, `LockTransaction`,
+`Locker`), because the only lock file worth writing is the one Composer
+would have written. It is checked three ways on frozen Packagist snapshots
+(`fixtures/registry/`, captured by `tools/snapshot-packagist.sh` so that
+both tools see the same metadata): the candidate pool is compared package by
+package, in order, with the pool Composer builds; the solver's full decision
+sequence, learned rules, operations and lock packages are compared with
+Composer's (read by reflection from its `Solver`); and
+[`harness/update.sh`](harness/update.sh) diffs the `composer.lock` written by
+`composer update --no-install` and by `vivace update --no-install` on the
+five application fixtures plus four solver cases (backtracking, an
+unsolvable set, root aliases, virtual packages) — zero differences. Remote
+`composer` repositories over HTTPS work (the Drupal fixture resolves
+against `packages.drupal.org` live); Packagist v1 provider repositories,
+`vcs`/`path`/`package` repositories, partial updates (`composer update
+vendor/name`), `--with`, `require`/`remove` and Composer's problem
+messages are not there yet.
+
 ## What vivace does not do (v1)
 
-- **Resolve dependencies.** No `update`, no `require`: you need a
-  `composer.lock`. (A PubGrub-based resolver is the natural next step.)
+- **`require`, `remove`, partial updates, VCS repositories.** `update`
+  resolves the whole `composer.json` against `composer`-type repositories
+  only (Packagist v2 protocol); an unsolvable set is reported without
+  Composer's explanation for now.
 - **Run scripts or plugins.** vivace never executes PHP. `symfony/runtime`,
   `composer/installers` and `drupal/core-composer-scaffold` are emulated
   natively; root `scripts` (including `pre/post-drupal-scaffold-cmd` hooks)
