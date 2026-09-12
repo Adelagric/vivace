@@ -13,7 +13,7 @@ use crate::platform_filter::PlatformRequirementFilter;
 use crate::policy::DefaultPolicy;
 use crate::pool::{OrderedMap, Pool, PoolError, Repository, RepositorySet, Request};
 use crate::repository::{
-    locked_repository, ComposerRepository, FileTransport, HttpFetch, HttpTransport,
+    locked_repository, ComposerRepository, FileTransport, HttpFetch, HttpFetchMany, HttpTransport,
 };
 use crate::root::RootPackage;
 use crate::solver::{SolveError, Solver};
@@ -247,7 +247,7 @@ impl UpdateSession {
         project_dir: &Path,
         composer_home: Option<&Path>,
         dev_mode: bool,
-        http: Option<HttpFetch>,
+        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
     ) -> Result<UpdateSession, SessionError> {
         // Pas encore de mise à jour partielle par cette entrée (R3).
         let partial_update = false;
@@ -647,7 +647,7 @@ impl UpdateSession {
 /// joignables en `file://` (les autres types arrivent avec R3).
 fn open_repository(
     repo: &RepoConfig,
-    http: Option<&HttpFetch>,
+    http: Option<&(HttpFetch, Option<HttpFetchMany>)>,
 ) -> Result<Repository, SessionError> {
     let def = &repo.definition;
     let kind = def.get("type").and_then(Value::as_str).ok_or_else(|| {
@@ -676,7 +676,10 @@ fn open_repository(
         Box::new(FileTransport)
     } else if url.starts_with("http://") || url.starts_with("https://") || !url.contains("://") {
         match http {
-            Some(h) => Box::new(HttpTransport(h.clone())),
+            Some(h) => Box::new(HttpTransport {
+                fetch: h.0.clone(),
+                fetch_many: h.1.clone(),
+            }),
             None => {
                 return Err(SessionError(format!(
                     "remote composer repositories need a network transport ({url})"

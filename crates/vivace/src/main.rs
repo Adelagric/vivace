@@ -607,6 +607,7 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     let offline = args.offline;
     let http: vivace_resolver::repository::HttpFetch = {
         let runtime = runtime.clone();
+        let fetcher = fetcher.clone();
         Arc::new(move |url: &str| {
             if offline {
                 return Err(format!("offline: cannot fetch {url}"));
@@ -616,8 +617,43 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
                 .map_err(|e| e.to_string())
         })
     };
-    let mut session = UpdateSession::prepare_with(&project, home.as_deref(), true, Some(http))
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Lot en parallèle (Composer : curl multi, 12 téléchargements à la fois).
+    let http_many: vivace_resolver::repository::HttpFetchMany = {
+        let runtime = runtime.clone();
+        let fetcher = fetcher.clone();
+        Arc::new(move |urls: &[String]| {
+            if offline {
+                return urls
+                    .iter()
+                    .map(|u| Err(format!("offline: cannot fetch {u}")))
+                    .collect();
+            }
+            let urls: Vec<String> = urls.to_vec();
+            runtime.block_on(async {
+                let sem = Arc::new(tokio::sync::Semaphore::new(12));
+                let tasks: Vec<_> = urls
+                    .iter()
+                    .map(|u| {
+                        let sem = sem.clone();
+                        let fetcher = fetcher.clone();
+                        let u = u.clone();
+                        async move {
+                            let _permit = sem.acquire().await;
+                            fetcher.metadata_bytes(&u).await.map_err(|e| e.to_string())
+                        }
+                    })
+                    .collect();
+                futures_join_all(tasks).await
+            })
+        })
+    };
+    let mut session = UpdateSession::prepare_with(
+        &project,
+        home.as_deref(),
+        true,
+        Some((http, Some(http_many))),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     trace("prepare", t0);
     // BaseCommand : COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST valent
     // les options.
@@ -695,4 +731,18 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
         offline: args.offline,
         working_dir: args.working_dir.clone(),
     })
+}
+
+/// `join_all` minimal (pas de dépendance futures) : les tâches tournent
+/// concurremment sur le runtime, résultats dans l'ordre.
+async fn futures_join_all<F: std::future::Future + Send + 'static>(tasks: Vec<F>) -> Vec<F::Output>
+where
+    F::Output: Send + 'static,
+{
+    let handles: Vec<_> = tasks.into_iter().map(tokio::spawn).collect();
+    let mut out = Vec::with_capacity(handles.len());
+    for h in handles {
+        out.push(h.await.expect("metadata task panicked"));
+    }
+    out
 }

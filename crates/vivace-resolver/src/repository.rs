@@ -22,17 +22,35 @@ pub struct RepoError(pub String);
 /// Composer en HTTP).
 pub trait Transport {
     fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError>;
+    /// Plusieurs URL d'un coup (un lot de `loadAsyncPackages`, que Composer
+    /// télécharge en parallèle) ; résultats dans l'ordre des URL. Par défaut
+    /// séquentiel.
+    fn fetch_many(&self, urls: &[String]) -> Vec<Result<Option<Vec<u8>>, RepoError>> {
+        urls.iter().map(|u| self.fetch(u)).collect()
+    }
 }
 
 /// Récupération réseau fournie par l'appelant (`https://`), `Ok(None)` sur
 /// 404.
 pub type HttpFetch = std::sync::Arc<dyn Fn(&str) -> Result<Option<Vec<u8>>, String> + Send + Sync>;
+/// Variante par lot : toutes les URL en parallèle, résultats dans l'ordre.
+pub type HttpFetchMany =
+    std::sync::Arc<dyn Fn(&[String]) -> Vec<Result<Option<Vec<u8>>, String>> + Send + Sync>;
 
-pub struct HttpTransport(pub HttpFetch);
+pub struct HttpTransport {
+    pub fetch: HttpFetch,
+    pub fetch_many: Option<HttpFetchMany>,
+}
 
 impl Transport for HttpTransport {
     fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError> {
-        (self.0)(url).map_err(RepoError)
+        (self.fetch)(url).map_err(RepoError)
+    }
+    fn fetch_many(&self, urls: &[String]) -> Vec<Result<Option<Vec<u8>>, RepoError>> {
+        match &self.fetch_many {
+            Some(f) => f(urls).into_iter().map(|r| r.map_err(RepoError)).collect(),
+            None => urls.iter().map(|u| self.fetch(u)).collect(),
+        }
     }
 }
 
@@ -401,7 +419,18 @@ impl ComposerRepository {
             return Err(RepoError("startCachedAsyncDownload only supports v2 protocol composer repos with a metadata-url".into()));
         };
         let url = template.replace("%package%", &key);
-        let value = match self.transport.fetch(&url)? {
+        let fetched = self.transport.fetch(&url)?;
+        let value = Self::parse_provider(&url, package_name, fetched)?;
+        self.fetched.borrow_mut().insert(key, value.clone());
+        Ok(value)
+    }
+
+    fn parse_provider(
+        url: &str,
+        package_name: &str,
+        fetched: Option<Vec<u8>>,
+    ) -> Result<Option<std::rc::Rc<Value>>, RepoError> {
+        Ok(match fetched {
             None => None,
             Some(bytes) => {
                 let v: Value = serde_json::from_slice(&bytes)
@@ -418,9 +447,38 @@ impl ComposerRepository {
                     None
                 }
             }
+        })
+    }
+
+    /// Les fichiers d'un lot pas encore en cache, téléchargés d'un coup
+    /// (`loadAsyncPackages` lance toutes les promesses avant d'attendre).
+    fn prefetch(&self, names: &[(String, String)]) -> Result<(), RepoError> {
+        let Some(template) = self.root_data()?.lazy_providers_url.clone() else {
+            return Ok(());
         };
-        self.fetched.borrow_mut().insert(key, value.clone());
-        Ok(value)
+        let mut todo: Vec<(String, String, String)> = Vec::new();
+        {
+            let cache = self.fetched.borrow();
+            for (file_name, package_name) in names {
+                let key = file_name.to_lowercase();
+                if cache.contains_key(&key) || todo.iter().any(|(k, _, _)| *k == key) {
+                    continue;
+                }
+                let url = template.replace("%package%", &key);
+                todo.push((key, package_name.clone(), url));
+            }
+        }
+        if todo.len() < 2 {
+            return Ok(());
+        }
+        let urls: Vec<String> = todo.iter().map(|(_, _, u)| u.clone()).collect();
+        let results = self.transport.fetch_many(&urls);
+        let mut cache = self.fetched.borrow_mut();
+        for ((key, package_name, url), result) in todo.into_iter().zip(results) {
+            let value = Self::parse_provider(&url, &package_name, result?)?;
+            cache.insert(key, value);
+        }
+        Ok(())
     }
 
     /// `isVersionAcceptable`.
@@ -723,6 +781,20 @@ impl ComposerRepository {
             }
         }
         names.extend(dev_names);
+
+        let wanted: Vec<(String, String)> = names
+            .iter()
+            .map(|(n, _)| n.to_lowercase())
+            .filter(|n| {
+                let real = n.strip_suffix("~dev").unwrap_or(n);
+                !is_platform_package(real) && real != "__root__"
+            })
+            .map(|n| {
+                let real = n.strip_suffix("~dev").unwrap_or(&n).to_owned();
+                (n.clone(), real)
+            })
+            .collect();
+        self.prefetch(&wanted)?;
 
         for (name, constraint) in &names {
             let name = name.to_lowercase();
