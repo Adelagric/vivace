@@ -27,6 +27,15 @@ enum Cli {
 
 #[derive(clap::Args, Debug)]
 struct UpdateArgs {
+    /// Paquets à mettre à jour (les autres restent verrouillés) ; motifs `vendor/*` acceptés.
+    #[arg(value_name = "PACKAGES")]
+    packages: Vec<String>,
+    /// Mettre aussi à jour leurs dépendances, sauf celles requises par la racine (`-w`).
+    #[arg(short = 'w', long)]
+    with_dependencies: bool,
+    /// Mettre aussi à jour leurs dépendances, exigences racine comprises (`-W`).
+    #[arg(short = 'W', long)]
+    with_all_dependencies: bool,
     /// Écrire le lock sans installer.
     #[arg(long)]
     no_install: bool,
@@ -669,18 +678,40 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     // `cache-repo-dir` de Composer : les métadonnées y sont lues et écrites
     // au format de Composer, avec revalidation `If-Modified-Since`.
     let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
-    let mut session = UpdateSession::prepare_full(
+    // Mise à jour partielle : `update a/b [-w|-W]` (UpdateCommand).
+    let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
+    for p in &args.packages {
+        if ["lock", "nothing", "mirrors"].contains(&p.as_str()) {
+            anyhow::bail!("`vivace update {p}` (lock file metadata refresh) is not supported yet");
+        }
+        if p.contains([' ', '=', ':']) {
+            anyhow::bail!("temporary constraints (`update {p}`, `--with`) are not supported yet");
+        }
+    }
+    let transitive = if args.with_all_dependencies || env_flag("COMPOSER_WITH_ALL_DEPENDENCIES") {
+        vivace_resolver::pool::UpdateMode::ListedWithTransitiveDeps
+    } else if args.with_dependencies || env_flag("COMPOSER_WITH_DEPENDENCIES") {
+        vivace_resolver::pool::UpdateMode::ListedWithTransitiveDepsNoRootRequire
+    } else {
+        vivace_resolver::pool::UpdateMode::OnlyListed
+    };
+    let options = if args.packages.is_empty() {
+        vivace_resolver::session::UpdateOptions::default()
+    } else {
+        vivace_resolver::session::UpdateOptions::partial(&args.packages, transitive)
+    };
+    let mut session = UpdateSession::prepare_update(
         &project,
         home.as_deref(),
         true,
         Some((http, Some(http_many))),
         Some(&cache_repo_dir),
+        &options,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     trace("prepare", t0);
     // BaseCommand : COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST valent
     // les options.
-    let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
     session.prefer_stable = args.prefer_stable || env_flag("COMPOSER_PREFER_STABLE");
     session.prefer_lowest = args.prefer_lowest || env_flag("COMPOSER_PREFER_LOWEST");
     let filter = if args.ignore_platform_reqs {

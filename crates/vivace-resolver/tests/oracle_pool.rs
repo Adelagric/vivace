@@ -164,11 +164,30 @@ fn setup(fx: &str) -> Setup {
     }
 }
 
+/// Cas de mise à jour partielle : (fixture, paquets, mode -w/-W).
+const PARTIAL: &[(&str, &[&str], &str)] = &[
+    ("laravel", &["laravel/pint"], ""),
+    ("symfony", &["doctrine/orm"], "-w"),
+    ("sylius", &["symfony/*"], "-W"),
+    ("sylius", &["symfony/console", "symfony/http-kernel"], "-w"),
+    ("sylius", &["sylius/sylius"], "-W"),
+];
+
 fn oracle(s: &Setup, solve: bool) -> Value {
+    oracle_with(s, solve, &[], "")
+}
+
+fn oracle_with(s: &Setup, solve: bool, update: &[&str], mode: &str) -> Value {
     let mut cmd = Command::new("php");
     cmd.arg(root().join("tools/oracle-pool.php")).arg(phar());
     if solve {
         cmd.arg("--solve");
+    }
+    if !update.is_empty() {
+        cmd.arg("--update").args(update);
+        if !mode.is_empty() {
+            cmd.arg(mode);
+        }
     }
     let out = cmd
         .current_dir(&s.project)
@@ -247,19 +266,63 @@ fn pool_matches_composer_on_snapshots() {
 /// du lock identiques à Composer.
 #[test]
 fn solve_matches_composer_on_snapshots() {
-    use vivace_resolver::platform_filter::PlatformRequirementFilter;
-    use vivace_resolver::transaction::Operation;
     let only: Option<String> = std::env::var("VIVACE_ORACLE_FIXTURE").ok();
     let mut total = 0;
     for fx in FIXTURES {
         if only.as_deref().is_some_and(|o| o != *fx) {
             continue;
         }
-        let s = setup(fx);
-        let expected = oracle(&s, true);
+        total += solve_case(fx, &[], "");
+    }
+    assert_eq!(total, 0, "solve ≠ Composer");
+}
+
+/// Mises à jour partielles : la machinerie `skippedLoad` / `unlockPackage`
+/// de PoolBuilder, exercée sur les mêmes instantanés.
+#[test]
+fn partial_updates_match_composer() {
+    let only: Option<String> = std::env::var("VIVACE_ORACLE_FIXTURE").ok();
+    let mut total = 0;
+    for (fx, update, mode) in PARTIAL {
+        if only.as_deref().is_some_and(|o| o != *fx) {
+            continue;
+        }
+        total += solve_case(fx, update, mode);
+    }
+    assert_eq!(total, 0, "partial update ≠ Composer");
+}
+
+fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
+    use vivace_resolver::platform_filter::PlatformRequirementFilter;
+    use vivace_resolver::session::UpdateOptions;
+    use vivace_resolver::transaction::Operation;
+    let label = if update.is_empty() {
+        fx.to_owned()
+    } else {
+        format!("{fx} update {} {mode}", update.join(" "))
+    };
+    let fx = &label;
+    let mut total = 0;
+    {
+        let s = setup(&label.split(' ').next().unwrap_or(fx).to_owned());
+        let expected = oracle_with(&s, true, update, mode);
         std::env::set_var("COMPOSER_ROOT_VERSION", &s.root_version);
-        let mut session = UpdateSession::prepare(&s.project, Some(&s.home), true)
-            .unwrap_or_else(|e| panic!("{fx}: {e}"));
+        let transitive = match mode {
+            "-w" => vivace_resolver::pool::UpdateMode::ListedWithTransitiveDepsNoRootRequire,
+            "-W" => vivace_resolver::pool::UpdateMode::ListedWithTransitiveDeps,
+            _ => vivace_resolver::pool::UpdateMode::OnlyListed,
+        };
+        let options = if update.is_empty() {
+            UpdateOptions::default()
+        } else {
+            UpdateOptions::partial(
+                &update.iter().map(|u| u.to_string()).collect::<Vec<_>>(),
+                transitive,
+            )
+        };
+        let mut session =
+            UpdateSession::prepare_update(&s.project, Some(&s.home), true, None, None, &options)
+                .unwrap_or_else(|e| panic!("{fx}: {e}"));
         let mut policy = session.policy();
         let pool = session
             .create_optimized_pool(&mut policy)
@@ -272,7 +335,7 @@ fn solve_matches_composer_on_snapshots() {
         let pool_divergences = compare(fx, &expected, &got);
         total += pool_divergences;
         if pool_divergences > 0 {
-            continue;
+            return total;
         }
         let solved = session.solve(
             &pool,
@@ -300,14 +363,14 @@ fn solve_matches_composer_on_snapshots() {
                     total += 1;
                 }
             }
-            continue;
+            return total;
         }
         let report = match solved {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("{fx}: vivace n'a pas de solution : {e:?}");
                 total += 1;
-                continue;
+                return total;
             }
         };
         let (transaction, decisions, rules, learned) = (
@@ -397,5 +460,5 @@ fn solve_matches_composer_on_snapshots() {
         );
         total += d;
     }
-    assert_eq!(total, 0, "solve ≠ Composer");
+    total
 }

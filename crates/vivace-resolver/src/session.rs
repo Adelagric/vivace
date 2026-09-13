@@ -215,6 +215,32 @@ pub struct SolveReport {
     pub learned: usize,
 }
 
+/// Options d'un `update` (`Installer::setUpdateAllowList`,
+/// `setUpdateAllowTransitiveDependencies`).
+#[derive(Debug, Clone, Default)]
+pub struct UpdateOptions {
+    /// `composer update a/b c/*` : motifs, en minuscules et dédoublonnés.
+    pub allow_list: Vec<String>,
+    pub transitive: Option<crate::pool::UpdateMode>,
+}
+
+impl UpdateOptions {
+    /// `Installer::setUpdateAllowList` : `strtolower` + `array_unique`.
+    pub fn partial(packages: &[String], transitive: crate::pool::UpdateMode) -> UpdateOptions {
+        let mut allow_list: Vec<String> = Vec::new();
+        for p in packages {
+            let l = p.to_lowercase();
+            if !allow_list.contains(&l) {
+                allow_list.push(l);
+            }
+        }
+        UpdateOptions {
+            allow_list,
+            transitive: Some(transitive),
+        }
+    }
+}
+
 /// Tout ce que `Installer::doUpdate` a en main juste avant `createPool`.
 pub struct UpdateSession {
     pub arena: Vec<Package>,
@@ -261,8 +287,27 @@ impl UpdateSession {
         http: Option<(HttpFetch, Option<HttpFetchMany>)>,
         cache_repo_dir: Option<&Path>,
     ) -> Result<UpdateSession, SessionError> {
-        // Pas encore de mise à jour partielle par cette entrée (R3).
-        let partial_update = false;
+        Self::prepare_update(
+            project_dir,
+            composer_home,
+            dev_mode,
+            http,
+            cache_repo_dir,
+            &UpdateOptions::default(),
+        )
+    }
+
+    /// Comme `prepare_full`, avec la liste d'autorisation d'une mise à jour
+    /// partielle (`composer update a/b`).
+    pub fn prepare_update(
+        project_dir: &Path,
+        composer_home: Option<&Path>,
+        dev_mode: bool,
+        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
+        cache_repo_dir: Option<&Path>,
+        options: &UpdateOptions,
+    ) -> Result<UpdateSession, SessionError> {
+        let partial_update = !options.allow_list.is_empty();
         let manifest_path = project_dir.join("composer.json");
         let manifest_text = std::fs::read_to_string(&manifest_path)
             .map_err(|e| SessionError(format!("{}: {e}", manifest_path.display())))?;
@@ -375,7 +420,21 @@ impl UpdateSession {
             set.add_repository(Repository::Locked(ids.clone()));
         }
 
+        // `Installer::run` : une mise à jour partielle exige un lock.
+        if partial_update && locked.is_none() {
+            return Err(SessionError(
+                "Cannot update only a partial set of packages without a lock file present. Run `composer update` to generate a lock file.".into(),
+            ));
+        }
         let mut request = Request::new(locked.clone());
+        if partial_update {
+            request.set_update_allow_list(
+                options.allow_list.clone(),
+                options
+                    .transitive
+                    .unwrap_or(crate::pool::UpdateMode::OnlyListed),
+            );
+        }
         if let Some(a) = fixed_root_alias {
             request.fix_package(a);
         }
@@ -588,6 +647,9 @@ impl UpdateSession {
         };
         let mut policy = self.policy();
         let pool = self.create_pool()?;
+        for w in &pool.warnings {
+            eprintln!("Warning: {w}");
+        }
         lap("pool", &t);
         let pool = if std::env::var("COMPOSER_POOL_OPTIMIZER").as_deref() == Ok("0") {
             pool

@@ -11,7 +11,11 @@
 // dans l'ordre (littéraux du pool optimisé), la taille du jeu de règles,
 // les opérations de la LockTransaction et ses paquets pour le lock.
 //
-// Usage : COMPOSER_HOME=… COMPOSER_ROOT_VERSION=… php tools/oracle-pool.php <composer.phar> [--solve]
+// Mise à jour partielle : `--update a/b c/*` (liste d'autorisation) et
+// `-w` / `-W` (dépendances transitives sans / avec les exigences racine),
+// comme `composer update a/b [-w|-W]`.
+//
+// Usage : COMPOSER_HOME=… COMPOSER_ROOT_VERSION=… php tools/oracle-pool.php <composer.phar> [--solve] [--update pkg…] [-w|-W]
 declare(strict_types=1);
 ini_set("memory_limit", "-1");
 
@@ -91,6 +95,23 @@ foreach ($requires as $link) {
 }
 
 $solve = in_array('--solve', $argv, true);
+$allowList = [];
+$transitive = Request::UPDATE_ONLY_LISTED;
+for ($i = 2; $i < count($argv); $i++) {
+    if ($argv[$i] === '--update') {
+        for ($j = $i + 1; $j < count($argv) && $argv[$j][0] !== '-'; $j++) {
+            $allowList[] = $argv[$j];
+        }
+    } elseif ($argv[$i] === '-w') {
+        $transitive = Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS_NO_ROOT_REQUIRE;
+    } elseif ($argv[$i] === '-W') {
+        $transitive = Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS;
+    }
+}
+if (count($allowList) > 0) {
+    // Installer::setUpdateAllowList : strtolower + array_unique.
+    $request->setUpdateAllowList(array_values(array_unique(array_map('strtolower', $allowList))), $transitive);
+}
 $policy = new DefaultPolicy($package->getPreferStable(), false, null);
 $pool = $repositorySet->createPool($request, $io, null, $solve ? new PoolOptimizer($policy) : null);
 
