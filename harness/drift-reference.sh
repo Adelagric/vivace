@@ -24,6 +24,7 @@ twin() {
     FilesystemRepository.php) echo "src/Composer/Repository/FilesystemRepository.php" ;;
     InstalledVersions.php)    echo "src/Composer/InstalledVersions.php" ;;
     JsonFile.php)             echo "src/Composer/Json/JsonFile.php" ;;
+    JsonManipulator.php)      echo "src/Composer/Json/JsonManipulator.php" ;;
     Locker.php)               echo "src/Composer/Package/Locker.php" ;;
     PackageSorter.php)        echo "src/Composer/Util/PackageSorter.php" ;;
     RootPackageLoader.php)    echo "src/Composer/Package/Loader/RootPackageLoader.php" ;;

@@ -17,6 +17,19 @@ byte-identical-output promise are the public API.
   copy is used with a warning, like Composer's degraded mode.
 - Metadata files of a pool batch are fetched in parallel (12 at a time),
   as `loadAsyncPackages` does.
+- Port of `JsonManipulator` (the part `require`/`remove` use: `addLink`
+  with `sort-packages`, `addSubNode`/`removeSubNode`, root keys,
+  `removeConfigSetting`, `format`), with Composer's own regular
+  expressions and PHP's `strnatcmp`; checked against the phar on 12 102
+  editing scenarios over 794 real manifests plus synthetic layouts.
+  Groundwork for `vivace require` and `vivace remove`; no command uses
+  it yet.
+
+### Fixed
+- The JSON encoder now escapes U+2028 and U+2029 as `json_encode` does
+  without `JSON_UNESCAPED_LINE_TERMINATORS`; a package description
+  containing either would have produced a `composer.lock` differing from
+  Composer's by those two characters.
 
 ## [0.4.0] — 2026-09-12
 

@@ -247,6 +247,10 @@ fn encode_string_with(s: &str, out: &mut String, opts: EncodeOptions) {
                 push_unicode_escape(c as u32, out);
             }
             c if c.is_ascii() => out.push(c),
+            // Sans JSON_UNESCAPED_LINE_TERMINATORS, json_encode échappe
+            // U+2028/U+2029 même avec JSON_UNESCAPED_UNICODE.
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
             c if !opts.escape_unicode => out.push(c),
             c => {
                 let cp = c as u32;

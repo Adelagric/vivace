@@ -222,7 +222,11 @@ pub fn normalize(version: &str, full_version: Option<&str>) -> Result<String, Ve
 pub fn preg_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if ".\\+*?[^]$(){}=!<>|:-#/".contains(c) {
+        if c == '\0' {
+            out.push_str("\\000");
+            continue;
+        }
+        if ".\\+*?[^]$(){}=!<>|:-#".contains(c) {
             out.push('\\');
         }
         out.push(c);

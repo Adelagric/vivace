@@ -6,6 +6,7 @@
 pub mod constraint;
 pub mod decisions;
 pub mod intervals;
+pub mod json_manipulator;
 pub mod loader;
 pub mod lockfile;
 pub mod metacache;
