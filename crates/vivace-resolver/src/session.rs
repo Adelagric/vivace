@@ -25,12 +25,33 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 #[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct SessionError(pub String);
+#[error("{message}")]
+pub struct SessionError {
+    pub message: String,
+    pub kind: SessionErrorKind,
+}
+
+/// Ce que Composer fait de l'erreur : un ensemble insoluble
+/// (`SolverProblemsException`) vaut le code retour 2 de `Installer::run`,
+/// tout le reste est une exception qui remonte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionErrorKind {
+    Other,
+    Unsolvable,
+}
+
+impl SessionError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            kind: SessionErrorKind::Other,
+        }
+    }
+}
 
 impl From<PoolError> for SessionError {
     fn from(e: PoolError) -> SessionError {
-        SessionError(e.0)
+        SessionError::new(e.0)
     }
 }
 
@@ -182,9 +203,9 @@ impl MergedConfig {
             let global = home.join("config.json");
             if global.is_file() {
                 let text = std::fs::read_to_string(&global)
-                    .map_err(|e| SessionError(format!("{}: {e}", global.display())))?;
+                    .map_err(|e| SessionError::new(format!("{}: {e}", global.display())))?;
                 let v: Value = serde_json::from_str(&text)
-                    .map_err(|e| SessionError(format!("{}: {e}", global.display())))?;
+                    .map_err(|e| SessionError::new(format!("{}: {e}", global.display())))?;
                 cfg.merge(&v);
             }
         }
@@ -310,14 +331,14 @@ impl UpdateSession {
         let partial_update = !options.allow_list.is_empty();
         let manifest_path = project_dir.join("composer.json");
         let manifest_text = std::fs::read_to_string(&manifest_path)
-            .map_err(|e| SessionError(format!("{}: {e}", manifest_path.display())))?;
+            .map_err(|e| SessionError::new(format!("{}: {e}", manifest_path.display())))?;
         let manifest: Value = serde_json::from_str(&manifest_text)
-            .map_err(|e| SessionError(format!("{}: {e}", manifest_path.display())))?;
+            .map_err(|e| SessionError::new(format!("{}: {e}", manifest_path.display())))?;
         let config = MergedConfig::load(&manifest, composer_home)?;
-        let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError(e.0))?;
-        let probed = probe().map_err(|e| SessionError(e.0))?;
+        let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
+        let probed = probe().map_err(|e| SessionError::new(e.0))?;
         let platform_pkgs =
-            platform_packages(&probed, &config.platform).map_err(|e| SessionError(e.0))?;
+            platform_packages(&probed, &config.platform).map_err(|e| SessionError::new(e.0))?;
 
         let mut arena: Vec<Package> = Vec::new();
 
@@ -349,13 +370,13 @@ impl UpdateSession {
         let lock_path = project_dir.join("composer.lock");
         let lock: Option<Value> = if lock_path.is_file() {
             let text = std::fs::read_to_string(&lock_path)
-                .map_err(|e| SessionError(format!("{}: {e}", lock_path.display())))?;
+                .map_err(|e| SessionError::new(format!("{}: {e}", lock_path.display())))?;
             match serde_json::from_str::<Value>(&text) {
                 Ok(v) if v.get("packages").is_some_and(|p| !p.is_null()) => Some(v),
                 Ok(_) => None,
                 Err(e) => {
                     if partial_update {
-                        return Err(SessionError(format!(
+                        return Err(SessionError::new(format!(
                             "\"{}\" does not contain valid JSON\n{e}",
                             lock_path.display()
                         )));
@@ -367,7 +388,7 @@ impl UpdateSession {
             None
         };
         let locked = match &lock {
-            Some(v) => Some(locked_repository(v, &mut arena).map_err(|e| SessionError(e.0))?),
+            Some(v) => Some(locked_repository(v, &mut arena).map_err(|e| SessionError::new(e.0))?),
             None => None,
         };
 
@@ -422,8 +443,8 @@ impl UpdateSession {
 
         // `Installer::run` : une mise à jour partielle exige un lock.
         if partial_update && locked.is_none() {
-            return Err(SessionError(
-                "Cannot update only a partial set of packages without a lock file present. Run `composer update` to generate a lock file.".into(),
+            return Err(SessionError::new(
+                "Cannot update only a partial set of packages without a lock file present. Run `composer update` to generate a lock file.",
             ));
         }
         let mut request = Request::new(locked.clone());
@@ -504,7 +525,7 @@ impl UpdateSession {
             .collect();
         let result_ids =
             crate::loader::load_packages(&dumps, Origin::Result, &mut self.arena, false)
-                .map_err(|e| SessionError(e.0))?;
+                .map_err(|e| SessionError::new(e.0))?;
         // createPoolWithAllPackages : racine, plateforme, résultat, avec les
         // alias racine appliqués au passage.
         let mut members: Vec<usize> = Vec::new();
@@ -564,10 +585,11 @@ impl UpdateSession {
         }
         let mut solver = Solver::new(&pool, &self.arena);
         let non_dev = solver.solve(&request, policy, filter).map_err(|e| match e {
-            SolveError::Problems(_) => SessionError(
-                "Unable to find a compatible set of packages based on your non-dev requirements alone.\nYour requirements can be resolved successfully when require-dev packages are present.\nYou may need to move packages from require-dev or some of their dependencies to require.".into(),
-            ),
-            SolveError::Bug(b) => SessionError(b),
+            SolveError::Problems(_) => SessionError {
+                message: "Unable to find a compatible set of packages based on your non-dev requirements alone.\nYour requirements can be resolved successfully when require-dev packages are present.\nYou may need to move packages from require-dev or some of their dependencies to require.".into(),
+                kind: SessionErrorKind::Unsolvable,
+            },
+            SolveError::Bug(b) => SessionError::new(b),
         })?;
         transaction.set_non_dev_packages(&self.arena, &non_dev);
         Ok(())
@@ -591,17 +613,17 @@ impl UpdateSession {
         manifest_text: &str,
     ) -> Result<Value, SessionError> {
         let content_hash = vivace_core::content_hash::content_hash(manifest_text)
-            .map_err(|e| SessionError(e.to_string()))?;
+            .map_err(|e| SessionError::new(e.to_string()))?;
         let packages = lock_packages(
             &self.arena,
             &transaction.new_lock_packages(&self.arena, false),
         )
-        .map_err(SessionError)?;
+        .map_err(SessionError::new)?;
         let packages_dev = lock_packages(
             &self.arena,
             &transaction.new_lock_packages(&self.arena, true),
         )
-        .map_err(SessionError)?;
+        .map_err(SessionError::new)?;
         let (requires, dev_requires) = match &self.root.branch_alias {
             Some((normalized, pretty)) => {
                 let a = self.root.package.alias(0, normalized, pretty);
@@ -658,18 +680,21 @@ impl UpdateSession {
         };
         lap("optimize", &t);
         let mut report = self.solve(&pool, &mut policy, filter).map_err(|e| match e {
-            SolveError::Problems(p) => SessionError(format!(
-                "Your requirements could not be resolved to an installable set of packages ({} problem(s)).",
-                p.len()
-            )),
-            SolveError::Bug(b) => SessionError(b),
+            SolveError::Problems(p) => SessionError {
+                message: format!(
+                    "Your requirements could not be resolved to an installable set of packages ({} problem(s)).",
+                    p.len()
+                ),
+                kind: SessionErrorKind::Unsolvable,
+            },
+            SolveError::Bug(b) => SessionError::new(b),
         })?;
         lap("solve", &t);
         // `ValidatingArrayLoader::validatePackage` sur chaque paquet retenu
         // (`LockTransaction::setResultPackages`) : une SecurityException
         // arrête l'update.
         for &idx in &report.transaction.all {
-            crate::lockfile::validate_package(&self.arena[idx]).map_err(SessionError)?;
+            crate::lockfile::validate_package(&self.arena[idx]).map_err(SessionError::new)?;
         }
         drop(pool);
         let mut transaction = std::mem::replace(&mut report.transaction, LockTransaction::empty());
@@ -726,27 +751,26 @@ fn open_repository(
 ) -> Result<Repository, SessionError> {
     let def = &repo.definition;
     let kind = def.get("type").and_then(Value::as_str).ok_or_else(|| {
-        SessionError(format!(
+        SessionError::new(format!(
             "Repository \"{}\" ({def}) must have a type defined",
             key_string(&repo.key)
         ))
     })?;
     if kind != "composer" {
-        return Err(SessionError(format!(
+        return Err(SessionError::new(format!(
             "repository type \"{kind}\" is not supported by vivace update yet ({})",
             key_string(&repo.key)
         )));
     }
     if def.get("only").is_some() || def.get("exclude").is_some() || def.get("canonical").is_some() {
-        return Err(SessionError(format!(
+        return Err(SessionError::new(format!(
             "repository filters (only/exclude/canonical) are not supported by vivace update yet ({})",
             key_string(&repo.key)
         )));
     }
-    let url = def
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or_else(|| SessionError(format!("repository {} has no url", key_string(&repo.key))))?;
+    let url = def.get("url").and_then(Value::as_str).ok_or_else(|| {
+        SessionError::new(format!("repository {} has no url", key_string(&repo.key)))
+    })?;
     let transport: Box<dyn crate::repository::Transport> = if url.starts_with("file://") {
         Box::new(FileTransport)
     } else if url.starts_with("http://") || url.starts_with("https://") || !url.contains("://") {
@@ -756,17 +780,17 @@ fn open_repository(
                 fetch_many: h.1.clone(),
             }),
             None => {
-                return Err(SessionError(format!(
+                return Err(SessionError::new(format!(
                     "remote composer repositories need a network transport ({url})"
                 )))
             }
         }
     } else {
-        return Err(SessionError(format!(
+        return Err(SessionError::new(format!(
             "unsupported repository url scheme ({url})"
         )));
     };
-    let mut repo = ComposerRepository::open(url, transport).map_err(|e| SessionError(e.0))?;
+    let mut repo = ComposerRepository::open(url, transport).map_err(|e| SessionError::new(e.0))?;
     if let Some(options) = def.get("options") {
         repo.options = options.clone();
     }

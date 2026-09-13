@@ -80,13 +80,18 @@ fn pattern_matches(pattern: &str, name: &str) -> bool {
 }
 
 /// `Config::merge` pour `allow-plugins` : la valeur projet remplace la
-/// globale sauf si les deux sont des objets (fusion, projet prioritaire).
-fn merged_allow_plugins(project: Option<&Value>, global: Option<&Value>) -> Option<Value> {
+/// globale sauf si les deux sont des objets — alors
+/// `array_merge($projet, $global, $projet)` : les clés du projet d'abord,
+/// dans son ordre, puis celles que seule la config globale apporte. L'ordre
+/// compte : la première règle qui correspond décide.
+pub fn merged_allow_plugins(project: Option<&Value>, global: Option<&Value>) -> Option<Value> {
     match (project, global) {
         (Some(Value::Object(p)), Some(Value::Object(g))) => {
-            let mut m = g.clone();
-            for (k, v) in p {
-                m.insert(k.clone(), v.clone());
+            let mut m = p.clone();
+            for (k, v) in g {
+                if !m.contains_key(k) {
+                    m.insert(k.clone(), v.clone());
+                }
             }
             Some(Value::Object(m))
         }
@@ -126,7 +131,8 @@ pub fn plugin_allowed(manifest: &Value, package: &str) -> PluginVerdict {
     plugin_verdict(allow.as_ref(), package)
 }
 
-fn global_allow_plugins() -> Option<Value> {
+/// `config.allow-plugins` de COMPOSER_HOME/config.json.
+pub fn global_allow_plugins() -> Option<Value> {
     let path = crate::fetch::composer_home()?.join("config.json");
     let text = std::fs::read_to_string(path).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;

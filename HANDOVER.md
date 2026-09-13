@@ -12,7 +12,8 @@ cargo build --release
 harness/diff-vendor.sh [--with-autoloader]   # parité vs Composer sur les 6 fixtures (projet entier pour wordpress et drupal)
 harness/removal.sh                       # paquets retirés du lock : même projet que Composer après
 harness/transitions.sh                   # montée de version d'un plugin émulé → main rendue à Composer, disque intact
-harness/update.sh                        # (résolveur, R0) locks identiques sur l'instantané Packagist figé — rouge tant que `vivace update` n'existe pas
+harness/update.sh                        # `composer update` vs `vivace update` (complet + 7 cas partiels) : locks identiques sur l'instantané Packagist figé
+harness/steps.sh                         # `composer remove` vs `vivace remove` (26 cas) : composer.json, lock et code retour identiques
 tools/snapshot-packagist.sh <fixture>    # (re)capture un instantané Packagist + lock de référence
 harness/boot.sh                          # les 6 fixtures démarrent sur un vendor 100 % vivace
 harness/drift-reference.sh [phar]        # docs/reference/ == fichiers du phar (2.10.3 ou autre)
@@ -40,7 +41,8 @@ message explicite (jamais de skip silencieux).
 | v0.2 composer/installers natif, drift, action | publié (v0.2.0, 2026-09-11) | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
 | v0.3 drupal/core-composer-scaffold natif | publié (v0.3.0, 2026-09-11) | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
 
-| v0.4 résolveur (option A : port du solveur) | R0 fait : instantanés + harness update.sh (Composer reproduit le lock de référence sur 5 fixtures) ; R1 métadonnées, R2 solveur, R3 `update` à faire | docs/plans/v0.4-resolver.md, fixtures/registry/, harness/update.sh |
+| v0.4 résolveur (option A : port du solveur) | publié (v0.4.0, 2026-09-12) : `vivace update` écrit le lock de Composer à l'octet (pool, séquence de décisions du solveur, opérations, lock) ; cache de métadonnées au format de Composer ; mises à jour partielles | docs/plans/v0.4-resolver.md, tests/oracle_pool.rs, harness/update.sh |
+| v0.5 require/remove | P1 partielles, P2 `JsonManipulator` (12 102 + 725 scénarios vs phar), P3 `remove` faits ; P4 `VersionSelector`, P5 `require`, P7 filtre de sécurité à faire | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
@@ -52,6 +54,8 @@ message explicite (jamais de skip silencieux).
 - **Version du root package** : portée (VersionGuesser git : branche, HEAD détaché, tag exact, branche de feature → parente, branch-alias ; COMPOSER_ROOT_VERSION). Le harness commite un dépôt git identique des deux côtés : parité vérifiée sur `main`. Non exercés par le harness : branches de feature, HEAD détaché, alias de la racine (tests unitaires seulement) ; hg/fossil/svn non portés (défaut `1.0.0+no-version-set`).
 - **Alias des paquets verrouillés** : port de `ArrayLoader::getBranchAlias` (`branch-alias` + `default-branch`), oracle de 31 cas contre le phar ; exercé par le harness via la fixture rector (`dev-main` + `default-branch`). Non exercé par diff : `extra.branch-alias` sur un paquet verrouillé en dev (oracle seulement).
 - **`extra.runtime` personnalisé** : routé en fallback, pas émulé.
+- **Résolveur** : le filtre de sécurité du pool (avis Packagist, bloquant par défaut chez Composer) n'est pas porté — vivace ≡ `COMPOSER_NO_BLOCKING=1`, et le harness le pose des deux côtés ; `bump-after-update` (config ou option) n'est pas exécuté par `vivace update` (Sylius l'a dans sa config : Composer réécrit composer.json après l'update, vivace non) ; `--with`, `update lock/nothing/mirrors`, `--minimal-changes`, l'explication d'un ensemble insoluble, les dépôts `vcs`/`path` : non portés.
+- **`remove`** : `--dry-run`, `--minimal-changes` et `COMPOSER=autre.json` refusés ; toujours non interactif (Composer, sur un TTY sans `-n`, propose de retirer un paquet trouvé dans l'autre section — vivace avertit seulement, comme `-n`) ; la validation `LAX_SCHEMA` après chaque édition n'est pas portée (Composer refuse d'éditer un manifeste déjà invalide, vivace l'édite) ; le code retour d'une erreur de transport diffère (Composer 100 ou statut HTTP, vivace 1) ; `--unused` liste chaque paquet une fois là où Composer répète les alias (message seulement) ; `config.vendor-dir` n'est pas lu (vendor/ partout dans vivace) ; `JsonManipulator` : seuil de backtracking PCRE, `1e999`, substituts UTF-16 isolés, > 512 niveaux (en-tête du module).
 - **Windows** : hors scope v1 (proxies .bat non générés).
 - **Concurrence** : deux installs simultanés sur le même vendor/ ne sont pas
   protégés (comme Composer) ; le store, lui, est sûr (temp+rename).

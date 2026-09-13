@@ -66,6 +66,9 @@ jobs:
       - name: Resolver parity (composer.lock written by `update --no-install`)
         run: harness/update.sh
 
+      - name: Manifest edits (`remove`: composer.json and composer.lock)
+        run: harness/steps.sh
+
       - name: Removals (inside and outside vendor/)
         run: harness/removal.sh
       - name: Transitions left to Composer (plugin upgrade)

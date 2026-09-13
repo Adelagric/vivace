@@ -3,6 +3,7 @@
 //! pool, puis le solveur. Chaque module est un port de la source vendorée
 //! dans docs/reference/resolver/, vérifié par un oracle contre le phar.
 
+pub mod config_source;
 pub mod constraint;
 pub mod decisions;
 pub mod intervals;

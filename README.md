@@ -8,7 +8,8 @@ the same lock file as Composer 2.10.3, byte for byte. No PHP is run.
 
 ```
 composer install       →  vivace install
-composer update        →  vivace update
+composer update        →  vivace update        (also `update vendor/name [-w|-W]`)
+composer remove        →  vivace remove
 composer dump-autoload →  vivace dump-autoload
 ```
 
@@ -79,9 +80,15 @@ candidate pool, then the solver's complete decision sequence, with what
 Composer computes on the same data (`tools/oracle-pool.php`).
 
 Repositories: `composer` type only, Packagist v2 protocol and plain
-`packages.json` files, local or over HTTPS. Not yet: `require`, `remove`,
-partial updates (`composer update vendor/name`), `--with`, `vcs`/`path`
-repositories, Composer's explanation when a set is unsolvable.
+`packages.json` files, local or over HTTPS. Not yet: `require`, `--with`,
+`vcs`/`path` repositories, Composer's explanation when a set is unsolvable.
+
+`vivace remove` edits `composer.json` the way Composer does — a port of
+`JsonManipulator`, which rewrites only the affected keys and keeps the
+file's layout — then runs the partial update `composer remove` runs.
+`harness/steps.sh` plays the same removals through both tools on the
+frozen snapshots and compares `composer.json`, `composer.lock` and the
+exit code.
 
 ## Plugins and scripts
 
@@ -108,6 +115,7 @@ fixtures/make.sh             # once; needs php and composer
 cargo test                   # unit tests and oracles against the Composer phar
 harness/diff-vendor.sh --with-autoloader
 harness/update.sh
+harness/steps.sh
 harness/removal.sh
 harness/transitions.sh
 harness/boot.sh

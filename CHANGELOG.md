@@ -7,6 +7,24 @@ byte-identical-output promise are the public API.
 ## [Unreleased]
 
 ### Added
+- **`vivace remove`**: a port of `RemoveCommand` — `composer.json` is
+  edited in place through the `JsonManipulator` port (names matched
+  case-insensitively and by `vendor/*` patterns, `--dev`, a package found
+  in the other section is reported and left alone as in non-interactive
+  Composer), `allow-plugins` entries of removed plugins are dropped, then
+  the same partial update as Composer runs (`-W`,
+  `--no-update-with-dependencies`, `--no-update`, `--no-install`,
+  `--update-no-dev`, `--unused`), `composer.json` is restored when it
+  fails, and exit code 2 is returned when the package is still installed.
+  `harness/steps.sh` (33 cases on the five snapshots, in CI) checks
+  `composer.json`, `composer.lock` and the exit code against Composer.
+  Not supported: `--dry-run`, `--minimal-changes`, `COMPOSER=other.json`.
+- `update` and `remove` honour `COMPOSER_IGNORE_PLATFORM_REQS` and
+  `COMPOSER_IGNORE_PLATFORM_REQ`, as `BaseCommand` does.
+
+### Changed
+- `update` exits with code 2 when the requirements cannot be resolved,
+  Composer's `ERROR_DEPENDENCY_RESOLUTION_FAILED`, instead of 1.
 - `update` keeps a metadata cache in Composer's own `cache-repo-dir`, in
   Composer's layout and byte format (`packages.json`,
   `provider-<vendor>~<name>[~dev].json`, `last-modified` injected the way
