@@ -8,6 +8,7 @@ pub mod decisions;
 pub mod intervals;
 pub mod loader;
 pub mod lockfile;
+pub mod metacache;
 pub mod optimizer;
 pub mod package;
 pub mod phpver;

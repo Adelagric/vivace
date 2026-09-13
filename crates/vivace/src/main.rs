@@ -605,15 +605,31 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
         vivace_core::fetch::Auth::load(&project),
     )?);
     let offline = args.offline;
+    fn to_fetched(r: vivace_core::fetch::MetadataResponse) -> vivace_resolver::repository::Fetched {
+        use vivace_core::fetch::MetadataResponse as M;
+        use vivace_resolver::repository::Fetched as F;
+        match r {
+            M::NotModified => F::NotModified,
+            M::NotFound => F::NotFound,
+            M::Body {
+                bytes,
+                last_modified,
+            } => F::Body {
+                bytes,
+                last_modified,
+            },
+        }
+    }
     let http: vivace_resolver::repository::HttpFetch = {
         let runtime = runtime.clone();
         let fetcher = fetcher.clone();
-        Arc::new(move |url: &str| {
+        Arc::new(move |url: &str, ims: Option<&str>| {
             if offline {
                 return Err(format!("offline: cannot fetch {url}"));
             }
             runtime
-                .block_on(fetcher.metadata_bytes(url))
+                .block_on(fetcher.metadata_fetch(url, ims))
+                .map(to_fetched)
                 .map_err(|e| e.to_string())
         })
     };
@@ -621,25 +637,28 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     let http_many: vivace_resolver::repository::HttpFetchMany = {
         let runtime = runtime.clone();
         let fetcher = fetcher.clone();
-        Arc::new(move |urls: &[String]| {
+        Arc::new(move |requests: &[vivace_resolver::repository::Request]| {
             if offline {
-                return urls
+                return requests
                     .iter()
-                    .map(|u| Err(format!("offline: cannot fetch {u}")))
+                    .map(|(u, _)| Err(format!("offline: cannot fetch {u}")))
                     .collect();
             }
-            let urls: Vec<String> = urls.to_vec();
+            let requests: Vec<(String, Option<String>)> = requests.to_vec();
             runtime.block_on(async {
                 let sem = Arc::new(tokio::sync::Semaphore::new(12));
-                let tasks: Vec<_> = urls
-                    .iter()
-                    .map(|u| {
+                let tasks: Vec<_> = requests
+                    .into_iter()
+                    .map(|(u, ims)| {
                         let sem = sem.clone();
                         let fetcher = fetcher.clone();
-                        let u = u.clone();
                         async move {
                             let _permit = sem.acquire().await;
-                            fetcher.metadata_bytes(&u).await.map_err(|e| e.to_string())
+                            fetcher
+                                .metadata_fetch(&u, ims.as_deref())
+                                .await
+                                .map(to_fetched)
+                                .map_err(|e| e.to_string())
                         }
                     })
                     .collect();
@@ -647,11 +666,15 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
             })
         })
     };
-    let mut session = UpdateSession::prepare_with(
+    // `cache-repo-dir` de Composer : les métadonnées y sont lues et écrites
+    // au format de Composer, avec revalidation `If-Modified-Since`.
+    let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
+    let mut session = UpdateSession::prepare_full(
         &project,
         home.as_deref(),
         true,
         Some((http, Some(http_many))),
+        Some(&cache_repo_dir),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     trace("prepare", t0);

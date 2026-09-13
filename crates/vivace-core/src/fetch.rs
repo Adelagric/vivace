@@ -199,6 +199,17 @@ fn sha1_hex(bytes: &[u8]) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Réponse d'un GET conditionnel de métadonnées.
+#[derive(Debug, Clone)]
+pub enum MetadataResponse {
+    NotModified,
+    NotFound,
+    Body {
+        bytes: Vec<u8>,
+        last_modified: Option<String>,
+    },
+}
+
 pub struct Fetcher {
     client: reqwest::Client,
     cache_root: PathBuf,
@@ -293,6 +304,20 @@ impl Fetcher {
     /// (paquet inconnu, toléré par Composer), erreur sinon ; 3 tentatives
     /// sur les erreurs de transport.
     pub async fn metadata_bytes(&self, url: &str) -> Result<Option<Vec<u8>>> {
+        match self.metadata_fetch(url, None).await? {
+            MetadataResponse::Body { bytes, .. } => Ok(Some(bytes)),
+            MetadataResponse::NotFound | MetadataResponse::NotModified => Ok(None),
+        }
+    }
+
+    /// GET conditionnel de métadonnées : `If-Modified-Since` quand le cache
+    /// a une date, 304 → `NotModified`, 404 → `NotFound`, sinon le corps et
+    /// l'en-tête `Last-Modified` ; 3 tentatives sur les erreurs de transport.
+    pub async fn metadata_fetch(
+        &self,
+        url: &str,
+        if_modified_since: Option<&str>,
+    ) -> Result<MetadataResponse> {
         let mut last_err = String::new();
         for attempt in 0..3u32 {
             if attempt > 0 {
@@ -306,14 +331,30 @@ impl Fetcher {
                     }
                 }
             }
+            if let Some(ims) = if_modified_since {
+                req = req.header(reqwest::header::IF_MODIFIED_SINCE, ims);
+            }
             match req.send().await {
                 Ok(resp) => {
                     if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                        return Ok(None);
+                        return Ok(MetadataResponse::NotFound);
                     }
+                    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+                        return Ok(MetadataResponse::NotModified);
+                    }
+                    let last_modified = resp
+                        .headers()
+                        .get(reqwest::header::LAST_MODIFIED)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned);
                     match resp.error_for_status() {
                         Ok(resp) => match resp.bytes().await {
-                            Ok(b) => return Ok(Some(b.to_vec())),
+                            Ok(b) => {
+                                return Ok(MetadataResponse::Body {
+                                    bytes: b.to_vec(),
+                                    last_modified,
+                                })
+                            }
                             Err(e) => last_err = e.to_string(),
                         },
                         Err(e) => {

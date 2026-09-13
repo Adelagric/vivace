@@ -20,22 +20,44 @@ pub struct RepoError(pub String);
 
 /// Récupération d'une URL : `Ok(None)` = 404 (paquet inconnu, toléré par
 /// Composer en HTTP).
+/// Résultat d'une récupération conditionnelle (`If-Modified-Since`).
+#[derive(Debug, Clone)]
+pub enum Fetched {
+    /// 304 : le cache est bon.
+    NotModified,
+    /// 404 : paquet inconnu (toléré par Composer en HTTP).
+    NotFound,
+    Body {
+        bytes: Vec<u8>,
+        /// En-tête `Last-Modified` de la réponse.
+        last_modified: Option<String>,
+    },
+}
+
+/// Une requête : URL et `If-Modified-Since` éventuel (la valeur
+/// `last-modified` du fichier en cache).
+pub type Request = (String, Option<String>);
+
 pub trait Transport {
-    fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError>;
-    /// Plusieurs URL d'un coup (un lot de `loadAsyncPackages`, que Composer
-    /// télécharge en parallèle) ; résultats dans l'ordre des URL. Par défaut
-    /// séquentiel.
-    fn fetch_many(&self, urls: &[String]) -> Vec<Result<Option<Vec<u8>>, RepoError>> {
-        urls.iter().map(|u| self.fetch(u)).collect()
+    fn fetch(&self, url: &str, if_modified_since: Option<&str>) -> Result<Fetched, RepoError>;
+    /// Plusieurs requêtes d'un coup (un lot de `loadAsyncPackages`, que
+    /// Composer télécharge en parallèle) ; résultats dans l'ordre. Par
+    /// défaut séquentiel.
+    fn fetch_many(&self, requests: &[Request]) -> Vec<Result<Fetched, RepoError>> {
+        requests
+            .iter()
+            .map(|(u, ims)| self.fetch(u, ims.as_deref()))
+            .collect()
     }
 }
 
 /// Récupération réseau fournie par l'appelant (`https://`), `Ok(None)` sur
 /// 404.
-pub type HttpFetch = std::sync::Arc<dyn Fn(&str) -> Result<Option<Vec<u8>>, String> + Send + Sync>;
-/// Variante par lot : toutes les URL en parallèle, résultats dans l'ordre.
+pub type HttpFetch =
+    std::sync::Arc<dyn Fn(&str, Option<&str>) -> Result<Fetched, String> + Send + Sync>;
+/// Variante par lot : toutes les requêtes en parallèle, résultats dans l'ordre.
 pub type HttpFetchMany =
-    std::sync::Arc<dyn Fn(&[String]) -> Vec<Result<Option<Vec<u8>>, String>> + Send + Sync>;
+    std::sync::Arc<dyn Fn(&[Request]) -> Vec<Result<Fetched, String>> + Send + Sync>;
 
 pub struct HttpTransport {
     pub fetch: HttpFetch,
@@ -43,30 +65,42 @@ pub struct HttpTransport {
 }
 
 impl Transport for HttpTransport {
-    fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError> {
-        (self.fetch)(url).map_err(RepoError)
+    fn fetch(&self, url: &str, if_modified_since: Option<&str>) -> Result<Fetched, RepoError> {
+        (self.fetch)(url, if_modified_since).map_err(RepoError)
     }
-    fn fetch_many(&self, urls: &[String]) -> Vec<Result<Option<Vec<u8>>, RepoError>> {
+    fn fetch_many(&self, requests: &[Request]) -> Vec<Result<Fetched, RepoError>> {
         match &self.fetch_many {
-            Some(f) => f(urls).into_iter().map(|r| r.map_err(RepoError)).collect(),
-            None => urls.iter().map(|u| self.fetch(u)).collect(),
+            Some(f) => f(requests)
+                .into_iter()
+                .map(|r| r.map_err(RepoError))
+                .collect(),
+            None => requests
+                .iter()
+                .map(|(u, ims)| self.fetch(u, ims.as_deref()))
+                .collect(),
         }
     }
 }
 
-/// `file://` : un fichier absent est fatal, comme chez Composer.
+/// `file://` : un fichier absent est fatal, comme chez Composer ; pas de
+/// `Last-Modified`, donc jamais de 304.
 pub struct FileTransport;
 
 impl Transport for FileTransport {
-    fn fetch(&self, url: &str) -> Result<Option<Vec<u8>>, RepoError> {
+    fn fetch(&self, url: &str, _if_modified_since: Option<&str>) -> Result<Fetched, RepoError> {
         let path = url
             .strip_prefix("file://")
             .ok_or_else(|| RepoError(format!("unsupported url scheme: {url}")))?;
-        std::fs::read(path).map(Some).map_err(|e| {
-            RepoError(format!(
-                "The \"{url}\" file could not be downloaded: Failed to open stream: {e}"
-            ))
-        })
+        std::fs::read(path)
+            .map(|bytes| Fetched::Body {
+                bytes,
+                last_modified: None,
+            })
+            .map_err(|e| {
+                RepoError(format!(
+                    "The \"{url}\" file could not be downloaded: Failed to open stream: {e}"
+                ))
+            })
     }
 }
 
@@ -133,6 +167,11 @@ pub struct ComposerRepository {
     /// Dépôt plein : index d'arène de ses paquets une fois chargés
     /// (`getPackages()`), [alias, base] par version aliasée.
     members: std::cell::OnceCell<Vec<usize>>,
+    /// Cache des métadonnées au format de Composer (`cache-repo-dir`).
+    pub cache: Option<crate::metacache::MetadataCache>,
+    /// Le dépôt a déjà été signalé en mode dégradé (réseau en panne, cache
+    /// utilisé) : un seul avertissement.
+    degraded: std::cell::Cell<bool>,
 }
 
 /// `empty()` PHP sur une valeur JSON.
@@ -208,6 +247,8 @@ impl ComposerRepository {
             root: std::cell::OnceCell::new(),
             fetched: std::cell::RefCell::new(BTreeMap::new()),
             members: std::cell::OnceCell::new(),
+            cache: None,
+            degraded: std::cell::Cell::new(false),
         })
     }
 
@@ -216,12 +257,9 @@ impl ComposerRepository {
         if let Some(r) = self.root.get() {
             return Ok(r);
         }
-        let bytes = self
-            .transport
-            .fetch(&self.packages_json_url)?
+        let data: Value = self
+            .fetch_cached(&self.packages_json_url, "packages.json")?
             .ok_or_else(|| RepoError(format!("{} not found", self.packages_json_url)))?;
-        let data: Value = serde_json::from_slice(&bytes)
-            .map_err(|e| RepoError(format!("{}: invalid JSON: {e}", self.packages_json_url)))?;
         let non_empty = |k: &str| !php_empty(data.get(k));
         let mut r = RootData::default();
         if non_empty("notify-batch") {
@@ -361,12 +399,9 @@ impl ComposerRepository {
                 } else {
                     format!("{}/{}", self.base_url, url.trim_start_matches('/'))
                 };
-                let bytes = self
-                    .transport
-                    .fetch(&url)?
+                let included = self
+                    .fetch_cached(&url, include)?
                     .ok_or_else(|| RepoError(format!("{url} not found")))?;
-                let included: Value = serde_json::from_slice(&bytes)
-                    .map_err(|e| RepoError(format!("{url}: invalid JSON: {e}")))?;
                 out.extend(self.load_includes(&included)?);
             }
         }
@@ -404,6 +439,79 @@ impl ComposerRepository {
             .any(|re| re.is_match(name.as_bytes()).unwrap_or(false))
     }
 
+    /// Lecture du cache : (JSON décodé, `last-modified`).
+    fn cached(&self, cache_key: &str) -> Option<(Value, Option<String>)> {
+        let bytes = self.cache.as_ref()?.read(cache_key)?;
+        let v: Value = serde_json::from_slice(&bytes).ok()?;
+        let lm = v
+            .get("last-modified")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        Some((v, lm))
+    }
+
+    /// `asyncFetchFile` + `Cache` : après la réponse, ce que Composer
+    /// garde — 304 → le cache ; 404 → rien (pas écrit) ; 200 → le JSON,
+    /// ré-encodé avec `last-modified` s'il y a l'en-tête, écrit tel quel
+    /// sinon. Une erreur de transport avec un cache daté → mode dégradé.
+    fn settle(
+        &self,
+        url: &str,
+        cache_key: &str,
+        cached: Option<(Value, Option<String>)>,
+        result: Result<Fetched, RepoError>,
+    ) -> Result<Option<Value>, RepoError> {
+        // `fetchFile` (packages.json, includes) encode avec les flags 0,
+        // `asyncFetchFile` (fichiers de paquets) sans échappement.
+        let escaped = !cache_key.starts_with("provider-");
+        match result {
+            Ok(Fetched::NotModified) => Ok(cached.map(|(v, _)| v)),
+            Ok(Fetched::NotFound) => Ok(None),
+            Ok(Fetched::Body {
+                bytes,
+                last_modified,
+            }) => {
+                let data: Value = serde_json::from_slice(&bytes)
+                    .map_err(|e| RepoError(format!("{url}: invalid JSON: {e}")))?;
+                if let Some(cache) = &self.cache {
+                    match &last_modified {
+                        Some(lm) => {
+                            if let Some(encoded) =
+                                crate::metacache::MetadataCache::with_last_modified(
+                                    &data, lm, escaped,
+                                )
+                            {
+                                cache.write(cache_key, &encoded);
+                            }
+                        }
+                        None => cache.write(cache_key, &bytes),
+                    }
+                }
+                Ok(Some(data))
+            }
+            Err(e) => {
+                if let Some((v, Some(_))) = cached {
+                    if !self.degraded.replace(true) {
+                        eprintln!(
+                            "Warning: {} could not be fully loaded ({}), package information was loaded from the local cache and may be out of date",
+                            self.url, e.0
+                        );
+                    }
+                    return Ok(Some(v));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Un fichier du dépôt, via le cache conditionnel.
+    fn fetch_cached(&self, url: &str, cache_key: &str) -> Result<Option<Value>, RepoError> {
+        let cached = self.cached(cache_key);
+        let ims = cached.as_ref().and_then(|(_, lm)| lm.clone());
+        let result = self.transport.fetch(url, ims.as_deref());
+        self.settle(url, cache_key, cached, result)
+    }
+
     /// `startCachedAsyncDownload` : le JSON du fichier p2 d'un nom (avec
     /// `~dev`), None si 404 ou sans la clé attendue.
     fn provider(
@@ -419,35 +527,26 @@ impl ComposerRepository {
             return Err(RepoError("startCachedAsyncDownload only supports v2 protocol composer repos with a metadata-url".into()));
         };
         let url = template.replace("%package%", &key);
-        let fetched = self.transport.fetch(&url)?;
-        let value = Self::parse_provider(&url, package_name, fetched)?;
+        let cache_key = crate::metacache::MetadataCache::provider_key(&key);
+        let data = self.fetch_cached(&url, &cache_key)?;
+        let value = Self::parse_provider(package_name, data);
         self.fetched.borrow_mut().insert(key, value.clone());
         Ok(value)
     }
 
-    fn parse_provider(
-        url: &str,
-        package_name: &str,
-        fetched: Option<Vec<u8>>,
-    ) -> Result<Option<std::rc::Rc<Value>>, RepoError> {
-        Ok(match fetched {
-            None => None,
-            Some(bytes) => {
-                let v: Value = serde_json::from_slice(&bytes)
-                    .map_err(|e| RepoError(format!("{url}: invalid JSON: {e}")))?;
-                let has = v
-                    .get("packages")
-                    .and_then(|p| p.get(package_name))
-                    .is_some()
-                    || v.get("security-advisories").is_some()
-                    || v.get("filter").is_some();
-                if has {
-                    Some(std::rc::Rc::new(v))
-                } else {
-                    None
-                }
-            }
-        })
+    fn parse_provider(package_name: &str, data: Option<Value>) -> Option<std::rc::Rc<Value>> {
+        let v = data?;
+        let has = v
+            .get("packages")
+            .and_then(|p| p.get(package_name))
+            .is_some()
+            || v.get("security-advisories").is_some()
+            || v.get("filter").is_some();
+        if has {
+            Some(std::rc::Rc::new(v))
+        } else {
+            None
+        }
     }
 
     /// Les fichiers d'un lot pas encore en cache, téléchargés d'un coup
@@ -471,12 +570,25 @@ impl ComposerRepository {
         if todo.len() < 2 {
             return Ok(());
         }
-        let urls: Vec<String> = todo.iter().map(|(_, _, u)| u.clone()).collect();
-        let results = self.transport.fetch_many(&urls);
-        let mut cache = self.fetched.borrow_mut();
-        for ((key, package_name, url), result) in todo.into_iter().zip(results) {
-            let value = Self::parse_provider(&url, &package_name, result?)?;
-            cache.insert(key, value);
+        let cached: Vec<Option<(Value, Option<String>)>> = todo
+            .iter()
+            .map(|(key, _, _)| self.cached(&crate::metacache::MetadataCache::provider_key(key)))
+            .collect();
+        let requests: Vec<Request> = todo
+            .iter()
+            .zip(&cached)
+            .map(|((_, _, url), c)| (url.clone(), c.as_ref().and_then(|(_, lm)| lm.clone())))
+            .collect();
+        let results = self.transport.fetch_many(&requests);
+        let mut settled = Vec::with_capacity(todo.len());
+        for (((key, package_name, url), c), result) in todo.into_iter().zip(cached).zip(results) {
+            let cache_key = crate::metacache::MetadataCache::provider_key(&key);
+            let data = self.settle(&url, &cache_key, c, result)?;
+            settled.push((key, Self::parse_provider(&package_name, data)));
+        }
+        let mut memo = self.fetched.borrow_mut();
+        for (key, value) in settled {
+            memo.insert(key, value);
         }
         Ok(())
     }
@@ -1003,4 +1115,112 @@ fn dist_urls(
         }
     }
     urls
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// Transport factice : répond selon un script et note les requêtes.
+    struct Scripted {
+        responses: RefCell<Vec<Fetched>>,
+        seen: std::rc::Rc<RefCell<Vec<Request>>>,
+    }
+
+    impl Transport for Scripted {
+        fn fetch(&self, url: &str, ims: Option<&str>) -> Result<Fetched, RepoError> {
+            self.seen
+                .borrow_mut()
+                .push((url.to_owned(), ims.map(str::to_owned)));
+            let mut responses = self.responses.borrow_mut();
+            assert!(
+                !responses.is_empty(),
+                "unexpected request: {url} (seen: {:?})",
+                self.seen.borrow()
+            );
+            Ok(responses.remove(0))
+        }
+    }
+
+    fn body(json: &str, lm: Option<&str>) -> Fetched {
+        Fetched::Body {
+            bytes: json.as_bytes().to_vec(),
+            last_modified: lm.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn revalidates_from_composer_cache() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let cache_dir = tmp.path().join("repo");
+        let root = r#"{"packages": [], "metadata-url": "/p2/%package%.json"}"#;
+        let provider = r#"{"packages": {"acme/lib": [{"name": "acme/lib", "version": "1.0.0", "version_normalized": "1.0.0.0"}]}}"#;
+
+        // Premier run : 200 avec Last-Modified → écrit dans le cache.
+        let t = Scripted {
+            responses: RefCell::new(vec![
+                body(root, Some("Sat, 12 Sep 2026 10:00:00 GMT")),
+                body(provider, Some("Sun, 13 Sep 2026 09:00:00 GMT")),
+                Fetched::NotFound,
+            ]),
+            seen: std::rc::Rc::new(RefCell::new(Vec::new())),
+        };
+        let mut repo =
+            ComposerRepository::open("https://satis.example.org", Box::new(t)).expect("open");
+        repo.cache = Some(crate::metacache::MetadataCache::new(&cache_dir, &repo.url));
+        let mut arena = Vec::new();
+        let (found, ids) = repo
+            .load_packages(
+                &[("acme/lib".to_owned(), Constraint::MatchAll)],
+                &[("stable".to_owned(), 0)].into_iter().collect(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Origin::Repository(2),
+                &mut arena,
+            )
+            .expect("load");
+        assert_eq!(found, vec!["acme/lib"]);
+        assert_eq!(ids.len(), 1);
+        let dir = cache_dir.join("https---satis.example.org");
+        let cached = std::fs::read_to_string(dir.join("provider-acme~lib.json")).expect("cached");
+        assert!(
+            cached.ends_with(r#""last-modified":"Sun, 13 Sep 2026 09:00:00 GMT"}"#),
+            "{cached}"
+        );
+        assert!(std::fs::read_to_string(dir.join("packages.json"))
+            .expect("root cached")
+            .contains(r#""metadata-url":"\/p2\/%package%.json""#));
+
+        // Second run : If-Modified-Since envoyé, 304 → servi depuis le cache.
+        let seen = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let t = Scripted {
+            responses: RefCell::new(vec![
+                Fetched::NotModified,
+                Fetched::NotModified,
+                Fetched::NotFound,
+            ]),
+            seen: seen.clone(),
+        };
+        let mut repo =
+            ComposerRepository::open("https://satis.example.org", Box::new(t)).expect("open");
+        repo.cache = Some(crate::metacache::MetadataCache::new(&cache_dir, &repo.url));
+        let mut arena = Vec::new();
+        let (found, ids) = repo
+            .load_packages(
+                &[("acme/lib".to_owned(), Constraint::MatchAll)],
+                &[("stable".to_owned(), 0)].into_iter().collect(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Origin::Repository(2),
+                &mut arena,
+            )
+            .expect("load");
+        assert_eq!(found, vec!["acme/lib"]);
+        assert_eq!(arena[ids[0]].version, "1.0.0.0");
+        let seen = seen.borrow();
+        assert_eq!(seen[0].1.as_deref(), Some("Sat, 12 Sep 2026 10:00:00 GMT"));
+        assert_eq!(seen[1].0, "https://satis.example.org/p2/acme/lib.json");
+        assert_eq!(seen[1].1.as_deref(), Some("Sun, 13 Sep 2026 09:00:00 GMT"));
+    }
 }

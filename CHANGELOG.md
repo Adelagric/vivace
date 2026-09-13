@@ -4,6 +4,20 @@ All notable changes to vivace. The format follows [Keep a Changelog](https://kee
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Added
+- `update` keeps a metadata cache in Composer's own `cache-repo-dir`, in
+  Composer's layout and byte format (`packages.json`,
+  `provider-<vendor>~<name>[~dev].json`, `last-modified` injected the way
+  `ComposerRepository` does it), revalidated with `If-Modified-Since`;
+  a cache written by Composer is read by vivace and vice versa (checked:
+  137 files identical after a resolution of the Laravel skeleton against
+  Packagist). When the network fails and the cache has a dated copy, the
+  copy is used with a warning, like Composer's degraded mode.
+- Metadata files of a pool batch are fetched in parallel (12 at a time),
+  as `loadAsyncPackages` does.
+
 ## [0.4.0] — 2026-09-12
 
 ### Added

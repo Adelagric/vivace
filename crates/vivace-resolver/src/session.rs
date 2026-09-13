@@ -249,6 +249,18 @@ impl UpdateSession {
         dev_mode: bool,
         http: Option<(HttpFetch, Option<HttpFetchMany>)>,
     ) -> Result<UpdateSession, SessionError> {
+        Self::prepare_full(project_dir, composer_home, dev_mode, http, None)
+    }
+
+    /// Comme `prepare_with`, avec le répertoire `cache-repo-dir` de Composer
+    /// pour le cache des métadonnées (lu et écrit au format de Composer).
+    pub fn prepare_full(
+        project_dir: &Path,
+        composer_home: Option<&Path>,
+        dev_mode: bool,
+        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
+        cache_repo_dir: Option<&Path>,
+    ) -> Result<UpdateSession, SessionError> {
         // Pas encore de mise à jour partielle par cette entrée (R3).
         let partial_update = false;
         let manifest_path = project_dir.join("composer.json");
@@ -357,7 +369,7 @@ impl UpdateSession {
         set.add_repository(Repository::Root(root_members));
         set.add_repository(Repository::Platform(platform.clone()));
         for repo in &config.repositories {
-            set.add_repository(open_repository(repo, http.as_ref())?);
+            set.add_repository(open_repository(repo, http.as_ref(), cache_repo_dir)?);
         }
         if let Some(ids) = &locked {
             set.add_repository(Repository::Locked(ids.clone()));
@@ -648,6 +660,7 @@ impl UpdateSession {
 fn open_repository(
     repo: &RepoConfig,
     http: Option<&(HttpFetch, Option<HttpFetchMany>)>,
+    cache_repo_dir: Option<&Path>,
 ) -> Result<Repository, SessionError> {
     let def = &repo.definition;
     let kind = def.get("type").and_then(Value::as_str).ok_or_else(|| {
@@ -694,6 +707,9 @@ fn open_repository(
     let mut repo = ComposerRepository::open(url, transport).map_err(|e| SessionError(e.0))?;
     if let Some(options) = def.get("options") {
         repo.options = options.clone();
+    }
+    if let Some(dir) = cache_repo_dir {
+        repo.cache = Some(crate::metacache::MetadataCache::new(dir, &repo.url));
     }
     Ok(Repository::Composer(Box::new(repo)))
 }
