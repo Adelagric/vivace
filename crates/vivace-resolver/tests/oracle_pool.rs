@@ -304,7 +304,7 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
     let fx = &label;
     let mut total = 0;
     {
-        let s = setup(&label.split(' ').next().unwrap_or(fx).to_owned());
+        let s = setup(label.split(' ').next().unwrap_or(fx));
         let expected = oracle_with(&s, true, update, mode);
         std::env::set_var("COMPOSER_ROOT_VERSION", &s.root_version);
         let transitive = match mode {
