@@ -33,6 +33,9 @@ for fx in "$@"; do
   # côtés du harness.
   root_version=""
   [ "$fx" = "rector" ] && root_version="dev-main"
+  # Le filtre de sécurité du pool (avis Packagist) n'est pas porté par
+  # vivace : la capture et le rejeu tournent sans, comme `--no-blocking`.
+  export COMPOSER_NO_BLOCKING=1
   # Une fixture volontairement insoluble (cas de test du solveur) est
   # acceptée : le cache est rempli avant l'échec, et le rejeu doit échouer de
   # la même façon ; elle n'a pas de lock de référence.

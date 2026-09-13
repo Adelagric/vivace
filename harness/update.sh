@@ -11,6 +11,9 @@
 #
 # Usage : harness/update.sh [fixture...]
 set -euo pipefail
+# Le filtre de sécurité du pool n'est pas porté : Composer tourne sans lui
+# (équivalent de --no-blocking), et l'instantané ne contient pas d'avis.
+export COMPOSER_NO_BLOCKING=1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIVACE="$ROOT/target/release/vivace"
