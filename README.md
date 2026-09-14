@@ -27,7 +27,8 @@ curl -fsSL https://raw.githubusercontent.com/Adelagric/vivace/main/install.sh | 
 ```
 
 Linux x86_64/arm64, macOS arm64/x86_64; the script checks the sha256.
-Also `cargo binstall vivace`, or `cargo install --path crates/vivace`.
+Also `cargo install vivace` (crates.io), `cargo binstall vivace`, or
+`cargo install --path crates/vivace`.
 
 GitHub Actions:
 
@@ -130,7 +131,7 @@ The `vivace` crate is a library with a thin binary on top: another program
 can run any vivace command in-process and get the binary's exit code.
 
 ```rust
-// Cargo.toml: vivace = { git = "https://github.com/Adelagric/vivace", tag = "v0.5.0" }
+// Cargo.toml: vivace = "0.5"
 let code = vivace::run(["vivace", "install", "--working-dir", "/srv/app"]);
 ```
 
