@@ -24,5 +24,5 @@ upstream moves.
 
 Nothing is ported from GPL-licensed software. Releases 0.3.0 to 0.5.0
 shipped an emulation of `drupal/core-composer-scaffold` (GPL-2.0-or-later)
-ported from its source; it was removed in 0.6.0 for that reason, and those
-releases are yanked on crates.io.
+ported from its source; it was removed in 0.6.0 for that reason, and the
+`vivace*` crates were deleted from crates.io (only 0.5.0 had been published).

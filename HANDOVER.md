@@ -70,7 +70,9 @@ composer/installers sont à côté des sources vendorées. L'émulation de
 `drupal/core-composer-scaffold` (port d'un code GPL-2.0-or-later, œuvre
 dérivée incompatible avec la distribution MIT/Apache-2.0) a été retirée en
 0.6.0 avec sa source vendorée ; les versions 0.3.0 à 0.5.0 qui la
-contenaient sont yankées sur crates.io. Rien n'est porté d'un logiciel GPL.
+contenaient ne sont plus distribuées sur crates.io (crates `vivace*`
+supprimés le 2026-09-15, ce qui libère aussi le nom pour svandragt/vivace).
+Rien n'est porté d'un logiciel GPL.
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 

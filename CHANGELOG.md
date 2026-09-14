@@ -16,8 +16,9 @@ byte-identical-output promise are the public API.
   `VIVACITY_*` (`VIVACE_*` is no longer read), the cache lives under
   `~/.cache/vivacity` / `~/Library/Caches/vivacity` (a `vivace` cache is
   simply left behind), the action is `Adelagric/vivacity`, the repository
-  redirects from its old name. The `vivace*` crates are yanked on
-  crates.io; nothing else changes in behaviour.
+  redirects from its old name. The `vivace*` crates are deleted from
+  crates.io, which frees the name for the older project; nothing else
+  changes in behaviour.
 - All module docs, comments, error messages and `--help` texts are in
   English.
 
@@ -31,7 +32,8 @@ byte-identical-output promise are the public API.
   plugin is locked and allowed, because Composer would run its
   `pre-autoload-dump` listener. The vendored source under
   `docs/reference/drupal-scaffold/` is removed with it. Releases 0.3.0 to
-  0.5.0 are yanked on crates.io for the same reason.
+  0.5.0 contained it; the only one published on crates.io (0.5.0) is
+  deleted.
 
 ## [0.5.0] — 2026-09-14
 

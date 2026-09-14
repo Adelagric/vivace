@@ -370,7 +370,9 @@ inconnu : `install` bascule sur `composer install` avant toute écriture,
 `dump-autoload` refuse (Composer exécuterait son `pre-autoload-dump`). La
 fixture drupal reste dans le harness et passe par le fallback ; la source
 vendorée `docs/reference/drupal-scaffold/` est supprimée avec le port. Les
-versions 0.3.0 à 0.5.0 sont yankées sur crates.io.
+versions 0.3.0 à 0.5.0 ne sont plus sur crates.io (crates `vivace*`
+supprimés le 2026-09-15 — un yank ne libère pas le nom, signalé par
+svandragt dans l'issue #3).
 
 ## 2026-09-14 — Renommage en vivacity (v0.6)
 
