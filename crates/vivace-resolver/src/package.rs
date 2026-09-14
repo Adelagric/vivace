@@ -1,8 +1,8 @@
-//! Modèle de paquet du résolveur — port de `Composer\Package\{BasePackage,
-//! Package, CompletePackage, AliasPackage, Link}` réduit à ce que le pool et
-//! le solveur lisent, plus le JSON brut de la version (pour écrire le lock à
-//! l'identique). Les paquets vivent dans une arène (`Vec<Package>`) et se
-//! désignent par index, comme Composer par identité d'objet.
+//! Package model of the resolver: port of `Composer\Package\{BasePackage,
+//! Package, CompletePackage, AliasPackage, Link}` reduced to what the pool
+//! and the solver read, plus the raw JSON of the version (to write the lock
+//! identically). Packages live in an arena (`Vec<Package>`) and refer to
+//! each other by index, as Composer does by object identity.
 
 use crate::constraint::{Constraint, Op};
 use crate::version::parse_stability;
@@ -18,7 +18,7 @@ pub enum LinkType {
 }
 
 impl LinkType {
-    /// `BasePackage::$supportedLinkTypes[…]['description']`.
+    /// `BasePackage::$supportedLinkTypes[...]['description']`.
     pub fn description(self) -> &'static str {
         match self {
             LinkType::Require => "requires",
@@ -40,10 +40,11 @@ impl LinkType {
     }
 }
 
-/// `Composer\Package\Link`, plus sa clé dans le tableau PHP qui le porte :
-/// la cible en général, le nom nu pour les `lib-*` de la plateforme
-/// (`PlatformRepository::addLibrary`), aucune (clé numérique) pour les liens
-/// `self.version` ajoutés par `AliasPackage`. `Pool::match` cherche par clé.
+/// `Composer\Package\Link`, plus its key in the PHP array holding it: the
+/// target in general, the bare name for the platform's `lib-*`
+/// (`PlatformRepository::addLibrary`), none (numeric key) for the
+/// `self.version` links added by `AliasPackage`. `Pool::match` looks up by
+/// key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Link {
     pub key: Option<String>,
@@ -55,7 +56,7 @@ pub struct Link {
 }
 
 impl Link {
-    /// Lien indexé par sa cible (cas `ArrayLoader::parseLinks`).
+    /// Link keyed by its target (the `ArrayLoader::parseLinks` case).
     pub fn new(
         source: &str,
         target: &str,
@@ -74,9 +75,9 @@ impl Link {
     }
 }
 
-/// Tableau PHP de liens : ordre d'insertion, une entrée par clé (la
-/// dernière écriture gagne, à la position de la première) ; les liens sans
-/// clé sont les entrées à clé numérique d'`array_merge`.
+/// PHP array of links: insertion order, one entry per key (the last write
+/// wins, at the position of the first); keyless links are the numeric-key
+/// entries of `array_merge`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Links(pub Vec<Link>);
 
@@ -94,7 +95,7 @@ impl Links {
     pub fn get(&self, key: &str) -> Option<&Link> {
         self.0.iter().find(|l| l.key.as_deref() == Some(key))
     }
-    /// `isset($links[0])` : au moins une entrée à clé numérique.
+    /// `isset($links[0])`: at least one numeric-key entry.
     pub fn has_numeric_keys(&self) -> bool {
         self.0.iter().any(|l| l.key.is_none())
     }
@@ -116,27 +117,27 @@ pub struct SourceRef {
     pub reference: Option<String>,
 }
 
-/// D'où vient un paquet (`getRepository()` chez Composer).
+/// Where a package comes from (`getRepository()` in Composer).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Root,
     Platform,
     Locked,
-    /// Index du dépôt distant dans la liste des dépôts.
+    /// Index of the remote repository in the repository list.
     Repository(usize),
-    /// Aucun dépôt : alias racine créé par `PoolBuilder::loadPackage`.
+    /// No repository: root alias created by `PoolBuilder::loadPackage`.
     Detached,
-    /// `$resultRepo` d'`extractDevPackages` : paquets du premier solve
-    /// rechargés depuis leur dump.
+    /// `$resultRepo` of `extractDevPackages`: packages of the first solve
+    /// reloaded from their dump.
     Result,
 }
 
 #[derive(Debug, Clone)]
 pub struct Package {
-    /// Nom en minuscules (`getName`).
+    /// Lowercased name (`getName`).
     pub name: String,
     pub pretty_name: String,
-    /// Version normalisée (`getVersion`).
+    /// Normalized version (`getVersion`).
     pub version: String,
     pub pretty_version: String,
     pub package_type: String,
@@ -149,10 +150,10 @@ pub struct Package {
     pub conflicts: Links,
     pub provides: Links,
     pub replaces: Links,
-    /// JSON brut de la version (métadonnées p2 ou entrée de lock).
+    /// Raw JSON of the version (p2 metadata or lock entry).
     pub raw: Value,
     pub origin: Origin,
-    /// `AliasPackage` : index du paquet aliasé dans l'arène.
+    /// `AliasPackage`: arena index of the aliased package.
     pub alias_of: Option<usize>,
     /// `AliasPackage::isRootPackageAlias`.
     pub root_package_alias: bool,
@@ -193,7 +194,7 @@ impl Package {
         self.stability == "dev"
     }
 
-    /// `getNames()` : nom + cibles des provide et replace.
+    /// `getNames()`: name + targets of provide and replace.
     pub fn names(&self, provides: bool) -> Vec<String> {
         let mut names: Vec<String> = vec![self.name.clone()];
         if provides {
@@ -237,8 +238,8 @@ impl Package {
         }
     }
 
-    /// `AliasPackage::__construct` : copie du paquet avec la version de
-    /// l'alias, la stabilité de l'alias, et les liens `self.version` réécrits
+    /// `AliasPackage::__construct`: copy of the package with the alias
+    /// version, the alias stability, and the `self.version` links rewritten
     /// (`replaceSelfVersionDependencies`).
     pub fn alias(&self, alias_of: usize, version: &str, pretty_version: &str) -> Package {
         let mut a = self.clone();
@@ -259,8 +260,8 @@ impl Package {
                 kind,
                 LinkType::Conflict | LinkType::Provide | LinkType::Replace
             ) {
-                // `array_merge($links, $newLinks)` : les liens self.version
-                // sont ajoutés en plus (clés numériques) — même cible deux fois.
+                // `array_merge($links, $newLinks)`: the self.version links
+                // are appended (numeric keys), so the same target twice.
                 let mut extra: Vec<Link> = Vec::new();
                 for l in links.iter() {
                     out.0.push(l.clone());

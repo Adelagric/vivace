@@ -1,19 +1,19 @@
-//! Sous-ensemble des contraintes composer/semver pour le platform-check.
-//! Port de `VersionParser::parseConstraint(s)` (source épinglé :
-//! docs/reference/SemverVersionParser.php, extrait du phar 2.10.3).
+//! Subset of composer/semver constraints for the platform check.
+//! Port of `VersionParser::parseConstraint(s)` (pinned source:
+//! docs/reference/SemverVersionParser.php, extracted from the 2.10.3 phar).
 //!
-//! Règles clés reproduites :
-//! - `*` / `x.*` : intervalle `[X…-dev, X+1…-dev)`, `*` seul matche tout ;
-//! - `^X.Y.Z` / `~X.Y.Z` : borne basse `>= version-dev` (si pas de suffixe de
-//!   stabilité explicite), borne haute exclusive `< next-dev` ;
-//! - `>=V` et `<V` sans suffixe : la borne devient `V-dev` (`>=8.1` accepte
-//!   `8.1.0-beta1`, `<2.0` refuse `2.0.0-beta`) ; `>V` et `<=V` restent sur la
-//!   version telle quelle ;
-//! - `A - B` : `>= A-dev` ; `<= B` si B a un patch/suffixe, sinon `< next(B)-dev` ;
-//! - OR sur `||` ou `|`, AND sur virgules/espaces.
+//! Key rules reproduced:
+//! - `*` / `x.*`: interval `[X...-dev, X+1...-dev)`, a bare `*` matches everything;
+//! - `^X.Y.Z` / `~X.Y.Z`: lower bound `>= version-dev` (when there is no explicit
+//!   stability suffix), exclusive upper bound `< next-dev`;
+//! - `>=V` and `<V` without suffix: the bound becomes `V-dev` (`>=8.1` accepts
+//!   `8.1.0-beta1`, `<2.0` rejects `2.0.0-beta`); `>V` and `<=V` keep the
+//!   version as is;
+//! - `A - B`: `>= A-dev`; `<= B` if B has a patch/suffix, else `< next(B)-dev`;
+//! - OR on `||` or `|`, AND on commas/spaces.
 //!
-//! Hors sous-ensemble (branches `dev-*`, alias `as`, `@stability`…) :
-//! `Unsupported`, l'appelant traite le cas en hors-scope.
+//! Outside the subset (`dev-*` branches, `as` aliases, `@stability`...):
+//! `Unsupported`, the caller treats the case as out of scope.
 
 use crate::version::{Stability, Version};
 
@@ -37,7 +37,7 @@ enum Op {
     Ge,
 }
 
-/// Groupes OR de conjonctions de contraintes simples.
+/// OR groups of conjunctions of simple constraints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Constraint {
     groups: Vec<Vec<Simple>>,
@@ -77,7 +77,7 @@ impl Constraint {
 }
 
 fn split_or(s: &str) -> Vec<&str> {
-    // `||` d'abord, puis `|` simple (les deux sont acceptés par Composer).
+    // `||` first, then a single `|` (both are accepted by Composer).
     if s.contains("||") {
         s.split("||").collect()
     } else if s.contains('|') {
@@ -88,7 +88,7 @@ fn split_or(s: &str) -> Vec<&str> {
 }
 
 fn parse_and_group(part: &str, original: &str) -> Result<Vec<Simple>, UnsupportedConstraint> {
-    // Tokenise sur virgules/espaces puis recolle « op version » et « A - B ».
+    // Tokenise on commas/spaces, then glue back "op version" and "A - B".
     let raw: Vec<&str> = part
         .split([',', ' ', '\t'])
         .filter(|t| !t.is_empty())
@@ -120,7 +120,7 @@ fn parse_and_group(part: &str, original: &str) -> Result<Vec<Simple>, Unsupporte
     Ok(out)
 }
 
-/// La version a-t-elle un suffixe de stabilité explicite (`-beta1`, `-dev`…) ?
+/// Does the version carry an explicit stability suffix (`-beta1`, `-dev`...)?
 fn has_stability_suffix(s: &str) -> bool {
     s.chars()
         .any(|c| !(c.is_ascii_digit() || c == '.' || c == 'v' || c == 'V'))
@@ -130,8 +130,8 @@ fn parse_version(s: &str, original: &str) -> Result<Version, UnsupportedConstrai
     Version::parse(s).map_err(|_| UnsupportedConstraint(original.to_owned()))
 }
 
-/// Décale d'un cran la composante `position` (1-based) et zéroe la suite —
-/// l'équivalent de `manipulateVersionString(matches, position, 1)`.
+/// Bumps the `position` component (1-based) by one and zeroes the rest, the
+/// equivalent of `manipulateVersionString(matches, position, 1)`.
 fn bump(v: &Version, position: usize) -> Version {
     let mut parts = v.parts;
     parts[position - 1] += 1;
@@ -158,7 +158,7 @@ fn parse_simple(
 ) -> Result<(), UnsupportedConstraint> {
     let t = token.trim();
 
-    // Hyphen range « A - B ».
+    // Hyphen range "A - B".
     if let Some((from, to)) = t.split_once(" - ") {
         let low = parse_version(from, original)?;
         let low = if has_stability_suffix(from) {
@@ -180,13 +180,13 @@ fn parse_simple(
         return Ok(());
     }
 
-    // Wildcards purs.
+    // Pure wildcards.
     if t.chars().all(|c| matches!(c, '*' | 'x' | 'X' | '.' | 'v')) && t.contains(['*', 'x', 'X']) {
         out.push(Simple::Any);
         return Ok(());
     }
 
-    // X-range « 1.2.* ».
+    // X-range "1.2.*".
     if let Some(stem) = t.strip_suffix(".*").or_else(|| t.strip_suffix(".x")) {
         let base = parse_version(stem, original)?;
         if has_stability_suffix(stem) {
@@ -210,7 +210,7 @@ fn parse_simple(
         } else {
             as_dev_floor(v.clone())
         };
-        // Position caret : premier composant non nul (0.x → mineur, 0.0.x → patch).
+        // Caret position: first non-zero component (0.x -> minor, 0.0.x -> patch).
         let stem = rest.split(['-', '+']).next().unwrap_or(rest);
         let given = stem.trim_start_matches(['v', 'V']).split('.').count();
         let position = if v.parts[0] != 0 || given < 2 {
@@ -242,7 +242,7 @@ fn parse_simple(
         return Ok(());
     }
 
-    // Opérateurs simples et version exacte.
+    // Simple operators and exact version.
     let (op, rest) = if let Some(r) = t.strip_prefix(">=") {
         (Op::Ge, r)
     } else if let Some(r) = t.strip_prefix("<=") {
@@ -260,7 +260,7 @@ fn parse_simple(
     };
     let rest = rest.trim();
     let v = parse_version(rest, original)?;
-    // `<` et `>=` sans suffixe explicite : borne ramenée au plancher -dev.
+    // `<` and `>=` without an explicit suffix: bound lowered to the -dev floor.
     let v = if matches!(op, Op::Lt | Op::Ge) && !has_stability_suffix(rest) {
         as_dev_floor(v)
     } else {
@@ -270,7 +270,7 @@ fn parse_simple(
     Ok(())
 }
 
-/// Raccourci : `version` satisfait-elle `constraint` ?
+/// Shortcut: does `version` satisfy `constraint`?
 pub fn satisfies(version: &str, constraint: &str) -> Result<bool, UnsupportedConstraint> {
     let v =
         Version::parse(version).map_err(|_| UnsupportedConstraint(format!("version {version}")))?;
@@ -288,10 +288,10 @@ mod tests {
     #[test]
     fn operators_and_dev_floors() {
         assert!(sat("8.5.10", ">=8.1"));
-        assert!(sat("8.1.0-beta1", ">=8.1")); // >= sans suffixe → plancher -dev
-        assert!(!sat("2.0.0-beta1", "<2.0")); // < sans suffixe → plancher -dev
+        assert!(sat("8.1.0-beta1", ">=8.1")); // >= without suffix -> -dev floor
+        assert!(!sat("2.0.0-beta1", "<2.0")); // < without suffix -> -dev floor
         assert!(sat("1.9.9", "<2.0"));
-        assert!(!sat("8.1.0-beta1", ">8.1")); // > reste sur la version stable
+        assert!(!sat("8.1.0-beta1", ">8.1")); // > stays on the stable version
         assert!(sat("8.1.1", ">8.1"));
         assert!(sat("2.0.0", "<=2.0"));
         assert!(!sat("2.0.1", "<=2.0"));
@@ -303,7 +303,7 @@ mod tests {
     fn caret_tilde_wildcards() {
         assert!(sat("8.5.10", "^8.1"));
         assert!(!sat("9.0.0-alpha1", "^8.1"));
-        assert!(sat("8.1.0-RC1", "^8.1")); // borne basse -dev
+        assert!(sat("8.1.0-RC1", "^8.1")); // -dev lower bound
         assert!(sat("0.3.7", "^0.3"));
         assert!(!sat("0.4.0", "^0.3"));
         assert!(!sat("0.0.4", "^0.0.3"));
@@ -324,10 +324,10 @@ mod tests {
         assert!(sat("1.5.0", ">=1.0 <2.0"));
         assert!(sat("1.5.0", ">=1.0,<2.0"));
         assert!(sat("1.5.0", ">= 1.0 , < 2.0"));
-        assert!(sat("2.0.0", "1.0 - 2.0")); // borne haute élargie: < 2.1-dev
+        assert!(sat("2.0.0", "1.0 - 2.0")); // widened upper bound: < 2.1-dev
         assert!(sat("2.0.9", "1.0 - 2.0"));
         assert!(!sat("2.1.0", "1.0 - 2.0"));
-        assert!(sat("2.0.0", "1.0.0 - 2.0.0")); // patch explicite: <= 2.0.0
+        assert!(sat("2.0.0", "1.0.0 - 2.0.0")); // explicit patch: <= 2.0.0
         assert!(!sat("2.0.1", "1.0.0 - 2.0.0"));
     }
 
@@ -339,9 +339,9 @@ mod tests {
     }
 }
 
-/// Borne basse d'une contrainte (`Bound` de composer/semver) : la plus
-/// petite version admise et son inclusivité. `None` = borne zéro (contrainte
-/// `*`, ou une branche OR sans borne basse).
+/// Lower bound of a constraint (composer/semver's `Bound`): the smallest
+/// admitted version and its inclusivity. `None` = zero bound (`*` constraint,
+/// or an OR branch without a lower bound).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LowerBound {
     pub version: Version,
@@ -349,8 +349,8 @@ pub struct LowerBound {
 }
 
 impl LowerBound {
-    /// `Bound::compareTo($other, '>')` : version puis, à version égale, une
-    /// borne exclusive est « plus haute » qu'une inclusive.
+    /// `Bound::compareTo($other, '>')`: version first, then, at equal version,
+    /// an exclusive bound is "higher" than an inclusive one.
     fn is_higher_than(&self, other: &LowerBound) -> bool {
         match self.version.cmp(&other.version) {
             std::cmp::Ordering::Greater => true,
@@ -364,7 +364,7 @@ impl Constraint {
     pub fn lower_bound(&self) -> Option<LowerBound> {
         let mut result: Option<LowerBound> = None;
         for group in &self.groups {
-            // AND : la plus haute des bornes basses du groupe.
+            // AND: the highest of the group's lower bounds.
             let mut group_bound: Option<LowerBound> = None;
             for c in group {
                 let candidate = match c {
@@ -385,7 +385,7 @@ impl Constraint {
                     group_bound = Some(candidate);
                 }
             }
-            // OR : la plus basse des bornes de groupe ; un groupe sans borne = zéro.
+            // OR: the lowest of the group bounds; a group without a bound = zero.
             let gb = group_bound?;
             if result.as_ref().is_none_or(|r| r.is_higher_than(&gb)) {
                 result = Some(gb);

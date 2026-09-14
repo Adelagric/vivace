@@ -1,5 +1,5 @@
-//! L'entrée bibliothèque : un programme hôte appelle `vivace::run` avec
-//! une ligne de commande et obtient le code retour du binaire.
+//! The library entry point: a host program calls `vivace::run` with a
+//! command line and gets the binary's exit code.
 
 #[test]
 fn run_returns_the_binary_exit_codes() {

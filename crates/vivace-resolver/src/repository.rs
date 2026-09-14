@@ -1,8 +1,8 @@
-//! Dépôts vus par le pool : `ComposerRepository` v2 (`metadata-url`,
-//! fichiers p2 minifiés, `~dev`), le dépôt du lock (`LockArrayRepository`),
-//! la racine et la plateforme (listes de paquets déjà chargés). Port de
-//! docs/reference/resolver/ComposerRepository.php (chemin v2 uniquement :
-//! `providers-url`/`provider-includes` v1 → refus).
+//! Repositories as seen by the pool: `ComposerRepository` v2
+//! (`metadata-url`, minified p2 files, `~dev`), the lock repository
+//! (`LockArrayRepository`), the root and the platform (lists of already
+//! loaded packages). Port of docs/reference/resolver/ComposerRepository.php
+//! (v2 path only: v1 `providers-url`/`provider-includes` -> rejected).
 
 use crate::constraint::Constraint;
 use crate::loader::{self, branch_alias, expand_minified_owned};
@@ -14,10 +14,9 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-/// Erreur de dépôt : de transport (`TransportException` chez Composer —
-/// réseau, fichier absent, 404 là où il est fatal) ou de données (JSON,
-/// contrainte, forme d'une réponse) ; seules les premières relèvent de
-/// `ignore-unreachable`.
+/// Repository error: transport (`TransportException` in Composer: network,
+/// missing file, 404 where it is fatal) or data (JSON, constraint, shape of
+/// a response); only the former fall under `ignore-unreachable`.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct RepoError(pub String, pub RepoErrorKind);
@@ -40,39 +39,38 @@ impl RepoError {
     }
 }
 
-/// Récupération d'une URL : `Ok(None)` = 404 (paquet inconnu, toléré par
-/// Composer en HTTP).
-/// Résultat d'une récupération conditionnelle (`If-Modified-Since`).
+/// Fetching a URL: `Ok(None)` = 404 (unknown package, tolerated by
+/// Composer over HTTP).
+/// Result of a conditional fetch (`If-Modified-Since`).
 #[derive(Debug, Clone)]
 pub enum Fetched {
-    /// 304 : le cache est bon.
+    /// 304: the cache is good.
     NotModified,
-    /// 404 : paquet inconnu (toléré par Composer en HTTP).
+    /// 404: unknown package (tolerated by Composer over HTTP).
     NotFound,
     Body {
         bytes: Vec<u8>,
-        /// En-tête `Last-Modified` de la réponse.
+        /// `Last-Modified` header of the response.
         last_modified: Option<String>,
     },
 }
 
-/// Une requête : URL et `If-Modified-Since` éventuel (la valeur
-/// `last-modified` du fichier en cache).
+/// A request: URL and optional `If-Modified-Since` (the `last-modified`
+/// value of the cached file).
 pub type Request = (String, Option<String>);
 
 pub trait Transport {
     fn fetch(&self, url: &str, if_modified_since: Option<&str>) -> Result<Fetched, RepoError>;
-    /// POST `application/x-www-form-urlencoded` (l'API des avis de
-    /// sécurité de Packagist) ; le corps est déjà encodé. Par défaut
-    /// refusé.
+    /// POST `application/x-www-form-urlencoded` (Packagist's security
+    /// advisories API); the body is already encoded. Rejected by default.
     fn post_form(&self, url: &str, _body: &str) -> Result<Fetched, RepoError> {
         Err(RepoError::transport(format!(
             "POST {url}: not supported by this transport"
         )))
     }
-    /// Plusieurs requêtes d'un coup (un lot de `loadAsyncPackages`, que
-    /// Composer télécharge en parallèle) ; résultats dans l'ordre. Par
-    /// défaut séquentiel.
+    /// Several requests at once (a `loadAsyncPackages` batch, which
+    /// Composer downloads in parallel); results in order. Sequential by
+    /// default.
     fn fetch_many(&self, requests: &[Request]) -> Vec<Result<Fetched, RepoError>> {
         requests
             .iter()
@@ -81,17 +79,16 @@ pub trait Transport {
     }
 }
 
-/// Récupération réseau fournie par l'appelant (`https://`), `Ok(None)` sur
-/// 404.
+/// Network fetch provided by the caller (`https://`), `Ok(None)` on 404.
 pub type HttpFetch =
     std::sync::Arc<dyn Fn(&str, Option<&str>) -> Result<Fetched, String> + Send + Sync>;
-/// Variante par lot : toutes les requêtes en parallèle, résultats dans l'ordre.
+/// Batch variant: all requests in parallel, results in order.
 pub type HttpFetchMany =
     std::sync::Arc<dyn Fn(&[Request]) -> Vec<Result<Fetched, String>> + Send + Sync>;
 
-/// POST d'un formulaire encodé ; `Ok(None)` sur 404.
+/// POST of an encoded form; `Ok(None)` on 404.
 pub type HttpPost = std::sync::Arc<dyn Fn(&str, &str) -> Result<Fetched, String> + Send + Sync>;
-/// Les trois fermetures réseau d'un appelant : GET conditionnel, lot, POST.
+/// A caller's three network closures: conditional GET, batch, POST.
 pub type HttpTransports = (HttpFetch, Option<HttpFetchMany>, Option<HttpPost>);
 
 pub struct HttpTransport {
@@ -126,8 +123,8 @@ impl Transport for HttpTransport {
     }
 }
 
-/// `file://` : un fichier absent est fatal, comme chez Composer ; pas de
-/// `Last-Modified`, donc jamais de 304.
+/// `file://`: a missing file is fatal, as in Composer; no `Last-Modified`,
+/// hence never a 304.
 pub struct FileTransport;
 
 impl Transport for FileTransport {
@@ -176,7 +173,7 @@ fn package_name_regexp(pattern: &str) -> Regex {
         .unwrap_or_else(|e| panic!("pattern {pattern}: {e}"))
 }
 
-/// `loadRootServerFile` : ce que packages.json apporte.
+/// `loadRootServerFile`: what packages.json provides.
 #[derive(Debug, Default)]
 struct RootData {
     lazy_providers_url: Option<String>,
@@ -184,21 +181,22 @@ struct RootData {
     has_available_package_list: bool,
     available_packages: BTreeSet<String>,
     available_patterns: Vec<Regex>,
-    /// `partialPackagesByName` : paquets en ligne de packages.json, par nom
-    /// (ordre d'apparition).
+    /// `partialPackagesByName`: inline packages of packages.json, by name
+    /// (order of appearance).
     partial_packages: Vec<(String, Vec<Value>)>,
-    /// `mirrors` de packages.json : `sourceMirrors[type]` et `distMirrors`
+    /// `mirrors` of packages.json: `sourceMirrors[type]` and `distMirrors`
     /// (`[{url, preferred}]`).
     source_mirrors: BTreeMap<String, Vec<Value>>,
     dist_mirrors: Vec<Value>,
-    /// Dépôt sans `metadata-url` ni providers : toutes les métadonnées
-    /// (`packages` + `includes`), dans l'ordre de `loadIncludes`.
+    /// Repository without `metadata-url` or providers: all the metadata
+    /// (`packages` + `includes`), in `loadIncludes` order.
     plain: Option<Vec<Value>>,
-    /// Dépôt au protocole v1 (`providers-url`…) : refusé à la résolution.
+    /// Repository using the v1 protocol (`providers-url`...): rejected for
+    /// resolution.
     v1_protocol: bool,
-    /// `security-advisories` de packages.json : `metadata`, `api-url`.
+    /// `security-advisories` of packages.json: `metadata`, `api-url`.
     security_advisories: Option<AdvisoryConfig>,
-    /// `filter` de packages.json (`ComposerRepositoryFilterInformation`).
+    /// `filter` of packages.json (`ComposerRepositoryFilterInformation`).
     filter: Option<FilterInfo>,
 }
 
@@ -211,20 +209,20 @@ pub struct AdvisoryConfig {
 #[derive(Debug, Clone)]
 pub struct FilterInfo {
     pub metadata: bool,
-    /// Listes annoncées et activées, noms réservés exclus.
+    /// Advertised and enabled lists, reserved names excluded.
     pub lists: Vec<String>,
     pub summary_url: Option<String>,
     pub api_url: Option<String>,
 }
 
-/// Un avis de sécurité tel que Composer le charge : partiel (`advisoryId`,
-/// `affectedVersions`) ou complet (avec `title`, `sources`, `reportedAt`).
+/// A security advisory as Composer loads it: partial (`advisoryId`,
+/// `affectedVersions`) or complete (with `title`, `sources`, `reportedAt`).
 #[derive(Debug, Clone)]
 pub struct Advisory {
     pub package_name: String,
     pub advisory_id: String,
     pub affected_versions: Constraint,
-    /// `SecurityAdvisory` : cve, sévérité, `remoteId` des sources.
+    /// `SecurityAdvisory`: cve, severity, `remoteId` of the sources.
     pub complete: Option<CompleteAdvisory>,
 }
 
@@ -235,8 +233,8 @@ pub struct CompleteAdvisory {
     pub source_remote_ids: Vec<String>,
 }
 
-/// `PartialSecurityAdvisory::create` : contrainte analysée avec ses deux
-/// replis, complet si `title`, `sources` et `reportedAt` sont là.
+/// `PartialSecurityAdvisory::create`: constraint parsed with its two
+/// fallbacks, complete if `title`, `sources` and `reportedAt` are present.
 pub fn advisory_from_data(package_name: &str, data: &Value) -> Option<Advisory> {
     let affected = data.get("affectedVersions")?.as_str()?.to_owned();
     let advisory_id = data.get("advisoryId")?.as_str()?.to_owned();
@@ -289,14 +287,14 @@ pub fn advisory_from_data(package_name: &str, data: &Value) -> Option<Advisory> 
     })
 }
 
-/// Avis par nom de paquet (`[name => [advisory…]]`).
+/// Advisories by package name (`[name => [advisory...]]`).
 pub type AdvisoriesByName = Vec<(String, Vec<Advisory>)>;
-/// Entrées de liste par nom de liste.
+/// List entries by list name.
 pub type FilterEntriesByList = Vec<(String, Vec<FilterEntry>)>;
-/// Résumé des listes : liste → (nom, contrainte).
+/// List summary: list -> (name, constraint).
 type FilterSummary = Vec<(String, Vec<(String, String)>)>;
 
-/// `FilterListEntry` : une version signalée par une liste.
+/// `FilterListEntry`: a version flagged by a list.
 #[derive(Debug, Clone)]
 pub struct FilterEntry {
     pub package_name: String,
@@ -308,8 +306,8 @@ pub struct FilterEntry {
     pub source: Option<String>,
 }
 
-/// `FilterListEntryBuilder::build` : entrées par liste, restreintes aux
-/// noms demandés et aux versions qui les concernent.
+/// `FilterListEntryBuilder::build`: entries per list, restricted to the
+/// requested names and the versions that concern them.
 fn build_filter_entries(
     raw_by_list: &Value,
     map: &[(String, Constraint)],
@@ -364,9 +362,8 @@ fn build_filter_entries(
     Ok(result)
 }
 
-/// `PolicyConfig::RESERVED_NAMES` + `FUTURE_RESERVED_NAMES` : des noms
-/// de liste qu'un dépôt ne peut pas annoncer ; le préfixe `ignore` est
-/// réservé aussi.
+/// `PolicyConfig::RESERVED_NAMES` + `FUTURE_RESERVED_NAMES`: list names a
+/// repository cannot advertise; the `ignore` prefix is reserved too.
 const RESERVED_LIST_NAMES: &[&str] = &[
     "advisories",
     "abandoned",
@@ -385,42 +382,42 @@ const RESERVED_LIST_NAMES: &[&str] = &[
 pub struct ComposerRepository {
     pub url: String,
     pub base_url: String,
-    /// `options` de la définition du dépôt (transport-options des paquets
-    /// dont une URL de dist est sous `base_url`).
+    /// `options` of the repository definition (transport-options of the
+    /// packages whose dist URL is under `base_url`).
     pub options: Value,
     packages_json_url: String,
     transport: Box<dyn Transport>,
-    /// Chargé au premier `loadPackages`, comme chez Composer.
+    /// Loaded on the first `loadPackages`, as in Composer.
     root: std::cell::OnceCell<RootData>,
-    /// `provider-<name>.json` déjà lus (cache mémoire du run).
+    /// `provider-<name>.json` files already read (in-memory cache of the run).
     fetched: std::cell::RefCell<BTreeMap<String, Option<std::rc::Rc<Value>>>>,
-    /// Dépôt plein : index d'arène de ses paquets une fois chargés
-    /// (`getPackages()`), [alias, base] par version aliasée.
+    /// Full repository: arena indices of its packages once loaded
+    /// (`getPackages()`), [alias, base] per aliased version.
     members: std::cell::OnceCell<Vec<usize>>,
-    /// Cache des métadonnées au format de Composer (`cache-repo-dir`).
+    /// Metadata cache in Composer's format (`cache-repo-dir`).
     pub cache: Option<crate::metacache::MetadataCache>,
-    /// Le dépôt a déjà été signalé en mode dégradé (réseau en panne, cache
-    /// utilisé) : un seul avertissement.
+    /// The repository was already reported in degraded mode (network down,
+    /// cache used): a single warning.
     degraded: std::cell::Cell<bool>,
-    /// Option `filter` de la définition du dépôt : `None` = `false` (aucune
-    /// liste), sinon les listes désactivées.
+    /// `filter` option of the repository definition: `None` = `false` (no
+    /// list), otherwise the disabled lists.
     pub user_filter: Option<Vec<String>>,
-    /// `freshMetadataUrls` : un fichier de métadonnées a été chargé dans
-    /// ce processus (les chemins `summary-url`/`api-url` des listes sont
-    /// alors ignorés).
+    /// `freshMetadataUrls`: a metadata file was loaded in this process (the
+    /// `summary-url`/`api-url` paths of the lists are then ignored).
     fresh_metadata: std::cell::Cell<bool>,
-    /// `FilterRepository` (`only` / `exclude` de la définition) : les noms
-    /// que ce dépôt sert ; les chemins des avis et des listes s'y limitent.
+    /// `FilterRepository` (`only` / `exclude` of the definition): the names
+    /// this repository serves; the advisory and list paths are limited to
+    /// them.
     name_filter: Option<NameFilter>,
 }
 
-/// `only` (autoriser) ou `exclude` (refuser) une liste de motifs.
+/// `only` (allow) or `exclude` (deny) a list of patterns.
 pub struct NameFilter {
     regex: Regex,
     only: bool,
 }
 
-/// `empty()` PHP sur une valeur JSON.
+/// PHP `empty()` on a JSON value.
 fn php_empty(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) | Some(Value::Bool(false)) => true,
@@ -432,7 +429,7 @@ fn php_empty(v: Option<&Value>) -> bool {
     }
 }
 
-/// Chemin d'une URL (sans schéma, hôte, requête ni fragment).
+/// Path of a URL (without scheme, host, query or fragment).
 fn url_path(url: &str) -> &str {
     let rest = match url.find("://") {
         Some(i) => {
@@ -449,7 +446,7 @@ fn url_path(url: &str) -> &str {
 }
 
 impl ComposerRepository {
-    /// Constructeur (sans lecture : `loadRootServerFile` est paresseux).
+    /// Constructor (no reading: `loadRootServerFile` is lazy).
     pub fn open(url: &str, transport: Box<dyn Transport>) -> Result<ComposerRepository, RepoError> {
         static SCHEME: OnceLock<Regex> = OnceLock::new();
         static PACKAGIST: OnceLock<Regex> = OnceLock::new();
@@ -478,7 +475,7 @@ impl ComposerRepository {
             Some(m) => url[..m.start()].trim_end_matches('/').to_owned(),
             None => url.clone(),
         };
-        // `getPackagesJsonUrl` : `.json` cherché dans le chemin seulement.
+        // `getPackagesJsonUrl`: `.json` looked up in the path only.
         let packages_json_url = if url_path(&url).contains(".json") {
             url.clone()
         } else {
@@ -501,7 +498,7 @@ impl ComposerRepository {
         })
     }
 
-    /// `FilterRepository::__construct` : `only` ou `exclude` (pas les deux).
+    /// `FilterRepository::__construct`: `only` or `exclude` (not both).
     pub fn set_name_filter(
         &mut self,
         only: Option<&Value>,
@@ -563,7 +560,7 @@ impl ComposerRepository {
         }
     }
 
-    /// `parseUserFilterConfig` de l'option `filter` du dépôt.
+    /// `parseUserFilterConfig` of the repository's `filter` option.
     pub fn set_user_filter(&mut self, raw: Option<&Value>) -> Result<(), RepoError> {
         self.user_filter = match raw {
             Some(Value::Bool(false)) => None,
@@ -597,14 +594,14 @@ impl ComposerRepository {
         Ok(())
     }
 
-    /// `loadRootServerFile`, une fois.
+    /// `loadRootServerFile`, once.
     fn root_data(&self) -> Result<&RootData, RepoError> {
         self.root_data_max_age(None)
     }
 
-    /// `loadRootServerFile($rootMaxAge)` : avec un âge maximal, un
-    /// packages.json en cache plus récent est pris sans requête (les
-    /// chemins des avis et des listes passent 600 s).
+    /// `loadRootServerFile($rootMaxAge)`: with a maximum age, a more recent
+    /// cached packages.json is taken without a request (the advisory and
+    /// list paths pass 600 s).
     fn root_data_max_age(&self, max_age: Option<u64>) -> Result<&RootData, RepoError> {
         if let Some(r) = self.root.get() {
             return Ok(r);
@@ -737,14 +734,14 @@ impl ComposerRepository {
             || non_empty("providers-includes")
             || has_providers
         {
-            // Le protocole v1 n'est pas porté pour la résolution ; ses
-            // packages.json restent lisibles pour ce qu'ils déclarent (avis,
-            // listes), comme Composer le fait.
+            // The v1 protocol is not ported for resolution; its packages.json
+            // files remain readable for what they declare (advisories,
+            // lists), as Composer does.
             r.v1_protocol = true;
         }
         if has_partial {
-            // `initializePartialPackages` : indexés par le `name` de chaque
-            // version, pas par la clé du tableau.
+            // `initializePartialPackages`: keyed by the `name` of each
+            // version, not by the array key.
             for (_, versions) in data["packages"].as_object().into_iter().flatten() {
                 let list: Vec<&Value> = match versions {
                     Value::Array(a) => a.iter().collect(),
@@ -767,17 +764,17 @@ impl ComposerRepository {
                 }
             }
         } else if r.lazy_providers_url.is_none() {
-            // Dépôt « plein » (Satis, `packages.json` statique) : tous les
-            // paquets viennent de `packages` et des `includes`
-            // (`loadIncludes`), chargés d'un bloc comme `initialize()`.
+            // "Full" repository (Satis, static `packages.json`): all packages
+            // come from `packages` and the `includes` (`loadIncludes`),
+            // loaded in one go like `initialize()`.
             r.plain = Some(self.load_includes(&data)?);
         }
         let _ = self.root.set(r);
         Ok(self.root.get().expect("just set"))
     }
 
-    /// `loadIncludes($data)` : métadonnées de `packages` (par nom, par
-    /// version) puis des fichiers `includes`, récursivement.
+    /// `loadIncludes($data)`: metadata from `packages` (by name, by
+    /// version) then from the `includes` files, recursively.
     fn load_includes(&self, data: &Value) -> Result<Vec<Value>, RepoError> {
         let mut out = Vec::new();
         let has_packages = data.get("packages").is_some();
@@ -849,7 +846,7 @@ impl ComposerRepository {
             .any(|re| re.is_match(name.as_bytes()).unwrap_or(false))
     }
 
-    /// Lecture du cache : (JSON décodé, `last-modified`).
+    /// Cache read: (decoded JSON, `last-modified`).
     fn cached(&self, cache_key: &str) -> Option<(Value, Option<String>)> {
         let bytes = self.cache.as_ref()?.read(cache_key)?;
         let v: Value = serde_json::from_slice(&bytes).ok()?;
@@ -860,10 +857,10 @@ impl ComposerRepository {
         Some((v, lm))
     }
 
-    /// `asyncFetchFile` + `Cache` : après la réponse, ce que Composer
-    /// garde — 304 → le cache ; 404 → rien (pas écrit) ; 200 → le JSON,
-    /// ré-encodé avec `last-modified` s'il y a l'en-tête, écrit tel quel
-    /// sinon. Une erreur de transport avec un cache daté → mode dégradé.
+    /// `asyncFetchFile` + `Cache`: after the response, what Composer keeps:
+    /// 304 -> the cache; 404 -> nothing (not written); 200 -> the JSON,
+    /// re-encoded with `last-modified` if the header is there, written as
+    /// is otherwise. A transport error with a stale cache -> degraded mode.
     fn settle(
         &self,
         url: &str,
@@ -871,8 +868,8 @@ impl ComposerRepository {
         cached: Option<(Value, Option<String>)>,
         result: Result<Fetched, RepoError>,
     ) -> Result<Option<Value>, RepoError> {
-        // `fetchFile` (packages.json, includes) encode avec les flags 0,
-        // `asyncFetchFile` (fichiers de paquets) sans échappement.
+        // `fetchFile` (packages.json, includes) encodes with flags 0,
+        // `asyncFetchFile` (package files) without escaping.
         let escaped = !cache_key.starts_with("provider-");
         match result {
             Ok(Fetched::NotModified) => Ok(cached.map(|(v, _)| v)),
@@ -914,7 +911,7 @@ impl ComposerRepository {
         }
     }
 
-    /// Un fichier du dépôt, via le cache conditionnel.
+    /// A repository file, through the conditional cache.
     fn fetch_cached(&self, url: &str, cache_key: &str) -> Result<Option<Value>, RepoError> {
         let cached = self.cached(cache_key);
         let ims = cached.as_ref().and_then(|(_, lm)| lm.clone());
@@ -922,8 +919,8 @@ impl ComposerRepository {
         self.settle(url, cache_key, cached, result)
     }
 
-    /// `startCachedAsyncDownload` : le JSON du fichier p2 d'un nom (avec
-    /// `~dev`), None si 404 ou sans la clé attendue.
+    /// `startCachedAsyncDownload`: the JSON of a name's p2 file (with
+    /// `~dev`), None on 404 or without the expected key.
     fn provider(
         &self,
         file_name: &str,
@@ -959,11 +956,11 @@ impl ComposerRepository {
             .is_some_and(|c| c.metadata || c.api_url.is_some()))
     }
 
-    /// `getSecurityAdvisories` : les avis par nom pour les contraintes
-    /// demandées — chemin métadonnées (fichiers p2, avis partiels) puis
-    /// API (POST) pour ce qui reste. `allow_partial` faux = chargement
-    /// complet exigé (erreur si un avis embarqué n'est que partiel et
-    /// qu'aucune API ne peut le compléter).
+    /// `getSecurityAdvisories`: advisories by name for the requested
+    /// constraints: metadata path (p2 files, partial advisories) then API
+    /// (POST) for what remains. `allow_partial` false = complete load
+    /// required (error if an embedded advisory is only partial and no API
+    /// can complete it).
     pub fn get_security_advisories(
         &self,
         map: &[(String, Constraint)],
@@ -1089,14 +1086,14 @@ impl ComposerRepository {
         Ok((names_found, advisories))
     }
 
-    /// `hasFilter` / `getFilterLists` : les listes annoncées, moins
-    /// celles que l'option `filter` du dépôt désactive.
+    /// `hasFilter` / `getFilterLists`: the advertised lists, minus those
+    /// the repository's `filter` option disables.
     pub fn get_filter_lists(&self) -> Result<Vec<String>, RepoError> {
         let Some(disabled) = &self.user_filter else {
             return Ok(Vec::new());
         };
         let root = self.root_data_max_age(Some(600))?;
-        // `hasFilter()` : sans `metadata`, le dépôt n'est pas un fournisseur.
+        // `hasFilter()`: without `metadata`, the repository is not a provider.
         let Some(f) = root.filter.as_ref().filter(|f| f.metadata) else {
             return Ok(Vec::new());
         };
@@ -1107,9 +1104,9 @@ impl ComposerRepository {
             .collect())
     }
 
-    /// `getFilter` : les entrées de liste pour les contraintes demandées —
-    /// API (non portée : erreur), sinon résumé puis fichiers p2 des
-    /// candidats, sinon fichiers p2 de tous les noms.
+    /// `getFilter`: the list entries for the requested constraints: API
+    /// (not ported: error), otherwise summary then p2 files of the
+    /// candidates, otherwise p2 files of all names.
     pub fn get_filter(
         &self,
         map: &[(String, Constraint)],
@@ -1188,8 +1185,8 @@ impl ComposerRepository {
         Ok(filter)
     }
 
-    /// `loadFilterSummary` : `summary.json` (cache `filter-summary.json`,
-    /// requête conditionnelle) → liste → nom (minuscule) → contrainte.
+    /// `loadFilterSummary`: `summary.json` (cache `filter-summary.json`,
+    /// conditional request) -> list -> name (lowercase) -> constraint.
     fn load_filter_summary(&self) -> Result<FilterSummary, RepoError> {
         let root = self.root_data_max_age(Some(600))?;
         let Some(url) = root.filter.as_ref().and_then(|f| f.summary_url.clone()) else {
@@ -1244,8 +1241,8 @@ impl ComposerRepository {
         }
     }
 
-    /// Les fichiers d'un lot pas encore en cache, téléchargés d'un coup
-    /// (`loadAsyncPackages` lance toutes les promesses avant d'attendre).
+    /// The files of a batch not yet cached, downloaded at once
+    /// (`loadAsyncPackages` starts all promises before waiting).
     fn prefetch(&self, names: &[(String, String)]) -> Result<(), RepoError> {
         let Some(template) = self.root_data()?.lazy_providers_url.clone() else {
             return Ok(());
@@ -1322,9 +1319,9 @@ impl ComposerRepository {
         false
     }
 
-    /// `whatProvides` restreint aux paquets en ligne de packages.json :
-    /// versions du nom, dédoublonnées par `uid`, filtrées par stabilité, et
-    /// chargées en lot — [base, alias] par version (`$result[$uid]`,
+    /// `whatProvides` restricted to the inline packages of packages.json:
+    /// versions of the name, deduplicated by `uid`, filtered by stability,
+    /// and loaded in batch; [base, alias] per version (`$result[$uid]`,
     /// `$result[$uid.'-alias']`).
     #[allow(clippy::too_many_arguments)]
     fn what_provides_partial(
@@ -1395,11 +1392,11 @@ impl ComposerRepository {
         Ok(out)
     }
 
-    /// Suite de `createPackages` : `setSourceMirrors` (par type),
-    /// `setDistMirrors` (toujours, écrase ceux des métadonnées),
-    /// `configurePackageTransportOptions` (les `options` du dépôt si une
-    /// URL de dist est sous `baseUrl`) ; et les `transport-options` des
-    /// métadonnées ne sont pas chargées (`loadOptions` faux).
+    /// Continuation of `createPackages`: `setSourceMirrors` (per type),
+    /// `setDistMirrors` (always, overwrites those of the metadata),
+    /// `configurePackageTransportOptions` (the repository's `options` if a
+    /// dist URL is under `baseUrl`); and the metadata's `transport-options`
+    /// are not loaded (`loadOptions` false).
     fn configure_package(&self, root: &RootData, p: &mut Package) {
         let Some(obj) = p.raw.as_object_mut() else {
             return;
@@ -1437,7 +1434,7 @@ impl ComposerRepository {
         }
     }
 
-    /// `createPackages` : `$data['notification-url'] ??= $this->notifyUrl`.
+    /// `createPackages`: `$data['notification-url'] ??= $this->notifyUrl`.
     fn add_notification_url(obj: &mut Map<String, Value>, root: &RootData) {
         if !obj.contains_key("notification-url") {
             obj.insert(
@@ -1458,8 +1455,8 @@ impl ComposerRepository {
         config
     }
 
-    /// `version_normalized` absent ou égal à l'alias de branche par défaut
-    /// → recalculé depuis `version`.
+    /// `version_normalized` absent or equal to the default branch alias ->
+    /// recomputed from `version`.
     fn fill_version_normalized(data: &mut Map<String, Value>) -> Result<(), RepoError> {
         let pretty = data
             .get("version")
@@ -1480,10 +1477,10 @@ impl ComposerRepository {
         Ok(())
     }
 
-    /// `loadPackages` : paquets en ligne d'abord (`whatProvides`), puis le
-    /// chemin v2 (`loadAsyncPackages`). Rend `(namesFound, ids)` ;
-    /// `already_loaded` : name → versions normalisées déjà dans le pool pour
-    /// ce dépôt.
+    /// `loadPackages`: inline packages first (`whatProvides`), then the v2
+    /// path (`loadAsyncPackages`). Returns `(namesFound, ids)`;
+    /// `already_loaded`: name -> normalized versions already in the pool
+    /// for this repository.
     pub fn load_packages(
         &self,
         package_name_map: &[(String, Constraint)],
@@ -1501,7 +1498,7 @@ impl ComposerRepository {
             )));
         }
         if let Some(plain) = &root.plain {
-            // `parent::loadPackages` (ArrayRepository) sur `getPackages()`.
+            // `parent::loadPackages` (ArrayRepository) on `getPackages()`.
             if self.members.get().is_none() {
                 let configs: Vec<Value> = plain
                     .iter()
@@ -1581,8 +1578,8 @@ impl ComposerRepository {
         if root.has_available_package_list {
             map.retain(|(name, _)| Self::contains(root, &name.to_lowercase()));
         }
-        // `$packageNames[$name.'~dev'] = $constraint` (ajouté à la fin) ;
-        // dev seul → le nom nu est retiré.
+        // `$packageNames[$name.'~dev'] = $constraint` (appended at the end);
+        // dev only -> the bare name is removed.
         let only_dev = acceptable.len() == 1 && acceptable.contains_key("dev") && flags.is_empty();
         let mut names: Vec<(String, Constraint)> = Vec::new();
         let mut dev_names: Vec<(String, Constraint)> = Vec::new();
@@ -1682,8 +1679,8 @@ impl ComposerRepository {
     }
 }
 
-/// `Locker::getLockedRepository(true)` : paquets du lock (+ dev) puis les
-/// alias racine (`aliases`), chaque alias avant son paquet.
+/// `Locker::getLockedRepository(true)`: lock packages (+ dev) then the
+/// root aliases (`aliases`), each alias before its package.
 pub fn locked_repository(lock: &Value, arena: &mut Vec<Package>) -> Result<Vec<usize>, RepoError> {
     locked_repository_with(lock, arena, true)
 }
@@ -1715,8 +1712,8 @@ pub fn locked_repository_with(
     let ids = loader::load_packages(&configs, Origin::Locked, arena, false)
         .map_err(|e| RepoError::data(e.0))?;
     let mut out = ids.clone();
-    // `$packageByName[$name] = $package` : pour un alias, les deux noms
-    // pointent (alias → dernier écrit gagne : le paquet de base).
+    // `$packageByName[$name] = $package`: for an alias, both names point
+    // (alias -> last write wins: the base package).
     let mut by_name: BTreeMap<String, usize> = BTreeMap::new();
     for id in &ids {
         by_name.insert(arena[*id].name.clone(), *id);
@@ -1782,8 +1779,8 @@ fn process_mirror_url(
         .replace("%prettyVersion%", pretty_version)
 }
 
-/// `Package::getDistUrls` : l'URL (placeholders traités) puis les miroirs,
-/// les préférés devant.
+/// `Package::getDistUrls`: the URL (placeholders processed) then the
+/// mirrors, preferred ones first.
 fn dist_urls(
     dist: &crate::package::SourceRef,
     mirrors: &[Value],
@@ -1830,7 +1827,7 @@ fn dist_urls(
     urls
 }
 
-/// `http_build_query` : encodage RFC 1738 d'une valeur (`/` → `%2F`).
+/// `http_build_query`: RFC 1738 encoding of a value (`/` -> `%2F`).
 fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
@@ -1848,7 +1845,7 @@ mod cache_tests {
     use super::*;
     use std::cell::RefCell;
 
-    /// Transport factice : répond selon un script et note les requêtes.
+    /// Fake transport: answers according to a script and records requests.
     struct Scripted {
         responses: RefCell<Vec<Fetched>>,
         seen: std::rc::Rc<RefCell<Vec<Request>>>,
@@ -1883,7 +1880,7 @@ mod cache_tests {
         let root = r#"{"packages": [], "metadata-url": "/p2/%package%.json"}"#;
         let provider = r#"{"packages": {"acme/lib": [{"name": "acme/lib", "version": "1.0.0", "version_normalized": "1.0.0.0"}]}}"#;
 
-        // Premier run : 200 avec Last-Modified → écrit dans le cache.
+        // First run: 200 with Last-Modified -> written to the cache.
         let t = Scripted {
             responses: RefCell::new(vec![
                 body(root, Some("Sat, 12 Sep 2026 10:00:00 GMT")),
@@ -1918,7 +1915,7 @@ mod cache_tests {
             .expect("root cached")
             .contains(r#""metadata-url":"\/p2\/%package%.json""#));
 
-        // Second run : If-Modified-Since envoyé, 304 → servi depuis le cache.
+        // Second run: If-Modified-Since sent, 304 -> served from the cache.
         let seen = std::rc::Rc::new(RefCell::new(Vec::new()));
         let t = Scripted {
             responses: RefCell::new(vec![

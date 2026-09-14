@@ -1,22 +1,22 @@
-//! Port de `drupal/core-composer-scaffold` (docs/reference/drupal-scaffold,
-//! source telle qu'installée en 11.4.6) : ce que le plugin fait pendant
-//! `composer install` — même avec `--no-scripts`, qui ne coupe que les
-//! scripts du composer.json racine.
+//! Port of `drupal/core-composer-scaffold` (docs/reference/drupal-scaffold,
+//! source as installed in 11.4.6): what the plugin does during
+//! `composer install`, even with `--no-scripts`, which only disables the
+//! scripts of the root composer.json.
 //!
-//! Trois moments, reproduits ici :
-//! - PRE_AUTOLOAD_DUMP (`Plugin::preAutoloadDump`) : entrées de classmap
-//!   ajoutées à la racine + `vendor/drupal/DrupalInstalled.php` → [`pre_autoload_dump`] ;
-//! - POST_INSTALL_CMD (`Handler::scaffold`) : copie/concaténation des
-//!   fichiers déclarés par `extra.drupal-scaffold.file-mapping` des paquets
-//!   autorisés, `web-root/autoload.php` (+ `autoload_runtime.php`), gestion
-//!   des `.gitignore` → [`plan`] puis [`Plan::apply`] ;
-//! - le tout sous un [`Profile`] choisi par l'empreinte de la source du
-//!   plugin (assets/scaffold-fingerprints.json) : le cœur est identique de
-//!   10.3 à 11.4, seules trois fonctionnalités s'ajoutent au fil des versions.
+//! Three moments, reproduced here:
+//! - PRE_AUTOLOAD_DUMP (`Plugin::preAutoloadDump`): classmap entries added
+//!   to the root + `vendor/drupal/DrupalInstalled.php` -> [`pre_autoload_dump`];
+//! - POST_INSTALL_CMD (`Handler::scaffold`): copy/concatenation of the files
+//!   declared by `extra.drupal-scaffold.file-mapping` of the allowed
+//!   packages, `web-root/autoload.php` (+ `autoload_runtime.php`), handling
+//!   of the `.gitignore` files -> [`plan`] then [`Plan::apply`];
+//! - all of it under a [`Profile`] chosen by the fingerprint of the plugin's
+//!   source (assets/scaffold-fingerprints.json): the core is identical from
+//!   10.3 to 11.4, only three features get added across versions.
 //!
-//! Tout ce que Composer ferait et que vivace ne peut pas reproduire à
-//! l'identique (ou qui effacerait un répertoire) est refusé au moment du
-//! plan, avant toute écriture : la CLI délègue alors à Composer.
+//! Everything Composer would do that vivace cannot reproduce identically
+//! (or that would delete a directory) is refused at plan time, before any
+//! write: the CLI then delegates to Composer.
 
 use crate::pathutil::{find_shortest_path, normalize_path};
 use serde_json::{Map, Value};
@@ -32,20 +32,20 @@ const AUTOLOAD_TPL: &str = include_str!("../assets/scaffold/autoload.php.tpl");
 const AUTOLOAD_RUNTIME_TPL: &str = include_str!("../assets/scaffold/autoload_runtime.php.tpl");
 const DRUPAL_INSTALLED_TPL: &str = include_str!("../assets/scaffold/DrupalInstalled.php.tpl");
 
-/// Fonctionnalités du plugin selon sa version (voir l'asset).
+/// Plugin features by version (see the asset).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Profile {
-    /// `Plugin::preAutoloadDump` : classmap + DrupalInstalled.php (≥ 11.3.0).
+    /// `Plugin::preAutoloadDump`: classmap + DrupalInstalled.php (>= 11.3.0).
     pub pre_autoload_dump: bool,
-    /// Hash de DrupalInstalled sur les paquets triés (≥ 11.3.4) ; non trié,
-    /// l'ordre est celui de la transaction Composer : non reproductible.
+    /// DrupalInstalled hash over the sorted packages (>= 11.3.4); unsorted,
+    /// the order is that of the Composer transaction: not reproducible.
     pub sorted_hash: bool,
-    /// `web-root/autoload_runtime.php` (≥ 11.4.0).
+    /// `web-root/autoload_runtime.php` (>= 11.4.0).
     pub autoload_runtime: bool,
 }
 
-/// sha256 de « <chemin relatif>\n<contenu> » de chaque `*.php` hors tests/,
-/// dans l'ordre trié des chemins (tools/plugin-fingerprint.sh).
+/// sha256 of "<relative path>\n<contents>" of every `*.php` outside tests/,
+/// in sorted path order (tools/plugin-fingerprint.sh).
 pub fn fingerprint(plugin_dir: &Path) -> std::io::Result<String> {
     let mut files: Vec<PathBuf> = Vec::new();
     collect_php(plugin_dir, plugin_dir, &mut files)?;
@@ -84,7 +84,7 @@ fn collect_php(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Resu
     Ok(())
 }
 
-/// Profil correspondant à une empreinte, None si la source n'est pas portée.
+/// Profile matching a fingerprint, None if the source is not ported.
 pub fn profile_for(fingerprint: &str) -> Option<Profile> {
     let table: Value = serde_json::from_str(FINGERPRINTS).ok()?;
     let level = table
@@ -97,14 +97,14 @@ pub fn profile_for(fingerprint: &str) -> Option<Profile> {
         sorted_hash: level >= 2,
         autoload_runtime: level >= 3,
     };
-    // Niveau 1 : hash dans l'ordre de la transaction Composer → non reproductible.
+    // Level 1: hash in Composer transaction order -> not reproducible.
     if profile.pre_autoload_dump && !profile.sorted_hash {
         return None;
     }
     Some(profile)
 }
 
-/// Versions du plugin dont l'empreinte est connue (pour les messages).
+/// Plugin versions whose fingerprint is known (for messages).
 pub fn known_versions(fingerprint: &str) -> Vec<String> {
     let table: Value = serde_json::from_str(FINGERPRINTS).unwrap_or(Value::Null);
     table
@@ -128,7 +128,7 @@ pub fn known_versions(fingerprint: &str) -> Vec<String> {
 #[derive(Debug, Clone)]
 struct Options {
     allowed_packages: Vec<String>,
-    /// Ordre d'insertion conservé (tableau PHP).
+    /// Insertion order preserved (PHP array).
     locations: Vec<(String, String)>,
     symlink: bool,
     file_mapping: Vec<(String, Value)>,
@@ -179,7 +179,7 @@ impl Options {
             locations,
             symlink: matches!(o.get("symlink"), Some(v) if php_truthy(v)),
             file_mapping,
-            // `isset` : null = absent.
+            // `isset`: null = absent.
             gitignore: o.get("gitignore").filter(|v| !v.is_null()).map(php_truthy),
         }
     }
@@ -192,7 +192,7 @@ impl Options {
     }
 }
 
-/// `empty()` inversé de PHP sur une valeur JSON.
+/// Negated PHP `empty()` on a JSON value.
 fn php_truthy(v: &Value) -> bool {
     match v {
         Value::Null | Value::Bool(false) => false,
@@ -204,8 +204,8 @@ fn php_truthy(v: &Value) -> bool {
     }
 }
 
-/// `Interpolator` : `[token]` (`[a-zA-Z0-9._-]+`) remplacé par la donnée,
-/// token inconnu → `default`.
+/// `Interpolator`: `[token]` (`[a-zA-Z0-9._-]+`) replaced by the datum,
+/// unknown token -> `default`.
 fn interpolate(message: &str, data: &[(String, String)], default: &str) -> String {
     let bytes = message.as_bytes();
     let mut out = String::with_capacity(message.len());
@@ -236,11 +236,11 @@ fn interpolate(message: &str, data: &[(String, String)], default: &str) -> Strin
 }
 
 // ---------------------------------------------------------------------------
-// Paquets et opérations
+// Packages and operations
 // ---------------------------------------------------------------------------
 
-/// Un paquet installé vu par le scaffold : nom, répertoire contenant sa
-/// source (entrée de store ou chemin d'installation) et son `extra`.
+/// An installed package as seen by the scaffold: name, directory holding its
+/// source (store entry or install path) and its `extra`.
 #[derive(Debug, Clone)]
 pub struct ScaffoldPackage {
     pub name: String,
@@ -260,9 +260,9 @@ enum Op {
         append: Option<PathBuf>,
         default: Option<PathBuf>,
         force_append: bool,
-        /// `managed` : faux quand l'op arrive sur une destination nouvelle.
+        /// `managed`: false when the op lands on a new destination.
         managed: bool,
-        /// `originalContents` (contenu de l'op précédente ou du fichier).
+        /// `originalContents` (contents of the previous op or of the file).
         original: Option<Vec<u8>>,
     },
 }
@@ -286,7 +286,7 @@ impl Op {
                     out.push(b'\n');
                 }
                 let mut orig = original.clone().unwrap_or_default();
-                // `empty($original_contents)` : "" ou "0".
+                // `empty($original_contents)`: "" or "0".
                 if (orig.is_empty() || orig == b"0") && default.is_some() {
                     if let Some(d) = default {
                         orig = std::fs::read(d)?;
@@ -303,56 +303,56 @@ impl Op {
     }
 }
 
-/// Une destination : chemin complet et paquet qui la fournit (la clé brute,
-/// non interpolée, est portée par les listes qui la contiennent).
+/// A destination: full path and package providing it (the raw,
+/// non-interpolated key is carried by the lists that contain it).
 #[derive(Debug, Clone)]
 struct Dest {
     full: PathBuf,
     package: String,
 }
 
-/// Fichiers d'un projet : (clé brute, destination, opération).
+/// Files of a project: (raw key, destination, operation).
 type ProjectFiles = Vec<(String, Dest, Op)>;
 
-/// Résultat d'une opération (`ScaffoldResult`).
+/// Result of an operation (`ScaffoldResult`).
 #[derive(Debug, Clone)]
 struct Outcome {
     full: PathBuf,
     managed: bool,
 }
 
-/// Une écriture à faire par `apply`.
+/// A write to be done by `apply`.
 #[derive(Debug, Clone)]
 pub struct Write {
     pub path: PathBuf,
     pub contents: Vec<u8>,
-    /// `ReplaceOp` : remove + création (répertoire rendu inscriptible au
-    /// besoin, perms d'origine du fichier restaurées) ; sinon écriture en
-    /// place comme `file_put_contents`.
+    /// `ReplaceOp`: remove + creation (directory made writable if needed,
+    /// original file perms restored); otherwise in-place write like
+    /// `file_put_contents`.
     pub replace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GitIgnoreMode {
-    /// Option `gitignore` explicite.
+    /// Explicit `gitignore` option.
     Forced(bool),
-    /// Décidé à l'application : dépôt git et `vendor` ignoré.
+    /// Decided at apply time: git repository and `vendor` ignored.
     Auto,
 }
 
-/// Ce que `Handler::scaffold()` écrirait, calculé sans toucher au disque
-/// (hors création des répertoires de `locations`, comme le plugin).
+/// What `Handler::scaffold()` would write, computed without touching the disk
+/// (except for creating the `locations` directories, like the plugin).
 #[derive(Debug, Clone)]
 pub struct Plan {
     root: PathBuf,
     writes: Vec<Write>,
-    /// Résultats dans l'ordre PHP (`$results[rel]`, remplacement en place).
+    /// Results in PHP order (`$results[rel]`, replaced in place).
     results: Vec<(String, Outcome)>,
     gitignore: GitIgnoreMode,
 }
 
 impl Plan {
-    /// Aucun paquet autorisé : le plugin ne fait rien.
+    /// No allowed package: the plugin does nothing.
     pub fn is_empty(&self) -> bool {
         self.writes.is_empty() && self.results.is_empty()
     }
@@ -370,7 +370,7 @@ fn abs_from_cwd(root: &Path, p: &str) -> PathBuf {
     }
 }
 
-/// `realpath()` PHP : None si le chemin n'existe pas.
+/// PHP `realpath()`: None if the path does not exist.
 fn realpath(p: &Path) -> Option<PathBuf> {
     std::fs::canonicalize(p).ok()
 }
@@ -379,9 +379,9 @@ fn under(path: &Path, root: &Path) -> bool {
     path == root || path.starts_with(root)
 }
 
-/// Calcule le plan du scaffold. `root` doit être la racine canonique du
-/// projet (`getcwd()` physique) ; `packages` = paquets installés (ce que le
-/// dépôt local contiendrait après la transaction) avec leur répertoire source.
+/// Computes the scaffold plan. `root` must be the canonical project root
+/// (physical `getcwd()`); `packages` = installed packages (what the local
+/// repository would contain after the transaction) with their source directory.
 pub fn plan(
     profile: Profile,
     root: &Path,
@@ -396,7 +396,7 @@ pub fn plan(
         ));
     }
 
-    // AllowedPackages::getAllowedPackages (DFS pré-ordre, premier vu conservé).
+    // AllowedPackages::getAllowedPackages (pre-order DFS, first seen kept).
     let find = |name: &str| -> Option<&ScaffoldPackage> {
         packages.iter().find(|p| p.name.eq_ignore_ascii_case(name))
     };
@@ -436,7 +436,7 @@ pub fn plan(
         });
     }
 
-    // ManageOptions::ensureLocations : locations + web_root, mkdir, realpath.
+    // ManageOptions::ensureLocations: locations + web_root, mkdir, realpath.
     let mut locations: Vec<(String, String)> = root_opts.locations.clone();
     if !locations.iter().any(|(k, _)| k == "web_root") {
         locations.push(("web_root".to_owned(), "./".to_owned()));
@@ -504,8 +504,8 @@ pub fn plan(
                 package: name.clone(),
             };
             if let Some((prev_dest, prev_op)) = files.get(dest_rel) {
-                // scaffoldOverExistingTarget : l'op précédente devient Skip
-                // (dans son projet), la nouvelle reçoit son contenu.
+                // scaffoldOverExistingTarget: the previous op becomes Skip
+                // (in its project), the new one receives its contents.
                 if let Op::Append { original, .. } = &mut op {
                     *original = Some(prev_op.contents().map_err(|e| io_err(name, e))?);
                 }
@@ -545,7 +545,7 @@ pub fn plan(
             .into_iter()
             .filter(|(rel, _, _)| !unchanged.contains(rel))
             .collect();
-        // `!empty($contents)` : "" et "0" sont vides.
+        // `!empty($contents)`: "" and "0" are empty.
         let has_content = kept
             .iter()
             .any(|(_, _, op)| matches!(op.contents(), Ok(c) if !(c.is_empty() || c == b"0")));
@@ -605,7 +605,7 @@ pub fn plan(
         }
     }
 
-    // Fichiers autoload de référence : (ré)écrits sauf si trackés par git.
+    // Reference autoload files: (re)written unless tracked by git.
     let web_root = root_opts.location("web-root").unwrap_or(".");
     let vendor_real = realpath(&root.join("vendor")).unwrap_or_else(|| root.join("vendor"));
     let vendor_s = normalize_path(&vendor_real.to_string_lossy());
@@ -645,8 +645,8 @@ pub fn plan(
             contents: tpl.replace(placeholder, &relative).into_bytes(),
             replace: false,
         });
-        // `$scaffold_results[] = …` : ajouté, jamais fusionné avec une entrée
-        // de file-mapping visant le même fichier (deux entrées .gitignore).
+        // `$scaffold_results[] = ...`: appended, never merged with a
+        // file-mapping entry targeting the same file (two .gitignore entries).
         results.push((
             rel_key.to_owned(),
             Outcome {
@@ -749,7 +749,7 @@ fn make_op(
             }
             let src =
                 source("path")?.ok_or_else(|| format!("{PLUGIN}: missing path for {dest}"))?;
-            // `overwrite()` = !empty ; défaut true.
+            // `overwrite()` = !empty; default true.
             let overwrite = data.get("overwrite").map(php_truthy).unwrap_or(true);
             Ok(Op::Replace {
                 source: src,
@@ -785,7 +785,7 @@ fn make_op(
     }
 }
 
-/// `AppendOp::scaffoldAtNewLocation` (les autres ops se renvoient elles-mêmes).
+/// `AppendOp::scaffoldAtNewLocation` (the other ops return themselves).
 fn scaffold_at_new_location(op: Op, dest: &Dest, package: &str) -> Result<Op, String> {
     let Op::Append {
         prepend,
@@ -836,7 +836,7 @@ fn scaffold_at_new_location(op: Op, dest: &Dest, package: &str) -> Result<Op, St
     })
 }
 
-/// `str_contains` (vrai pour l'aiguille vide).
+/// `str_contains` (true for an empty needle).
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     needle.is_empty() || haystack.windows(needle.len()).any(|w| w == needle)
 }
@@ -845,8 +845,9 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
 // Application
 // ---------------------------------------------------------------------------
 
-/// `git <args>` dans `cwd`, sans GIT_DIR (le plugin laisse git découvrir le
-/// dépôt, un projet dans un dépôt parent compte) ; binaire absent = échec.
+/// `git <args>` in `cwd`, without GIT_DIR (the plugin lets git discover the
+/// repository, a project inside a parent repository counts); missing binary
+/// = failure.
 fn git_ok(cwd: &Path, args: &[&str]) -> bool {
     Command::new("git")
         .args(args)
@@ -860,8 +861,8 @@ fn git_ok(cwd: &Path, args: &[&str]) -> bool {
 }
 
 impl Plan {
-    /// Écrit les fichiers puis gère les `.gitignore` (ManageGitIgnore),
-    /// dans cet ordre comme le plugin (git interrogé après les écritures).
+    /// Writes the files then handles the `.gitignore` files (ManageGitIgnore),
+    /// in that order like the plugin (git queried after the writes).
     pub fn apply(&self) -> std::io::Result<()> {
         for w in &self.writes {
             if let Some(parent) = w.path.parent() {
@@ -917,7 +918,7 @@ impl Plan {
             entries.sort();
             let path = dir.join(".gitignore");
             let mut contents = std::fs::read(&path).unwrap_or_default();
-            // `!empty($contents)` : "0" compte comme vide.
+            // `!empty($contents)`: "0" counts as empty.
             if !(contents.is_empty() || contents == b"0" || contents.ends_with(b"\n")) {
                 contents.push(b'\n');
             }
@@ -928,10 +929,10 @@ impl Plan {
     }
 }
 
-/// `ReplaceOp::process` : `makeWritable(dirname)` si nécessaire, `remove`,
-/// `file_put_contents`, puis perms d'origine du fichier et du répertoire
-/// restaurées — un `.htaccess` en 0444 ou un `sites/default` en 0555 ne
-/// font pas échouer le scaffold.
+/// `ReplaceOp::process`: `makeWritable(dirname)` if needed, `remove`,
+/// `file_put_contents`, then original perms of the file and of the directory
+/// restored; a `.htaccess` at 0444 or a `sites/default` at 0555 do not make
+/// the scaffold fail.
 fn write_replacing(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -980,9 +981,9 @@ fn write_replacing(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 // preAutoloadDump
 // ---------------------------------------------------------------------------
 
-/// Un paquet du dépôt local pour le hash : `getUniqueName()` =
-/// `name-version_normalized`, `getSourceReference()` (chaîne vide si absent),
-/// et l'alias éventuel (`name-<alias normalisé>`, même référence).
+/// A local repository package for the hash: `getUniqueName()` =
+/// `name-version_normalized`, `getSourceReference()` (empty string if
+/// absent), and the optional alias (`name-<normalised alias>`, same reference).
 #[derive(Debug, Clone)]
 pub struct HashPackage {
     pub name: String,
@@ -991,17 +992,17 @@ pub struct HashPackage {
     pub alias_normalized: Option<String>,
 }
 
-/// Sortie de `Plugin::preAutoloadDump`.
+/// Output of `Plugin::preAutoloadDump`.
 #[derive(Debug, Clone)]
 pub struct PreAutoloadDump {
-    /// Entrées à ajouter à la classmap de la racine (relatives au projet).
+    /// Entries to add to the root classmap (project-relative).
     pub root_classmap: Vec<String>,
     /// `vendor/drupal/DrupalInstalled.php`.
     pub drupal_installed: Vec<u8>,
 }
 
-/// `findPackage($name, new Constraint('>', ''))` : une version `dev-*` sans
-/// alias numérique ne matche pas (`versionCompare` renvoie false).
+/// `findPackage($name, new Constraint('>', ''))`: a `dev-*` version without
+/// a numeric alias does not match (`versionCompare` returns false).
 fn installed_matches(packages: &[HashPackage], name: &str) -> bool {
     packages.iter().any(|p| {
         p.name.eq_ignore_ascii_case(name)
@@ -1009,7 +1010,7 @@ fn installed_matches(packages: &[HashPackage], name: &str) -> bool {
     })
 }
 
-/// Paquets du dépôt local après la transaction, depuis le lock.
+/// Local repository packages after the transaction, from the lock.
 pub fn hash_packages(lock: &crate::lock::Lock, with_dev: bool) -> Vec<HashPackage> {
     lock.wanted_packages(with_dev)
         .map(|p| {
@@ -1040,7 +1041,7 @@ pub fn hash_packages(lock: &crate::lock::Lock, with_dev: bool) -> Vec<HashPackag
         .collect()
 }
 
-/// La racine comme `getPackage()` la voit (alias de branche compris).
+/// The root as `getPackage()` sees it (branch alias included).
 pub fn root_hash_package(root: &crate::state::RootPackage) -> HashPackage {
     HashPackage {
         name: root.name.clone(),
@@ -1094,7 +1095,7 @@ pub fn pre_autoload_dump(
     }
     classmap.push(format!("{vendor_dir}/drupal/DrupalInstalled.php"));
 
-    // DrupalInstalledTemplate::getCode (profil trié).
+    // DrupalInstalledTemplate::getCode (sorted profile).
     let mut names: Vec<(String, String)> = Vec::new();
     for p in packages {
         if let Some(alias) = &p.alias_normalized {
@@ -1179,8 +1180,8 @@ mod tests {
 
     #[test]
     fn drupal_installed_matches_reference_project() {
-        // Valeurs du projet de référence (drupal/recommended-project 11.4.6,
-        // installé par Composer, dépôt git sans commit → référence vide).
+        // Values from the reference project (drupal/recommended-project 11.4.6,
+        // installed by Composer, git repository without a commit -> empty reference).
         let profile = Profile {
             pre_autoload_dump: true,
             sorted_hash: true,
@@ -1241,11 +1242,11 @@ mod tests {
         let plan = plan(profile, &root, "me/root", Some(&root_extra), &packages).expect("plan");
         plan.apply().expect("apply");
         let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap_or_default();
-        // b/site surcharge index.php de drupal/core.
+        // b/site overrides drupal/core's index.php.
         assert_eq!(read("web/index.php"), "<?php site index\n");
-        // append sur une cible déjà scaffoldée : contenu de l'op précédente + append.
+        // append on an already scaffolded target: previous op's contents + append.
         assert_eq!(read("web/robots.txt"), "robots\n\nEXTRA");
-        // append sur une nouvelle cible sans force-append : skip.
+        // append on a new target without force-append: skip.
         assert!(!root.join("web/robots.txt.bak").exists());
         assert!(!root.join("web/skipped.txt").exists());
         assert_eq!(
@@ -1253,11 +1254,11 @@ mod tests {
             AUTOLOAD_TPL.replace("{relative_autoload_path}", "../vendor/autoload.php")
         );
         assert!(read("web/autoload_runtime.php").contains("'/../vendor/autoload_runtime.php'"));
-        // Second plan : rien ne change → seuls les autoload*.php sont réécrits.
+        // Second plan: nothing changes, so only the autoload*.php files are rewritten.
         let plan2 =
             super::plan(profile, &root, "me/root", Some(&root_extra), &packages).expect("plan2");
         assert_eq!(plan2.writes().len(), 2);
-        // Destination qui est un répertoire → refus.
+        // Destination that is a directory -> refusal.
         std::fs::create_dir_all(root.join("web/dir")).expect("mkdir");
         let hostile = vec![ScaffoldPackage {
             name: "drupal/core".into(),

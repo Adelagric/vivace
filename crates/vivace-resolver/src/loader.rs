@@ -1,7 +1,7 @@
-//! Port de `Composer\Package\Loader\ArrayLoader` (docs/reference/resolver/
-//! ArrayLoader.php) restreint aux champs du modèle, et de
-//! `MetadataMinifier::expand`. Une entrée JSON (version p2 ou entrée de
-//! lock) devient un `Package`, plus son alias de branche le cas échéant.
+//! Port of `Composer\Package\Loader\ArrayLoader` (docs/reference/resolver/
+//! ArrayLoader.php) restricted to the model's fields, and of
+//! `MetadataMinifier::expand`. A JSON entry (p2 version or lock entry)
+//! becomes a `Package`, plus its branch alias if any.
 
 use crate::constraint::parse_constraints;
 use crate::package::{Link, LinkType, Links, Origin, Package, SourceRef};
@@ -20,7 +20,7 @@ pub fn expand_minified(versions: &[Value]) -> Vec<Value> {
     expand_minified_owned(versions.to_vec())
 }
 
-/// `expand` en consommant l'entrée (une copie de moins par version).
+/// `expand` consuming the input (one copy fewer per version).
 pub fn expand_minified_owned(versions: Vec<Value>) -> Vec<Value> {
     let mut expanded: Vec<Value> = Vec::with_capacity(versions.len());
     let mut current: Option<Map<String, Value>> = None;
@@ -29,7 +29,7 @@ pub fn expand_minified_owned(versions: Vec<Value>) -> Vec<Value> {
             Value::Object(o) => o,
             _ => Map::new(),
         };
-        // `if (!$expandedVersion)` : un premier élément vide compte pour rien.
+        // `if (!$expandedVersion)`: an empty first element counts for nothing.
         if current.as_ref().is_some_and(Map::is_empty) {
             current = None;
         }
@@ -53,7 +53,7 @@ pub fn expand_minified_owned(versions: Vec<Value>) -> Vec<Value> {
     expanded
 }
 
-/// `ArrayLoader::getBranchAlias($config)` → alias normalisé.
+/// `ArrayLoader::getBranchAlias($config)` -> normalized alias.
 pub fn branch_alias(config: &Map<String, Value>) -> Option<String> {
     let version = config.get("version")?.as_str()?;
     if !version.starts_with("dev-") && !version.ends_with("-dev") {
@@ -119,7 +119,7 @@ pub fn pretty_alias(normalized: &str) -> String {
     out
 }
 
-/// `(string)` PHP d'un scalaire JSON.
+/// PHP `(string)` cast of a JSON scalar.
 fn php_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -133,10 +133,10 @@ fn php_string(v: &Value) -> String {
     }
 }
 
-/// `source`/`dist` de `configureObject` : forme imposée, référence castée en
-/// chaîne (`null` reste absent).
+/// `source`/`dist` of `configureObject`: fixed shape, reference cast to
+/// string (`null` stays absent).
 fn source_ref(name: &str, key: &str, v: Option<&Value>) -> Result<Option<SourceRef>, LoadError> {
-    // `isset($config['source'])` : absent ou null → rien.
+    // `isset($config['source'])`: absent or null -> nothing.
     let Some(v) = v.filter(|v| !v.is_null()) else {
         return Ok(None);
     };
@@ -165,10 +165,10 @@ fn source_ref(name: &str, key: &str, v: Option<&Value>) -> Result<Option<SourceR
     }))
 }
 
-/// `ArrayLoader::parseLinks` (`load`, un paquet) ou
-/// `configureCachedLinks` (`loadPackages`, lot d'un dépôt) pour un type de
-/// lien. En lot, un lien vers le paquet lui-même est ignoré, et une
-/// contrainte non textuelle est une erreur ; à l'unité, elle est ignorée.
+/// `ArrayLoader::parseLinks` (`load`, one package) or
+/// `configureCachedLinks` (`loadPackages`, a repository batch) for one link
+/// type. In batch mode, a link to the package itself is ignored and a
+/// non-string constraint is an error; in single mode, it is ignored.
 fn parse_links(
     source: &str,
     source_version: &str,
@@ -223,9 +223,9 @@ fn parse_links(
     Ok(out)
 }
 
-/// `ArrayLoader::load($config)` (`batch` = false) ou une itération de
-/// `ArrayLoader::loadPackages` (`batch` = true) : le paquet, et son alias
-/// éventuel (à ajouter juste avant lui, comme `ArrayRepository::addPackage`).
+/// `ArrayLoader::load($config)` (`batch` = false) or one iteration of
+/// `ArrayLoader::loadPackages` (`batch` = true): the package, and its alias
+/// if any (to be added right before it, like `ArrayRepository::addPackage`).
 pub fn load(
     config: &Value,
     origin: Origin,
@@ -313,11 +313,11 @@ pub fn load(
     Ok((p, alias))
 }
 
-/// `ArrayLoader::loadPackages` (`batch`) ou `load()` répété, suivi de
-/// l'ajout à un dépôt : `load()` rend
-/// l'AliasPackage quand il y en a un, et le dépôt ajoute l'alias PUIS le
-/// paquet aliasé (`ArrayRepository::addPackage`, `loadAsyncPackages`). L'ordre
-/// rendu est donc [alias, base] ; l'arène, elle, garde base avant alias.
+/// `ArrayLoader::loadPackages` (`batch`) or repeated `load()`, followed by
+/// the addition to a repository: `load()` returns the AliasPackage when
+/// there is one, and the repository adds the alias THEN the aliased package
+/// (`ArrayRepository::addPackage`, `loadAsyncPackages`). The returned order
+/// is therefore [alias, base]; the arena keeps base before alias.
 pub fn load_packages(
     configs: &[Value],
     origin: Origin,
@@ -380,12 +380,12 @@ mod tests {
         assert_eq!(a.version, "9999999-dev");
         assert_eq!(a.pretty_version, "9999999-dev");
         assert_eq!(a.alias_of, Some(0));
-        // replace self.version : lien d'origine + lien alias ajouté.
+        // replace self.version: original link + added alias link.
         assert_eq!(a.replaces.0.len(), 2);
         assert_eq!(a.replaces.0[1].constraint.to_string(), "== 9999999-dev");
         assert_eq!(a.replaces.0[1].pretty_constraint, "dev-main");
-        // En lot (dépôt composer), un lien vers soi-même est ignoré
-        // (`configureCachedLinks`) ; à l'unité (lock, racine) il reste.
+        // In batch mode (composer repository), a self link is ignored
+        // (`configureCachedLinks`); in single mode (lock, root) it stays.
         let cfg = json!({"name": "acme/lib", "version": "1.0.0", "replace": {"acme/lib": "self.version", "acme/old": "1.0"}});
         let mut arena = Vec::new();
         load_packages(

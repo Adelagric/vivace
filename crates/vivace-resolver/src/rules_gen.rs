@@ -1,4 +1,4 @@
-//! Port de `Composer\DependencyResolver\RuleSetGenerator`.
+//! Port of `Composer\DependencyResolver\RuleSetGenerator`.
 
 use crate::constraint::Constraint;
 use crate::package::Package;
@@ -15,10 +15,10 @@ pub struct RuleSetGenerator<'a> {
     pool: &'a Pool,
     arena: &'a [Package],
     rules: RuleSet,
-    /// `addedMap` : identifiants de pool déjà traités (ordre d'ajout).
+    /// `addedMap`: pool ids already processed (insertion order).
     added: HashSet<usize>,
     added_order: Vec<usize>,
-    /// `addedPackagesByNames` : name → identifiants de pool (ordre).
+    /// `addedPackagesByNames`: name -> pool ids (ordered).
     added_by_name: Vec<(String, Vec<usize>)>,
     added_by_name_index: HashMap<String, usize>,
 }
@@ -40,7 +40,7 @@ impl<'a> RuleSetGenerator<'a> {
         &self.arena[self.pool.package_by_id(id)]
     }
 
-    /// `createRequireRule` : None si le paquet est parmi ses fournisseurs.
+    /// `createRequireRule`: None if the package is among its own providers.
     fn create_require_rule(&self, id: usize, providers: &[usize], reason: Reason) -> Option<Rule> {
         let mut literals = vec![-(id as i64)];
         for &p in providers {
@@ -176,8 +176,8 @@ impl<'a> RuleSetGenerator<'a> {
         filter: &PlatformRequirementFilter,
     ) -> Result<(), RulesError> {
         for &fixed in &request.fixed_packages {
-            // Un verrouillé retiré par une liste de filtrage n'a pas de
-            // règle : le solveur en fera un problème.
+            // A locked package removed by a filter list gets no rule: the
+            // solver will turn it into a problem.
             if request.is_locked_package(fixed)
                 && self
                     .pool

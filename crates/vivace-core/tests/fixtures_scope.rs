@@ -1,6 +1,6 @@
-//! Le détecteur hors-scope doit déclarer les trois fixtures installables
-//! nativement (c'est le contrat v1 : elles bootent sans plugins), avec les
-//! plugins bénins attendus signalés — ni plus, ni moins.
+//! The out-of-scope detector must declare the three fixtures natively
+//! installable (that is the v1 contract: they boot without plugins), with
+//! the expected harmless plugins reported, no more, no less.
 
 use std::path::{Path, PathBuf};
 

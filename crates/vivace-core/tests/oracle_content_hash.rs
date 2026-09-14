@@ -1,14 +1,14 @@
-//! Tests différentiels du content-hash contre l'oracle Composer réel.
+//! Differential tests of the content-hash against the real Composer oracle.
 //!
-//! Deux niveaux :
-//! 1. Golden : le hash calculé sur le composer.json de chaque fixture doit être
-//!    exactement le `content-hash` de son composer.lock (écrit par Composer).
-//! 2. Oracle vivant : pour une batterie de manifestes retors, comparer au
-//!    résultat de `Locker::getContentHash` exécuté via le phar Composer.
+//! Two levels:
+//! 1. Golden: the hash computed over each fixture's composer.json must be
+//!    exactly the `content-hash` of its composer.lock (written by Composer).
+//! 2. Live oracle: for a battery of tricky manifests, compare with the result
+//!    of `Locker::getContentHash` run through the Composer phar.
 //!
-//! Prérequis (environnement de dev/CI, cf. fixtures/make.sh) : fixtures créées,
-//! `php` + `composer` installés. Si absents, le test ÉCHOUE avec un message
-//! explicite — pas de skip silencieux.
+//! Prerequisites (dev/CI environment, cf. fixtures/make.sh): fixtures created,
+//! `php` + `composer` installed. If missing, the test FAILS with an explicit
+//! message; no silent skip.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,7 +38,7 @@ fn golden_fixture_locks() {
     }
 }
 
-/// Invoque Locker::getContentHash du phar Composer sur un manifeste donné.
+/// Invokes the Composer phar's Locker::getContentHash on a given manifest.
 fn oracle_hash(manifest: &str) -> String {
     let phar = which_composer_phar();
     let script = format!(
@@ -64,8 +64,8 @@ fn oracle_hash(manifest: &str) -> String {
     String::from_utf8(out.stdout).expect("utf8")
 }
 
-/// Le phar est le binaire `composer` du PATH, copié sous extension .phar
-/// (le stream phar:// exige l'extension).
+/// The phar is the `composer` binary from the PATH, copied under a .phar
+/// extension (the phar:// stream requires the extension).
 fn which_composer_phar() -> PathBuf {
     let target = std::env::temp_dir().join("vivace-oracle-composer.phar");
     if !target.exists() {
@@ -90,30 +90,30 @@ fn which_composer_phar() -> PathBuf {
 #[test]
 fn differential_against_php_oracle() {
     let manifests = [
-        // Vide et minimal.
+        // Empty and minimal.
         "{}",
         r#"{"require":{}}"#,
-        // Clés pertinentes vs ignorées, ordre non trié.
+        // Relevant vs ignored keys, unsorted order.
         r#"{"extra":{"a":1},"name":"v/x","description":"ignorée","require":{"php":"^8.2"}}"#,
-        // Unicode, slashes, caractères spéciaux.
+        // Unicode, slashes, special characters.
         r#"{"name":"vendé/tôt","require":{"a/b":"^1.0"},"extra":{"url":"https://ex.com/p?q=1&r=2","emoji":"🎼","quote":"a\"b\\c"}}"#,
-        // Objets vides et pseudo-listes (quirk assoc PHP).
+        // Empty objects and pseudo-lists (PHP assoc quirk).
         r#"{"require":{},"extra":{"empty":{},"list":{"0":"a","1":"b"},"gap":{"0":"a","2":"b"},"rev":{"1":"a","0":"b"}}}"#,
-        // Nombres : entiers, flottants, flottant entier, négatifs, grands.
+        // Numbers: integers, floats, integral float, negatives, large ones.
         r#"{"extra":{"i":42,"f":1.5,"fi":1.0,"neg":-3,"big":9007199254740993,"tiny":1.0e-7}}"#,
-        // Frontières du formatage double de PHP (fixe vs exponentiel) et
-        // entier > PHP_INT_MAX (devient float au decode).
+        // Boundaries of PHP's double formatting (fixed vs exponential) and
+        // integer > PHP_INT_MAX (becomes a float at decode time).
         r#"{"extra":{"a":0.0001,"b":1.0e-5,"c":9.9e16,"d":1.0e17,"e":1.23e17,"f":-0.0,"g":5.0e-324,"h":1.7976931348623157e308,"j":12345678901234567890,"k":1.0e21,"l":123456.789}}"#,
-        // config.platform re-nesté + repositories.
+        // Re-nested config.platform + repositories.
         r#"{"config":{"platform":{"php":"8.2.1"},"sort-packages":true},"repositories":[{"type":"vcs","url":"https://github.com/a/b"}]}"#,
         // prefer-stable / minimum-stability / version.
         r#"{"version":"1.2.3","minimum-stability":"dev","prefer-stable":true,"provide":{"x/y":"*"},"replace":{"z/w":"self.version"},"conflict":{"c/d":"<2.0"}}"#,
-        // Clés imbriquées non triées (seul le premier niveau est ksorté).
+        // Unsorted nested keys (only the top level is ksorted).
         r#"{"require":{"zzz/a":"1","aaa/b":"2"},"extra":{"z":1,"a":2}}"#,
-        // Booleans et null dans extra.
+        // Booleans and null in extra.
         r#"{"extra":{"t":true,"f":false,"n":null,"nested":[1,[2,3],{"k":"v"}]}}"#,
-        // Régression proptest 2026-09-09 : divergence d'1 ULP au parsing des
-        // floats sans la feature serde_json `float_roundtrip`.
+        // proptest regression 2026-09-09: 1 ULP divergence when parsing
+        // floats without the serde_json `float_roundtrip` feature.
         r#"{"extra":{"ulp":-1.0287745609898322e+201}}"#,
     ];
     for m in manifests {

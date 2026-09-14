@@ -1,8 +1,8 @@
-//! Oracle composer/semver sur des données réelles : toutes les contraintes et
-//! versions présentes dans les instantanés Packagist des fixtures
-//! (fixtures/registry/*.tar.gz) passent par le phar — `parseConstraints`
-//! (forme chaîne), `normalize`, `parseStability`, `version_compare`, et
-//! `matches` sur des paires contrainte/version — et par le port.
+//! composer/semver oracle on real data: every constraint and version
+//! present in the fixtures' Packagist snapshots (fixtures/registry/*.tar.gz)
+//! goes through the phar (`parseConstraints` (string form), `normalize`,
+//! `parseStability`, `version_compare`, and `matches` on constraint/version
+//! pairs) and through the port.
 
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -30,7 +30,7 @@ fn phar() -> std::path::PathBuf {
     phar
 }
 
-/// Contraintes et versions distinctes des instantanés (ordre trié).
+/// Distinct constraints and versions of the snapshots (sorted order).
 fn corpus() -> (Vec<String>, Vec<String>) {
     let registry = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/registry");
     let tmp = tempfile::tempdir().expect("tmp");
@@ -139,7 +139,7 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
         versions.len()
     );
 
-    // Contraintes : forme chaîne (ou erreur).
+    // Constraints: string form (or error).
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
            $p = new \Composer\Semver\VersionParser();
@@ -172,7 +172,7 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
     }
     assert_eq!(bad, 0, "{bad} contraintes divergentes");
 
-    // Versions : normalize + parseStability.
+    // Versions: normalize + parseStability.
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
            $p = new \Composer\Semver\VersionParser();
@@ -209,8 +209,8 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
     }
     assert_eq!(bad, 0, "{bad} versions divergentes");
 
-    // version_compare sur des paires de versions normalisées (échantillon
-    // déterministe) et matches(contrainte, version).
+    // version_compare on pairs of normalized versions (deterministic
+    // sample) and matches(constraint, version).
     normalized.sort();
     normalized.dedup();
     let step = std::cmp::max(1, normalized.len() / 400);
@@ -292,8 +292,8 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
     );
 }
 
-/// Intervals : `isSubsetOf` et `compactConstraint` sur des paires de
-/// contraintes du corpus (échantillon déterministe), contre le phar.
+/// Intervals: `isSubsetOf` and `compactConstraint` on pairs of constraints
+/// from the corpus (deterministic sample), against the phar.
 #[test]
 fn intervals_match_composer() {
     use vivace_resolver::intervals::{compact_constraint, is_subset_of};

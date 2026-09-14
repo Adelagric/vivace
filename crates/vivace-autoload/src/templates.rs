@@ -1,19 +1,19 @@
-//! Templates des fichiers d'autoload, transcrits des heredocs de
+//! Templates for the autoload files, transcribed from the heredocs of
 //! `AutoloadGenerator` (docs/reference/AutoloadGenerator.php, Composer
-//! 2.10.3). Convention heredoc PHP : la ligne vide avant le marqueur de fin
-//! fait partie de la chaîne (`…}\n\n`), la dernière newline non — chaque bloc
-//! ci-dessous reproduit ces octets exactement.
+//! 2.10.3). PHP heredoc convention: the blank line before the end marker is
+//! part of the string (`...}\n\n`), the final newline is not; every block
+//! below reproduces those bytes exactly.
 //!
-//! Les structures exportées (`var_export`) manipulent des OCTETS : les noms
-//! de classes ne sont pas forcément de l'UTF-8 valide.
+//! The exported structures (`var_export`) work on BYTES: class names are not
+//! necessarily valid UTF-8.
 
 use crate::pathutil::php_str_bytes;
 
 pub const CLASS_LOADER_PHP: &str = include_str!("../assets/ClassLoader.php");
 pub const LICENSE: &str = include_str!("../assets/LICENSE");
 
-/// `getAutoloadFile($vendorPathToTargetDirCode, $suffix)` — le code du chemin
-/// vers autoload_real.php est déjà résolu par l'appelant.
+/// `getAutoloadFile($vendorPathToTargetDirCode, $suffix)`; the path code to
+/// autoload_real.php is already resolved by the caller.
 pub fn autoload_php(real_path_code: &str, suffix: &str) -> String {
     format!(
         r#"<?php
@@ -53,7 +53,7 @@ pub struct RealFileOptions<'a> {
     pub target_dir_loader: Option<&'a str>,
 }
 
-/// `getAutoloadRealFile(...)` (apcu non supporté : jamais activé par vivace).
+/// `getAutoloadRealFile(...)` (apcu unsupported: never enabled by vivace).
 pub fn autoload_real_php(o: &RealFileOptions<'_>) -> String {
     let suffix = o.suffix;
     let prepend = if o.prepend_autoloader {
@@ -125,12 +125,12 @@ class ComposerAutoloaderInit{suffix}
     f
 }
 
-/// Valeur PHP exportable par `var_export` (chaînes en octets).
+/// PHP value exportable through `var_export` (strings as bytes).
 #[derive(Debug, Clone)]
 pub enum PhpVal {
     Int(i64),
     Str(Vec<u8>),
-    /// Tableau PHP (clés entières ou chaînes), ordre d'insertion.
+    /// PHP array (integer or string keys), insertion order.
     Arr(Vec<(PhpKey, PhpVal)>),
 }
 
@@ -152,9 +152,8 @@ impl PhpKey {
     }
 }
 
-/// `var_export($value, true)` : deux espaces par niveau, `key => ` puis pour
-/// un tableau imbriqué un retour à la ligne et `array (` à l'indentation de
-/// la clé.
+/// `var_export($value, true)`: two spaces per level, `key => ` then, for a
+/// nested array, a line break and `array (` at the key's indentation.
 pub fn var_export(v: &PhpVal, indent: usize) -> Vec<u8> {
     match v {
         PhpVal::Int(i) => i.to_string().into_bytes(),
@@ -206,9 +205,9 @@ fn replace_bytes(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Un `public static $prop = …;` du fichier static : var_export, substitution
-/// des préfixes absolus par les expressions `__DIR__`, ré-indentation
-/// (`    ` + double de l'indentation d'origine), trim des espaces de fin.
+/// One `public static $prop = ...;` of the static file: var_export, absolute
+/// prefixes substituted with `__DIR__` expressions, re-indentation (`    ` +
+/// twice the original indentation), trailing spaces trimmed.
 pub fn static_property(prop: &str, value: &PhpVal, substitutions: &[(String, String)]) -> Vec<u8> {
     let mut exported = var_export(value, 0);
     for (from, to) in substitutions {
@@ -261,7 +260,7 @@ pub fn autoload_static_php(suffix: &str, properties: &[u8], initializer_props: &
     out
 }
 
-/// Fichiers `autoload_{namespaces,psr4,classmap,files}.php` et include_paths.php.
+/// `autoload_{namespaces,psr4,classmap,files}.php` and include_paths.php files.
 pub fn map_file(
     kind: &str,
     vendor_path_code: &str,
@@ -278,14 +277,14 @@ pub fn map_file(
 }
 
 pub struct PlatformCheckParts {
-    /// (id PHP_VERSION_ID, opérateur `>=`/`>`, version lisible) si borne non nulle.
+    /// (PHP_VERSION_ID, `>=`/`>` operator, human-readable version) if a bound is set.
     pub php: Option<(i64, &'static str, String)>,
     pub php_64bit: bool,
-    /// Lignes `extension_loaded(...)` déjà formatées, triées par nom.
+    /// Pre-formatted `extension_loaded(...)` lines, sorted by name.
     pub extension_lines: Vec<String>,
 }
 
-/// `getPlatformCheck` → contenu, ou None si rien à vérifier.
+/// `getPlatformCheck`: the content, or None if there is nothing to check.
 pub fn platform_check_php(parts: &PlatformCheckParts) -> Option<String> {
     let mut required_php = String::new();
     if let Some((id, op, human)) = &parts.php {

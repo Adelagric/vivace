@@ -1,9 +1,9 @@
-//! Oracle d'un dépôt « plein » (Satis, `packages.json` statique, sans
-//! `metadata-url`) avec `mirrors` et `options` de dépôt : le lock écrit
-//! par `composer update --no-install` et celui calculé par
-//! `UpdateSession::update` doivent être identiques à l'octet — y compris
-//! `dist.mirrors`, `source.mirrors` et `transport-options`, que
-//! `ComposerRepository::createPackages` pose après le chargement.
+//! Oracle of a "full" repository (Satis, static `packages.json`, no
+//! `metadata-url`) with repository `mirrors` and `options`: the lock
+//! written by `composer update --no-install` and the one computed by
+//! `UpdateSession::update` must be byte-identical, including
+//! `dist.mirrors`, `source.mirrors` and `transport-options`, which
+//! `ComposerRepository::createPackages` sets after loading.
 
 use std::process::Command;
 use vivace_resolver::platform_filter::PlatformRequirementFilter;

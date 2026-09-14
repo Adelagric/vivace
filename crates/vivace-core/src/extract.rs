@@ -1,28 +1,28 @@
-//! Extraction d'une dist zip vers un répertoire, avec le strip du dossier
-//! racine unique des zipballs GitHub/Packagist (règle d'ArchiveDownloader :
-//! strip ssi l'archive a exactement une entrée de premier niveau et que c'est
-//! un répertoire — sinon tout est extrait tel quel), et une extraction MÉFIANTE :
-//! - chemins : `enclosed_name()` (rejette `..` et absolus) ;
-//! - symlinks (mode unix S_IFLNK) : cible relative uniquement, et le chemin
-//!   résolu lexicalement doit rester dans la racine du paquet ;
-//! - bits exécutables préservés (les binaires en dépendent) ;
-//! - refus des tailles décompressées aberrantes (zip bomb grossière).
+//! Extraction of a zip dist into a directory, stripping the single root
+//! directory of GitHub/Packagist zipballs (ArchiveDownloader's rule: strip iff
+//! the archive has exactly one top-level entry and it is a directory;
+//! otherwise everything is extracted as is), and a DISTRUSTFUL extraction:
+//! - paths: `enclosed_name()` (rejects `..` and absolute paths);
+//! - symlinks (unix mode S_IFLNK): relative target only, and the lexically
+//!   resolved path must stay inside the package root;
+//! - executable bits preserved (binaries depend on them);
+//! - refusal of absurd decompressed sizes (crude zip bomb).
 
 use crate::error::{Error, Result};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
-/// Taille décompressée maximale d'une dist (512 Mo) — au-delà, quelque chose
-/// ne va pas (les plus gros paquets réels font quelques dizaines de Mo).
+/// Maximum decompressed size of a dist (512 MB); beyond that, something is
+/// wrong (the largest real packages weigh a few tens of MB).
 const MAX_UNCOMPRESSED: u64 = 512 * 1024 * 1024;
 
 const S_IFMT: u32 = 0o170000;
 const S_IFLNK: u32 = 0o120000;
 
-/// Chemin d'une entrée, ou erreur si elle est absolue ou contient `..` :
-/// enclosed_name accepte un `..` interne (`r/../x` reste dans la racine) que
-/// le strip du premier composant transformerait en évasion, et aucune dist
-/// légitime n'en contient.
+/// Path of an entry, or an error if it is absolute or contains `..`:
+/// enclosed_name accepts an inner `..` (`r/../x` stays inside the root) that
+/// stripping the first component would turn into an escape, and no
+/// legitimate dist contains one.
 fn entry_path(entry: &zip::read::ZipFile<'_>, dest: &Path) -> Result<PathBuf> {
     entry
         .enclosed_name()
@@ -36,12 +36,12 @@ fn entry_path(entry: &zip::read::ZipFile<'_>, dest: &Path) -> Result<PathBuf> {
         })
 }
 
-/// Nombre de composants à retirer en tête de chaque entrée : 1 si l'archive
-/// a exactement une entrée de premier niveau et que c'est un répertoire
-/// (`ArchiveDownloader::install`, `$singleDirAtTopLevel` ; un `.DS_Store` de
-/// premier niveau n'est pas compté, et disparaît alors avec le dossier
-/// racine), 0 sinon — auquel cas tout est déplacé, `.DS_Store` compris
-/// (`rename($temporaryDir, $path)` sur une cible vide).
+/// Number of leading components to strip from each entry: 1 if the archive
+/// has exactly one top-level entry and it is a directory
+/// (`ArchiveDownloader::install`, `$singleDirAtTopLevel`; a top-level
+/// `.DS_Store` is not counted, and then disappears along with the root
+/// directory), 0 otherwise, in which case everything is moved, `.DS_Store`
+/// included (`rename($temporaryDir, $path)` onto an empty target).
 fn root_strip(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, dest: &Path) -> Result<usize> {
     let mut top: std::collections::BTreeMap<std::ffi::OsString, bool> =
         std::collections::BTreeMap::new();
@@ -125,8 +125,8 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// La cible d'un symlink doit être relative et rester lexicalement dans la
-/// racine extraite (l'attaque classique : `link -> ../../../../etc/passwd`).
+/// A symlink target must be relative and stay lexically inside the extracted
+/// root (the classic attack: `link -> ../../../../etc/passwd`).
 fn check_symlink_target(link_rel: &Path, target: &str, dest: &Path) -> Result<()> {
     let hostile = |reason: String| Error::HostileArchive {
         dest: dest.to_path_buf(),
@@ -136,7 +136,7 @@ fn check_symlink_target(link_rel: &Path, target: &str, dest: &Path) -> Result<()
     if target_path.is_absolute() {
         return Err(hostile(format!("symlink absolu: {link_rel:?} -> {target}")));
     }
-    let mut depth: i64 = link_rel.components().count() as i64 - 1; // profondeur du dossier du lien
+    let mut depth: i64 = link_rel.components().count() as i64 - 1; // depth of the link's directory
     for c in target_path.components() {
         match c {
             Component::ParentDir => {
@@ -214,13 +214,13 @@ mod tests {
 
     #[test]
     fn strips_only_a_single_top_level_directory() {
-        // Dossier unique sans entrée de répertoire explicite : strip.
+        // Single directory without an explicit directory entry: strip.
         let single = build_zip(&[("pkg/a.txt", b"a", None), ("pkg/sub/b.txt", b"b", None)]);
         let d = tmpdir();
         extract_zip(&single, d.path()).expect("extract");
         assert!(d.path().join("a.txt").is_file() && d.path().join("sub/b.txt").is_file());
 
-        // Fichier à la racine + dossier : rien n'est retiré, rien n'est perdu.
+        // File at the root + directory: nothing is stripped, nothing is lost.
         let mixed = build_zip(&[("README", b"r", None), ("src/a.php", b"<?php", None)]);
         let d = tmpdir();
         extract_zip(&mixed, d.path()).expect("extract");
@@ -230,21 +230,21 @@ mod tests {
             "dossier aplati à tort"
         );
 
-        // Deux dossiers de premier niveau : rien n'est retiré.
+        // Two top-level directories: nothing is stripped.
         let two = build_zip(&[("a/x", b"x", None), ("b/y", b"y", None)]);
         let d = tmpdir();
         extract_zip(&two, d.path()).expect("extract");
         assert!(d.path().join("a/x").is_file() && d.path().join("b/y").is_file());
 
-        // Un seul fichier à la racine : ce n'est pas un répertoire, pas de strip.
+        // A single file at the root: not a directory, no strip.
         let file = build_zip(&[("only.txt", b"o", None)]);
         let d = tmpdir();
         extract_zip(&file, d.path()).expect("extract");
         assert!(d.path().join("only.txt").is_file(), "fichier unique perdu");
 
-        // .DS_Store de premier niveau : ignoré pour le compte (strip du
-        // dossier unique, il disparaît) ; sans dossier unique, extrait comme
-        // le reste.
+        // Top-level .DS_Store: ignored for the count (the single directory is
+        // stripped, it disappears); without a single directory, extracted like
+        // the rest.
         let ds = build_zip(&[(".DS_Store", b"junk", None), ("pkg/a.txt", b"a", None)]);
         let d = tmpdir();
         extract_zip(&ds, d.path()).expect("extract");
@@ -288,8 +288,8 @@ mod tests {
 
     #[test]
     fn zip_slip_paths_are_rejected() {
-        // Le writer assainit les noms : on fabrique le `..` par byte-patch
-        // (même longueur), comme le ferait une archive forgée.
+        // The writer sanitises names: we forge the `..` by byte-patching
+        // (same length), as a crafted archive would.
         let benign = build_zip(&[("r/", b"", None), ("r/AA/evil.txt", b"x", None)]);
         let patched: Vec<u8> = {
             let needle = b"r/AA/evil.txt";

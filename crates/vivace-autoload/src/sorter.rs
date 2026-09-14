@@ -1,18 +1,18 @@
-//! Port de `Composer\Util\PackageSorter::sortPackages` : chaque paquet reçoit
-//! un poids d'après ses « utilisateurs » (qui le requiert), récursivement ; les
-//! plus requis remontent en tête. Égalité départagée par strnatcasecmp.
+//! Port of `Composer\Util\PackageSorter::sortPackages`: each package gets a
+//! weight from its "users" (whoever requires it), recursively; the most
+//! required packages float to the top. Ties are broken by strnatcasecmp.
 
 use crate::natsort::strnatcasecmp;
 use std::collections::BTreeMap;
 
-/// Un paquet vu par le trieur : nom + cibles de ses `require` (+ `require-dev`
-/// pour la racine).
+/// A package as seen by the sorter: name + targets of its `require` (+
+/// `require-dev` for the root).
 pub struct SortablePackage<'a> {
     pub name: &'a str,
     pub requires: Vec<&'a str>,
 }
 
-/// Renvoie les indices des paquets dans l'ordre trié.
+/// Returns the package indices in sorted order.
 pub fn sort_packages(packages: &[SortablePackage<'_>]) -> Vec<usize> {
     let mut usage: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for p in packages {
@@ -85,10 +85,10 @@ mod tests {
             .into_iter()
             .map(|i| packages[i].name)
             .collect();
-        // base est requis par a et b (chacun requis par z) → poids le plus négatif.
+        // base is required by a and b (each required by z): most negative weight.
         assert_eq!(order[0], "lib/base");
         assert_eq!(&order[1..3], &["lib/a", "lib/b"]);
-        // Poids 0 : app/z, c9 avant c10 (naturel).
+        // Weight 0: app/z, c9 before c10 (natural order).
         assert_eq!(&order[3..], &["app/z", "lib/c9", "lib/c10"]);
     }
 }

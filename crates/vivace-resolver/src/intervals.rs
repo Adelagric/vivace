@@ -1,9 +1,9 @@
-//! Port de `Composer\Semver\Intervals` (docs/reference/resolver/
-//! semver-Intervals.php) : une contrainte devient une liste d'intervalles
-//! numériques `[borne, borne]` plus un ensemble de branches (`dev-*`) inclus
-//! ou exclus ; `isSubsetOf`, `haveIntersections` et `compactConstraint` en
-//! découlent. PoolBuilder s'en sert pour savoir si un paquet déjà chargé
-//! couvre une nouvelle contrainte, et pour fusionner des contraintes.
+//! Port of `Composer\Semver\Intervals` (docs/reference/resolver/
+//! semver-Intervals.php): a constraint becomes a list of numeric intervals
+//! `[bound, bound]` plus a set of branches (`dev-*`) that are either included
+//! or excluded; `isSubsetOf`, `haveIntersections` and `compactConstraint`
+//! derive from it. PoolBuilder uses it to know whether an already loaded
+//! package covers a new constraint, and to merge constraints.
 
 use crate::constraint::{Constraint, Op};
 use crate::phpver::version_compare;
@@ -242,8 +242,8 @@ pub fn compact_constraint(constraint: &Constraint) -> Constraint {
 
 /// `Intervals::get` / `generateIntervals`.
 pub fn generate(constraint: &Constraint, stop_on_first_valid: bool) -> Intervals {
-    // `Intervals::$intervalsCache` (par forme textuelle chez Composer) :
-    // ici par valeur structurelle, même résultat.
+    // `Intervals::$intervalsCache` (keyed by textual form in Composer):
+    // keyed by structural value here, same result.
     thread_local! {
         static CACHE: std::cell::RefCell<std::collections::HashMap<(Constraint, bool), Intervals>> =
             std::cell::RefCell::new(std::collections::HashMap::new());
@@ -280,8 +280,8 @@ fn generate_uncached(constraint: &Constraint, stop_on_first_valid: bool) -> Inte
     }
 }
 
-/// `array_diff($a, $b)` / `array_intersect` / `array_merge` sur des listes
-/// de chaînes (ordre de `$a` conservé, doublons conservés).
+/// `array_diff($a, $b)` / `array_intersect` / `array_merge` on lists of
+/// strings (order of `$a` preserved, duplicates preserved).
 fn diff(a: &[String], b: &[String]) -> Vec<String> {
     a.iter().filter(|x| !b.contains(x)).cloned().collect()
 }
@@ -378,7 +378,7 @@ fn multi(constraints: &[Constraint], conjunctive: bool, stop_on_first_valid: boo
             _ => 0,
         }
     };
-    // usort : tri stable sur (version_compare, ordre des opérateurs).
+    // usort: stable sort on (version_compare, operator order).
     borders.sort_by(|a, b| {
         let order = version_compare(&a.version, &b.version);
         if order == Ordering::Equal {

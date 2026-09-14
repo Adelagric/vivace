@@ -1,14 +1,14 @@
-//! Oracle de bout en bout de la disposition composer/installers : Composer
-//! (phar) + le vrai plugin (docs/reference/installers, v2.3.0) activé sur un
-//! Composer construit avec l'extra racine du cas ; on interroge
-//! `InstallationManager::getInstallPath` (dispatch réel : `supports` faux →
-//! LibraryInstaller) puis `Filesystem::findShortestPath(vendor/composer, …)`.
-//! Le port (`layout::resolve`) doit rendre le même chemin relatif au projet
-//! et le même `install-path`.
+//! End-to-end oracle of the composer/installers layout: Composer (phar) +
+//! the real plugin (docs/reference/installers, v2.3.0) activated on a
+//! Composer built with the case's root extra; we query
+//! `InstallationManager::getInstallPath` (real dispatch: `supports` false ->
+//! LibraryInstaller) then `Filesystem::findShortestPath(vendor/composer, ...)`.
+//! The port (`layout::resolve`) must return the same project-relative path
+//! and the same `install-path`.
 //!
-//! Quand vivace refuse un cas (framework custom, cible refusée…), le test
-//! vérifie seulement que le refus est de la catégorie attendue ; quand il
-//! l'accepte, l'égalité est obligatoire.
+//! When vivace refuses a case (custom framework, refused target...), the test
+//! only checks that the refusal is of the expected category; when it accepts
+//! it, equality is mandatory.
 
 use serde_json::{json, Value};
 use std::io::Write as _;
@@ -17,7 +17,7 @@ use std::process::{Command, Stdio};
 use vivace_core::layout::Layout;
 use vivace_core::lock::Lock;
 
-/// Un cas : extra racine + paquets (nom, type, extra, target-dir).
+/// A case: root extra + packages (name, type, extra, target-dir).
 struct Case {
     root_extra: Value,
     packages: Vec<Value>,
@@ -31,9 +31,9 @@ fn cases() -> Vec<Case> {
     let mut out = Vec::new();
     let table = vivace_core::installers::table_for("v2.3.0").expect("table");
 
-    // Tous les frameworks × tous leurs emplacements × plusieurs noms, sans
-    // installer-paths : le défaut de la table (frameworks custom compris —
-    // vivace doit les refuser).
+    // All frameworks x all their locations x several names, without
+    // installer-paths: the table default (custom frameworks included; vivace
+    // must refuse them).
     let mut defaults = Vec::new();
     for fw in table.frameworks() {
         for loc in fw.locations.keys() {
@@ -48,7 +48,7 @@ fn cases() -> Vec<Case> {
         packages: defaults,
     });
 
-    // Types non pris par le plugin ou sans emplacement, target-dir legacy.
+    // Types not taken by the plugin or without a location, legacy target-dir.
     out.push(Case {
         root_extra: json!({}),
         packages: vec![
@@ -68,8 +68,8 @@ fn cases() -> Vec<Case> {
         ],
     });
 
-    // installer-paths : par type, par nom, par vendor, chevauchements,
-    // templates avec toutes les variables, listes et scalaires.
+    // installer-paths: by type, by name, by vendor, overlaps, templates with
+    // all the variables, lists and scalars.
     out.push(Case {
         root_extra: json!({"installer-paths": {
             "web/app/plugins/dolly/": ["wpackagist-plugin/hello-dolly"],
@@ -95,7 +95,7 @@ fn cases() -> Vec<Case> {
         ],
     });
 
-    // installer-disable sous toutes ses formes.
+    // installer-disable in all its forms.
     for disable in [
         json!(true),
         json!("all"),
@@ -116,8 +116,8 @@ fn cases() -> Vec<Case> {
         });
     }
 
-    // Formes malformées ou hostiles d'installer-paths : vivace refuse, le
-    // test vérifie que la catégorie de refus est la bonne.
+    // Malformed or hostile forms of installer-paths: vivace refuses, the test
+    // checks that the refusal category is the right one.
     for paths in [
         json!({"x/{$name}": true}),
         json!({"x/{$Nope}": ["acme/mod"]}),
@@ -228,7 +228,7 @@ fn php_oracle(cases: &[Case], cwd: &Path) -> Vec<Vec<Value>> {
         .unwrap_or_else(|e| panic!("json: {e}\n{}", String::from_utf8_lossy(&out.stdout)))
 }
 
-/// Lock minimal : composer/installers 2.3.0 + le paquet du cas.
+/// Minimal lock: composer/installers 2.3.0 + the case's package.
 fn lock_for(p: &Value) -> Lock {
     let mut entry = p.clone();
     entry["version"] = json!("1.0.0");
@@ -251,7 +251,7 @@ fn lock_for(p: &Value) -> Lock {
 #[test]
 fn layout_matches_composer_with_the_real_plugin() {
     let cwd = tempfile::tempdir().expect("tmp");
-    // PHP réalise le cwd (macOS : /private/var…) ; on aligne notre racine.
+    // PHP resolves the cwd with realpath (macOS: /private/var...); align our root.
     let root = cwd.path().canonicalize().expect("canonicalize");
     let cases = cases();
     let oracle = php_oracle(&cases, &root);
@@ -294,8 +294,8 @@ fn layout_matches_composer_with_the_real_plugin() {
                 Err(issues) => {
                     refused += 1;
                     let msg = issues.join(" | ");
-                    // Un refus est soit ce que Composer refuse aussi, soit
-                    // un refus délibéré (logique non portée, cible dangereuse).
+                    // A refusal is either what Composer refuses too, or a
+                    // deliberate refusal (logic not ported, dangerous target).
                     let deliberate = msg.contains("custom path logic")
                         || msg.contains("malformed")
                         || msg.contains("unknown variable")

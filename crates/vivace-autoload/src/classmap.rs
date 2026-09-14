@@ -1,22 +1,21 @@
-//! Port de `composer/class-map-generator` (docs/reference/cmg-*.php) :
-//! - `find_classes` : pré-nettoyage (PhpFileCleaner — strings, commentaires,
-//!   heredocs remplacés) puis LE pattern PCRE de PhpFileParser, exécuté par
-//!   pcre2 (possessifs, lookbehind, octets `\x7f-\xff` : hors de portée du
-//!   crate `regex`, décision plan r1/F4) ;
-//! - `Scanner` : parcours à la Symfony Finder (extensions php/inc/hh, dot-files
-//!   et répertoires VCS ignorés, symlinks suivis), filtre PSR-0/PSR-4,
-//!   exclusion par regex, dédoublonnage par realpath, ambiguïtés « le premier
-//!   gagne ».
+//! Port of `composer/class-map-generator` (docs/reference/cmg-*.php):
+//! - `find_classes`: pre-cleaning (PhpFileCleaner: strings, comments and
+//!   heredocs replaced) then THE PCRE pattern of PhpFileParser, run by pcre2
+//!   (possessive quantifiers, lookbehind, `\x7f-\xff` bytes: out of reach of
+//!   the `regex` crate, plan decision r1/F4);
+//! - `Scanner`: Symfony Finder-style walk (php/inc/hh extensions, dot-files
+//!   and VCS directories ignored, symlinks followed), PSR-0/PSR-4 filter,
+//!   regex exclusion, realpath deduplication, "first one wins" ambiguities.
 //!
-//! Les noms de classes sont des OCTETS bruts, comme chez PHP : symfony/cache
-//! déclare une classe nommée d'un seul octet non-UTF-8, que Composer écrit
-//! tel quel dans la classmap.
+//! Class names are raw BYTES, as in PHP: symfony/cache declares a class named
+//! with a single non-UTF-8 byte, which Composer writes as is into the
+//! classmap.
 //!
-//! Composer passe d'abord par `php_strip_whitespace()` (tokenizer PHP) : nous
-//! ne l'avons pas, donc le cleaner gère en plus les commentaires `#` (hors
-//! attributs `#[`), seule différence observable pour la détection de classes.
-//! Parité tenue par tests/oracle_classmap.rs (findClasses du phar sur tous les
-//! fichiers des fixtures).
+//! Composer first goes through `php_strip_whitespace()` (PHP tokenizer): we do
+//! not have it, so the cleaner additionally handles `#` comments (except `#[`
+//! attributes), the only observable difference for class detection. Parity is
+//! held by tests/oracle_classmap.rs (the phar's findClasses on every fixture
+//! file).
 
 use crate::pathutil::normalize_path;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,8 +35,8 @@ pub enum ClassMapError {
 
 const TYPE_WORDS: [&str; 4] = ["class", "interface", "trait", "enum"];
 
-/// Nettoyage minimal : remplace strings/heredocs par `null`, supprime les
-/// commentaires, s'arrête tôt quand un seul type est attendu (maxMatches == 1).
+/// Minimal cleaning: replaces strings/heredocs with `null`, strips comments,
+/// stops early when a single type is expected (maxMatches == 1).
 fn clean(contents: &[u8], max_matches: usize, type_pattern: &pcre2::bytes::Regex) -> Vec<u8> {
     let len = contents.len();
     let mut out: Vec<u8> = Vec::with_capacity(len);
@@ -83,8 +82,8 @@ fn clean(contents: &[u8], max_matches: usize, type_pattern: &pcre2::bytes::Regex
                     continue;
                 }
             }
-            // `#` : commentaire de ligne, sauf attribut `#[` (PHP 8) — rôle
-            // de php_strip_whitespace chez Composer.
+            // `#`: line comment, except `#[` attributes (PHP 8); this is the
+            // role of php_strip_whitespace in Composer.
             if c == b'#' && !peek(i, b'[') {
                 i = skip_to_newline(contents, i);
                 continue;
@@ -92,7 +91,7 @@ fn clean(contents: &[u8], max_matches: usize, type_pattern: &pcre2::bytes::Regex
             if max_matches == 1 && matches!(c, b'c' | b'i' | b't' | b'e') {
                 for word in TYPE_WORDS {
                     if contents[i..].starts_with(word.as_bytes()) {
-                        // pattern ancré à index-1 : `.\b(?<![\$:>])type\s++name`
+                        // pattern anchored at index-1: `.\b(?<![\$:>])type\s++name`
                         let start = i.saturating_sub(1);
                         if let Ok(Some(m)) = type_pattern.find_at(contents, start) {
                             if m.start() == start {
@@ -104,7 +103,7 @@ fn clean(contents: &[u8], max_matches: usize, type_pattern: &pcre2::bytes::Regex
                 }
             }
             i += 1;
-            // strcspn sur les caractères de rejet
+            // strcspn over the reject characters
             let mut skip = 0;
             while i + skip < len
                 && !matches!(
@@ -160,7 +159,7 @@ fn skip_to_newline(contents: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// `<<<[ \t]*(['"]?)(ident)\1(\r\n|\n|\r)` ancré à i → (délimiteur, index après).
+/// `<<<[ \t]*(['"]?)(ident)\1(\r\n|\n|\r)` anchored at i: (delimiter, index after).
 fn heredoc_start(contents: &[u8], i: usize) -> Option<(Vec<u8>, usize)> {
     if !contents[i..].starts_with(b"<<<") {
         return None;
@@ -263,7 +262,7 @@ impl ClassFinder {
         })
     }
 
-    /// `PhpFileParser::findClasses` sur un contenu déjà lu (noms en octets).
+    /// `PhpFileParser::findClasses` on already-read contents (names as bytes).
     pub fn find_classes(&self, contents: &[u8]) -> Result<Vec<Vec<u8>>, ClassMapError> {
         if contents.iter().all(u8::is_ascii_whitespace) {
             return Ok(Vec::new());
@@ -334,9 +333,9 @@ impl ClassFinder {
     }
 }
 
-/// Détection en parallèle (threads scoped, un `ClassFinder` par thread —
-/// les regex pcre2 ne se partagent pas), résultats dans l'ordre d'entrée
-/// pour préserver « le premier gagne ».
+/// Parallel detection (scoped threads, one `ClassFinder` per thread since
+/// pcre2 regexes cannot be shared), results in input order to preserve
+/// "first one wins".
 fn find_all_parallel(
     todo: &[(PathBuf, PathBuf, Vec<u8>)],
 ) -> Result<Vec<Vec<Vec<u8>>>, ClassMapError> {
@@ -378,12 +377,12 @@ fn find_all_parallel(
     Ok(out)
 }
 
-/// Version du format/algorithme de scan : à incrémenter dès que la détection
-/// change, pour invalider les caches existants.
+/// Version of the scan format/algorithm: bump it whenever detection changes,
+/// to invalidate existing caches.
 const CACHE_FORMAT: &str = "v1";
 
-/// Emplacement de cache pour le scan d'un répertoire d'une entrée de store :
-/// clé = entrée (nom/version/ref) + sous-répertoire relatif + version du format.
+/// Cache location for the scan of a store entry's directory:
+/// key = entry (name/version/ref) + relative subdirectory + format version.
 pub struct CacheSlot {
     file: PathBuf,
 }
@@ -403,7 +402,7 @@ impl CacheSlot {
         }
     }
 
-    /// Entrées (chemin relatif, classes brutes) dans l'ordre de parcours.
+    /// Entries (relative path, raw classes) in walk order.
     fn load(&self) -> Option<Vec<(PathBuf, Vec<Vec<u8>>)>> {
         use base64::Engine as _;
         let text = std::fs::read(&self.file).ok()?;
@@ -426,7 +425,7 @@ impl CacheSlot {
         let mut raw: Vec<(String, Vec<String>)> = Vec::with_capacity(files.len());
         for (file, _, classes) in files {
             let Ok(rel) = file.strip_prefix(base) else {
-                return; // hors de la base : on ne cache pas
+                return; // outside the base: do not cache
             };
             raw.push((
                 rel.to_string_lossy().into_owned(),
@@ -457,10 +456,10 @@ pub enum AutoloadType {
 
 #[derive(Default)]
 pub struct ClassMap {
-    /// classe (octets bruts) → chemin normalisé ; BTreeMap = ksort (octets).
+    /// class (raw bytes) -> normalized path; BTreeMap = ksort (bytes).
     pub map: BTreeMap<Vec<u8>, String>,
     pub ambiguous: BTreeMap<Vec<u8>, Vec<String>>,
-    /// (message, classe, chemin)
+    /// (message, class, path)
     pub psr_violations: Vec<(String, Vec<u8>, String)>,
 }
 
@@ -483,7 +482,7 @@ const VCS_DIRS: [&str; 9] = [
 
 impl Scanner {
     pub fn new() -> Result<Scanner, ClassMapError> {
-        ClassFinder::new()?; // valide les regex tôt
+        ClassFinder::new()?; // validates the regexes early
         Ok(Scanner {
             class_map: ClassMap::default(),
             scanned: BTreeSet::new(),
@@ -494,12 +493,11 @@ impl Scanner {
         self.class_map.map.insert(class.to_vec(), path.to_owned());
     }
 
-    /// `scanPaths($path, $excluded, $autoloadType, $namespace)` ; `path`
-    /// absolu (fichier ou répertoire). Un chemin absent est une erreur pour
-    /// une règle classmap (comme Composer) ; les répertoires PSR absents sont
-    /// filtrés en amont par l'appelant. Les fichiers sont visités dans l'ordre
-    /// lexicographique — Composer suit l'ordre du système de fichiers, ce qui
-    /// n'affecte que le gagnant d'une ambiguïté.
+    /// `scanPaths($path, $excluded, $autoloadType, $namespace)`; `path` is
+    /// absolute (file or directory). A missing path is an error for a classmap
+    /// rule (as in Composer); missing PSR directories are filtered out upstream
+    /// by the caller. Files are visited in lexicographic order; Composer
+    /// follows filesystem order, which only affects the winner of an ambiguity.
     pub fn scan_path(
         &mut self,
         path: &Path,
@@ -510,10 +508,10 @@ impl Scanner {
         self.scan_path_cached(path, excluded, autoload_type, namespace, None)
     }
 
-    /// `scan_path` avec, pour un répertoire d'une entrée de store (immuable),
-    /// un cache des classes brutes par fichier : la lecture et la détection
-    /// sont sautées, tout le reste (exclusions, dédoublonnage, filtre PSR,
-    /// ambiguïtés) est rejoué à l'identique.
+    /// `scan_path` with, for a (immutable) store entry directory, a cache of
+    /// raw classes per file: reading and detection are skipped, everything
+    /// else (exclusions, deduplication, PSR filter, ambiguities) is replayed
+    /// identically.
     pub fn scan_path_cached(
         &mut self,
         path: &Path,
@@ -524,7 +522,7 @@ impl Scanner {
     ) -> Result<(), ClassMapError> {
         let base_path = normalize_path(&path.to_string_lossy());
 
-        // (chemin, chemin réel, classes brutes) dans l'ordre de parcours.
+        // (path, real path, raw classes) in walk order.
         let mut scanned_files: Vec<(PathBuf, PathBuf, Vec<Vec<u8>>)> = Vec::new();
 
         let cached = cache.and_then(|c| c.load());
@@ -535,8 +533,8 @@ impl Scanner {
             }
         } else {
             let (files, saw_symlink) = self.collect_files(path)?;
-            // Lecture séquentielle (la lecture parallèle est plus lente sur
-            // APFS), détection en parallèle sur le CPU.
+            // Sequential reads (parallel reading is slower on APFS),
+            // parallel detection on the CPU.
             let mut todo: Vec<(PathBuf, PathBuf, Vec<u8>)> = Vec::new();
             for (file, real) in files {
                 let contents =
@@ -599,8 +597,8 @@ impl Scanner {
         Ok(())
     }
 
-    /// Parcours à la Finder : (chemin, chemin réel) des fichiers php/inc/hh,
-    /// et si un symlink a été traversé (le cache est alors désactivé).
+    /// Finder-style walk: (path, real path) of php/inc/hh files, and whether
+    /// a symlink was traversed (the cache is then disabled).
     fn collect_files(&self, path: &Path) -> Result<(Vec<(PathBuf, PathBuf)>, bool), ClassMapError> {
         let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut saw_symlink = false;
@@ -818,9 +816,9 @@ mod cache_tests {
         std::fs::write(p, content).expect("write");
     }
 
-    /// Un scan servi par le cache doit produire exactement la même classmap
-    /// (classes, chemins, ambiguïtés) qu'un scan direct — y compris pour les
-    /// noms non-UTF-8 et les fichiers sans classe.
+    /// A scan served from the cache must produce exactly the same classmap
+    /// (classes, paths, ambiguities) as a direct scan, including for non-UTF-8
+    /// names and files without any class.
     #[test]
     fn cached_scan_equals_direct_scan() {
         let tmp = tempfile::tempdir().expect("tmp");
@@ -849,9 +847,9 @@ mod cache_tests {
             (s.class_map.map, s.class_map.ambiguous)
         };
         let direct = run(None);
-        let first = run(Some(&slot)); // remplit le cache
+        let first = run(Some(&slot)); // fills the cache
         assert!(slot.file.is_file(), "cache non écrit");
-        let cached = run(Some(&slot)); // servi par le cache
+        let cached = run(Some(&slot)); // served from the cache
         assert_eq!(direct, first);
         assert_eq!(direct, cached);
         assert_eq!(direct.0.len(), 4);

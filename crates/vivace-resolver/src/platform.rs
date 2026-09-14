@@ -1,9 +1,9 @@
-//! Port de `Composer\Repository\PlatformRepository` : les paquets de
-//! plateforme (composer*, php*, ext-*, lib-*, hhvm) dans l'ordre exact de
-//! Composer, avec les surcharges `config.platform`. Le sondage du PHP
-//! courant est fait par assets/platform-probe.php (transcription de
-//! `initialize()`, versions brutes) ; la normalisation et ses replis sont
-//! rejoués ici avec le port exact de VersionParser.
+//! Port of `Composer\Repository\PlatformRepository`: the platform packages
+//! (composer*, php*, ext-*, lib-*, hhvm) in Composer's exact order, with the
+//! `config.platform` overrides. Probing the current PHP is done by
+//! assets/platform-probe.php (a transcription of `initialize()`, raw
+//! versions); normalization and its fallbacks are replayed here with the
+//! exact port of VersionParser.
 
 use crate::constraint::{Constraint, Op};
 use crate::package::{Link, LinkType, Links, Origin, Package};
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::process::Command;
 use std::sync::OnceLock;
 
-/// Version de Composer émulée et ses API (Composer::VERSION,
+/// Emulated Composer version and its APIs (Composer::VERSION,
 /// PluginInterface::PLUGIN_API_VERSION, Composer::RUNTIME_API_VERSION).
 pub const COMPOSER_VERSION: &str = "2.10.3";
 pub const PLUGIN_API_VERSION: &str = "2.9.0";
@@ -37,7 +37,7 @@ pub fn is_platform_package(name: &str) -> bool {
     re.is_match(name.as_bytes()).unwrap_or(false)
 }
 
-/// Une entrée brute du sondage.
+/// A raw probe entry.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct Probed {
     kind: String,
@@ -51,7 +51,7 @@ struct Probed {
     provides: Vec<String>,
 }
 
-/// Lance le sondage sur le PHP courant (`VIVACE_PHP` ou `php`).
+/// Runs the probe on the current PHP (`VIVACE_PHP` or `php`).
 pub fn probe() -> Result<Vec<Value>, PlatformError> {
     let php = std::env::var("VIVACE_PHP").unwrap_or_else(|_| "php".to_owned());
     let dir = tempfile::tempdir().map_err(|e| PlatformError(e.to_string()))?;
@@ -76,13 +76,13 @@ struct Override {
     version: Option<String>,
 }
 
-/// La liste ordonnée des paquets de plateforme (`getPackages()`), `probed`
-/// étant la sortie du sondage et `overrides` `config.platform`.
+/// The ordered list of platform packages (`getPackages()`), `probed` being
+/// the probe output and `overrides` `config.platform`.
 pub fn platform_packages(
     probed: &[Value],
     overrides_cfg: &Map<String, Value>,
 ) -> Result<Vec<Package>, PlatformError> {
-    // Ordre d'insertion de `config.platform` (tableau PHP), pas trié.
+    // Insertion order of `config.platform` (PHP array), not sorted.
     let mut overrides: Vec<(String, Override)> = Vec::new();
     for (name, version) in overrides_cfg {
         let v = match version {
@@ -140,7 +140,7 @@ pub fn platform_packages(
             add_overridden(&mut packages, o, None)?;
         }
     }
-    // La version réelle est ajoutée à la description de la surcharge
+    // The actual version is appended to the override's description
     // (`, same as actual` / `, actual: x.y.z`).
     let note_actual = |packages: &mut [Package], actual: &Package| {
         if let Some(over) = packages.iter_mut().find(|q| q.name == actual.name) {
@@ -162,10 +162,10 @@ pub fn platform_packages(
     let add = |packages: &mut Vec<Package>, p: Package| -> Result<(), PlatformError> {
         if let Some(o) = override_of(&p.name) {
             if o.version.is_none() {
-                return Ok(()); // désactivé
+                return Ok(()); // disabled
             }
             note_actual(packages, &p);
-            return Ok(()); // déjà ajouté par la surcharge
+            return Ok(()); // already added by the override
         }
         if let Some(php) = override_of("php") {
             if p.name.starts_with("php-") {
@@ -281,7 +281,7 @@ pub fn platform_packages(
                 let mut replaces = Links::default();
                 for r in &e.replaces {
                     let r = r.to_lowercase();
-                    // Clé PHP = nom nu, cible = `lib-<nom>` (addLibrary).
+                    // PHP key = bare name, target = `lib-<name>` (addLibrary).
                     replaces.insert(Link {
                         key: Some(r.clone()),
                         source: lib_name.clone(),
@@ -361,12 +361,12 @@ mod tests {
             pk[4].version, "8.2.0.0",
             "php-64bit prend la version surchargée de php"
         );
-        // Clé PHP sans `lib-`, cible avec (addLibrary).
+        // PHP key without `lib-`, target with it (addLibrary).
         let link = pk[7].provides.get("dom-libxml").unwrap();
         assert_eq!(link.target, "lib-dom-libxml");
         assert_eq!(link.constraint.to_string(), "== 2.13.4.0");
         assert!(pk[7].provides.get("lib-dom-libxml").is_none());
-        // Ordre d'insertion des surcharges, pas alphabétique.
+        // Insertion order of the overrides, not alphabetical.
         let mut overrides = Map::new();
         overrides.insert("php".into(), Value::String("8.2.0".into()));
         overrides.insert("ext-mbstring".into(), Value::String("1.0".into()));

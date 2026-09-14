@@ -1,9 +1,9 @@
-//! Cache des métadonnées d'un dépôt `composer`, au format et à l'emplacement
-//! de Composer (`Cache` sur `cache-repo-dir/<url assainie>/`) : mêmes noms
-//! de fichiers (`packages.json`, `provider-<vendor>~<name>[~dev].json`),
-//! même contenu (le JSON ré-encodé avec `last-modified` injecté quand le
-//! serveur a donné l'en-tête, le corps brut sinon). Un cache écrit par l'un
-//! est lu par l'autre, et vice versa.
+//! Metadata cache of a `composer` repository, in Composer's format and
+//! location (`Cache` on `cache-repo-dir/<sanitized url>/`): same file names
+//! (`packages.json`, `provider-<vendor>~<name>[~dev].json`), same content
+//! (the JSON re-encoded with `last-modified` injected when the server sent
+//! the header, the raw body otherwise). A cache written by one is read by
+//! the other, and vice versa.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -12,8 +12,8 @@ pub struct MetadataCache {
     root: PathBuf,
 }
 
-/// `Url::sanitize` réduit aux identifiants dans l'URL (`user:pass@`) et au
-/// paramètre `access_token`.
+/// `Url::sanitize` reduced to credentials in the URL (`user:pass@`) and the
+/// `access_token` parameter.
 fn sanitize_url(url: &str) -> String {
     static TOKEN: std::sync::OnceLock<pcre2::bytes::Regex> = std::sync::OnceLock::new();
     static CREDS: std::sync::OnceLock<pcre2::bytes::Regex> = std::sync::OnceLock::new();
@@ -92,7 +92,7 @@ impl MetadataCache {
         }
     }
 
-    /// Clé assainie (`Cache` : `[^a-z0-9.$~_]` → `-`).
+    /// Sanitized key (`Cache`: `[^a-z0-9.$~_]` -> `-`).
     fn path(&self, key: &str) -> PathBuf {
         let file: String = key
             .chars()
@@ -107,7 +107,7 @@ impl MetadataCache {
         self.root.join(file)
     }
 
-    /// `provider-<name avec / → ~>.json`.
+    /// `provider-<name with / -> ~>.json`.
     pub fn provider_key(file_name: &str) -> String {
         format!("provider-{}.json", file_name.replace('/', "~"))
     }
@@ -116,7 +116,7 @@ impl MetadataCache {
         std::fs::read(self.path(key)).ok()
     }
 
-    /// `Cache::getAge` : âge du fichier en secondes.
+    /// `Cache::getAge`: age of the file in seconds.
     pub fn age(&self, key: &str) -> Option<u64> {
         let modified = std::fs::metadata(self.path(key)).ok()?.modified().ok()?;
         std::time::SystemTime::now()
@@ -125,8 +125,8 @@ impl MetadataCache {
             .map(|d| d.as_secs())
     }
 
-    /// Écriture atomique (temp + rename), comme `Cache::write` ; un échec est
-    /// silencieux (Composer continue sans cache).
+    /// Atomic write (temp + rename), like `Cache::write`; a failure is
+    /// silent (Composer carries on without cache).
     pub fn write(&self, key: &str, contents: &[u8]) {
         if std::fs::create_dir_all(&self.root).is_err() {
             return;
@@ -138,11 +138,11 @@ impl MetadataCache {
         }
     }
 
-    /// Le contenu à écrire quand le serveur a fourni `Last-Modified` :
-    /// `$data['last-modified'] = …` puis `JsonFile::encode` compact — avec
-    /// `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE` pour les fichiers
-    /// de paquets (`asyncFetchFile`), avec les flags 0 (slashes et unicode
-    /// échappés) pour `packages.json` et les `includes` (`fetchFile`).
+    /// The content to write when the server provided `Last-Modified`:
+    /// `$data['last-modified'] = ...` then compact `JsonFile::encode`, with
+    /// `JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE` for package files
+    /// (`asyncFetchFile`), with flags 0 (slashes and unicode escaped) for
+    /// `packages.json` and the `includes` (`fetchFile`).
     pub fn with_last_modified(data: &Value, last_modified: &str, escaped: bool) -> Option<Vec<u8>> {
         let mut data = data.clone();
         let obj = data.as_object_mut()?;

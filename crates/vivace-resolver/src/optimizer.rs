@@ -1,6 +1,6 @@
-//! Port de `Composer\DependencyResolver\PoolOptimizer` : retire du pool les
-//! versions dont les dépendances sont identiques à une version préférée,
-//! et celles qu'un paquet verrouillé rend impossibles.
+//! Port of `Composer\DependencyResolver\PoolOptimizer`: removes from the
+//! pool the versions whose dependencies are identical to a preferred
+//! version, and those a locked package makes impossible.
 
 use crate::constraint::{Constraint, Op};
 use crate::intervals;
@@ -9,7 +9,7 @@ use crate::policy::DefaultPolicy;
 use crate::pool::{OrderedMap, Pool, Request};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Tableau PHP à clés chaînes avec index : ordre d'insertion et accès en O(1).
+/// String-keyed PHP array with an index: insertion order and O(1) access.
 #[derive(Debug, Clone)]
 struct IndexedMap<V> {
     entries: Vec<(String, V)>,
@@ -29,7 +29,7 @@ impl<V> IndexedMap<V> {
     fn contains(&self, key: &str) -> bool {
         self.index.contains_key(key)
     }
-    /// `$map[$key] ??= $default` puis référence mutable.
+    /// `$map[$key] ??= $default` then a mutable reference.
     fn entry_or_insert_with(&mut self, key: &str, default: impl FnOnce() -> V) -> &mut V {
         let i = match self.index.get(key) {
             Some(&i) => i,
@@ -48,16 +48,16 @@ impl<V> IndexedMap<V> {
 }
 
 pub struct PoolOptimizer {
-    /// Forme textuelle d'une contrainte → ses morceaux disjonctifs
-    /// (`expandDisjunctiveMultiConstraints`), mémoïsés : le même texte de
-    /// lien revient des milliers de fois dans un pool.
+    /// Textual form of a constraint -> its disjunctive pieces
+    /// (`expandDisjunctiveMultiConstraints`), memoized: the same link text
+    /// shows up thousands of times in a pool.
     expansion_cache: HashMap<String, Vec<(String, Constraint)>>,
     irremovable: HashSet<usize>,
-    /// name → contraintes (dédoublonnées par forme textuelle, ordre d'insertion).
+    /// name -> constraints (deduplicated by textual form, insertion order).
     require_constraints: HashMap<String, IndexedMap<Constraint>>,
     conflict_constraints: HashMap<String, IndexedMap<Constraint>>,
     to_remove: HashSet<usize>,
-    /// identifiant de base → identifiants d'alias.
+    /// base id -> alias ids.
     aliases_per_package: HashMap<usize, Vec<usize>>,
 }
 
@@ -73,8 +73,8 @@ impl PoolOptimizer {
         }
     }
 
-    /// `optimize($request, $pool)` : le pool réduit (mêmes index d'arène,
-    /// nouveaux identifiants).
+    /// `optimize($request, $pool)`: the reduced pool (same arena indices,
+    /// new ids).
     pub fn optimize(
         mut self,
         request: &Request,
@@ -103,8 +103,8 @@ impl PoolOptimizer {
         }
     }
 
-    /// `extractRequireConstraintsPerPackage` / `…Conflict…` : `pretty` est
-    /// la clé de mémoïsation (même texte → même contrainte parsée).
+    /// `extractRequireConstraintsPerPackage` / `...Conflict...`: `pretty` is
+    /// the memoization key (same text -> same parsed constraint).
     fn extract(
         cache: &mut HashMap<String, Vec<(String, Constraint)>>,
         map: &mut HashMap<String, IndexedMap<Constraint>>,
@@ -112,7 +112,7 @@ impl PoolOptimizer {
         pretty: &str,
         constraint: &Constraint,
     ) {
-        // `self.version` : même texte, contrainte différente par paquet.
+        // `self.version`: same text, different constraint per package.
         let pretty = if pretty == "self.version" {
             format!("\u{0}{constraint}")
         } else {
@@ -126,8 +126,8 @@ impl PoolOptimizer {
         });
         let per_name = map.entry(package.to_owned()).or_default();
         for (key, expanded) in expansions {
-            // `$map[$package][(string) $expanded] = $expanded` : réécriture
-            // en place, même forme textuelle → même contrainte.
+            // `$map[$package][(string) $expanded] = $expanded`: in-place
+            // rewrite, same textual form -> same constraint.
             if !per_name.contains(key) {
                 per_name.entry_or_insert_with(key, || expanded.clone());
             }
@@ -146,8 +146,8 @@ impl PoolOptimizer {
             }
         }
         for (name, constraint) in request.requires.iter() {
-            // Les contraintes racine n'ont pas de texte stable sous la main :
-            // leur forme affichée sert de clé.
+            // Root constraints have no stable text at hand: their display
+            // form serves as the key.
             let pretty = format!("\u{0}{constraint}");
             Self::extract(
                 &mut self.expansion_cache,
@@ -256,7 +256,7 @@ impl PoolOptimizer {
         arena: &[Package],
         policy: &mut DefaultPolicy,
     ) {
-        // name → groupHash → dependencyHash → ids (ordres d'insertion).
+        // name -> groupHash -> dependencyHash -> ids (insertion orders).
         let mut identical: IndexedMap<IndexedMap<IndexedMap<Vec<usize>>>> = IndexedMap::default();
         for id in 1..=pool.len() {
             if self.irremovable.contains(&id) {
@@ -265,8 +265,8 @@ impl PoolOptimizer {
             self.to_remove.insert(id);
             let p = &arena[pool.package_by_id(id)];
             let dependency_hash = Self::dependency_hash(p);
-            // Les morceaux `replace` ne dépendent pas de la contrainte
-            // examinée : une fois par paquet.
+            // The `replace` pieces do not depend on the constraint under
+            // examination: once per package.
             let replace_parts: String = p
                 .replaces
                 .iter()
@@ -277,7 +277,7 @@ impl PoolOptimizer {
                 let Some(requires) = self.require_constraints.get(&name) else {
                     continue;
                 };
-                // Idem pour les conflits : une fois par nom.
+                // Same for conflicts: once per name.
                 let conflict_parts: String = match self.conflict_constraints.get(&name) {
                     Some(conflicts) => conflicts
                         .iter()
@@ -325,8 +325,8 @@ impl PoolOptimizer {
         }
     }
 
-    /// `keepPackageInGroup` (sans `recordRemovedVersionsForPackage`, qui ne
-    /// sert qu'aux messages).
+    /// `keepPackageInGroup` (without `recordRemovedVersionsForPackage`, which
+    /// only serves the messages).
     fn keep_package_in_group(
         &mut self,
         id: usize,
@@ -367,7 +367,7 @@ impl PoolOptimizer {
         if locked.is_empty() {
             return;
         }
-        // name → [(id, arena idx)] (ordre du pool).
+        // name -> [(id, arena idx)] (pool order).
         let mut index: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
         for id in 1..=pool.len() {
             if self.irremovable.contains(&id) {

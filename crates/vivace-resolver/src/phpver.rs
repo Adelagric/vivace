@@ -1,9 +1,9 @@
-//! Port exact de `version_compare()` de PHP (ext/standard/versioning.c) :
-//! canonicalisation (`-`, `_`, `+` → `.`, un `.` inséré à chaque transition
-//! chiffre/non-chiffre), puis comparaison composant par composant — les
-//! formes spéciales sont ordonnées `dev < alpha = a < beta = b < RC = rc <
-//! # < pl = p`, un nombre valant `#`. C'est l'ordre sur lequel reposent
-//! `Constraint::versionCompare`, les bornes et le tri des versions.
+//! Exact port of PHP's `version_compare()` (ext/standard/versioning.c):
+//! canonicalization (`-`, `_`, `+` -> `.`, a `.` inserted at every
+//! digit/non-digit transition), then component-by-component comparison; the
+//! special forms are ordered `dev < alpha = a < beta = b < RC = rc < # < pl
+//! = p`, a number counting as `#`. This is the ordering that
+//! `Constraint::versionCompare`, the bounds and version sorting rely on.
 
 use std::cmp::Ordering;
 
@@ -11,16 +11,16 @@ fn is_special(c: u8) -> bool {
     matches!(c, b'-' | b'_' | b'+')
 }
 
-/// `php_canonicalize_version` : le premier caractère est copié tel quel,
-/// puis `-`/`_`/`+` et tout non-alphanumérique deviennent `.` (sans
-/// doublon), et un `.` est inséré à chaque transition chiffre ↔ non-chiffre.
+/// `php_canonicalize_version`: the first character is copied as is, then
+/// `-`/`_`/`+` and any non-alphanumeric become `.` (never doubled), and a
+/// `.` is inserted at every digit <-> non-digit transition.
 pub fn canonicalize(version: &str) -> String {
     let mut out = Vec::new();
     canonicalize_into(version, &mut out);
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `canonicalize` dans un tampon réutilisable (vidé d'abord).
+/// `canonicalize` into a reusable buffer (cleared first).
 fn canonicalize_into(version: &str, out: &mut Vec<u8>) {
     out.clear();
     let bytes = version.as_bytes();
@@ -53,7 +53,7 @@ fn canonicalize_into(version: &str, out: &mut Vec<u8>) {
     }
 }
 
-/// `compare_special_version_forms` : rang par préfixe, -1 si inconnu.
+/// `compare_special_version_forms`: rank by prefix, -1 if unknown.
 fn special_rank(form: &str) -> i32 {
     const FORMS: &[(&str, i32)] = &[
         ("dev", 0),
@@ -80,7 +80,7 @@ fn compare_special(a: &str, b: &str) -> Ordering {
 }
 
 fn parse_num(s: &str) -> i64 {
-    // strtol : préfixe numérique, 0 sinon (saturé comme strtol sur long).
+    // strtol: numeric prefix, 0 otherwise (saturating like strtol on long).
     let mut n: i64 = 0;
     for c in s.bytes().take_while(u8::is_ascii_digit) {
         n = n.saturating_mul(10).saturating_add(i64::from(c - b'0'));
@@ -88,8 +88,8 @@ fn parse_num(s: &str) -> i64 {
     n
 }
 
-/// Chaîne de la forme `\d+(\.\d+)*` : la canonicalisation est l'identité
-/// et la comparaison est purement numérique par composant.
+/// String of the form `\d+(\.\d+)*`: canonicalization is the identity and
+/// the comparison is purely numeric per component.
 fn is_plain_dotted(s: &str) -> bool {
     let b = s.as_bytes();
     !b.is_empty()
@@ -103,7 +103,7 @@ fn starts_digit(s: &str) -> bool {
     s.bytes().next().is_some_and(|b| b.is_ascii_digit())
 }
 
-/// `php_version_compare($a, $b)` sur des chaînes déjà canonicalisées.
+/// `php_version_compare($a, $b)` on already canonicalized strings.
 fn compare_canonical(a: &str, b: &str) -> Ordering {
     if a.is_empty() || b.is_empty() {
         return match (a.is_empty(), b.is_empty()) {
@@ -148,11 +148,11 @@ fn compare_canonical(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// `version_compare($a, $b)` : -1 / 0 / 1.
+/// `version_compare($a, $b)`: -1 / 0 / 1.
 pub fn version_compare(a: &str, b: &str) -> Ordering {
     if is_plain_dotted(a) && is_plain_dotted(b) {
-        // Chemin rapide sans allocation : mêmes règles (composant manquant
-        // face à un nombre → plus petit).
+        // Allocation-free fast path: same rules (a missing component
+        // against a number -> smaller).
         let mut pa = a.split('.');
         let mut pb = b.split('.');
         loop {
@@ -177,7 +177,7 @@ pub fn version_compare(a: &str, b: &str) -> Ordering {
         let (ca, cb) = &mut *bufs;
         canonicalize_into(a, ca);
         canonicalize_into(b, cb);
-        // Entrées ASCII en pratique ; un octet non ASCII garde sa place.
+        // Inputs are ASCII in practice; a non-ASCII byte keeps its position.
         compare_canonical(&String::from_utf8_lossy(ca), &String::from_utf8_lossy(cb))
     })
 }

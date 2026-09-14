@@ -1,14 +1,14 @@
-//! Port de `Composer\Package\Locker::getContentHash` (2.10.3, voir
-//! docs/reference/Locker.php) : md5 d'un sous-ensemble de composer.json
-//! ré-encodé via `JsonFile::encode($relevantContent, 0)`.
+//! Port of `Composer\Package\Locker::getContentHash` (2.10.3, see
+//! docs/reference/Locker.php): md5 of a subset of composer.json
+//! re-encoded through `JsonFile::encode($relevantContent, 0)`.
 
 use crate::error::{Error, Result};
 use crate::phpjson::php_json_encode;
 use md5::{Digest, Md5};
 use serde_json::{Map, Value};
 
-/// Ordre canonique de $relevantKeys dans Locker::getContentHash. L'ordre
-/// d'insertion importe peu (ksort suit) mais on le préserve par fidélité.
+/// Canonical order of $relevantKeys in Locker::getContentHash. Insertion
+/// order hardly matters (ksort follows) but we preserve it for fidelity.
 const RELEVANT_KEYS: [&str; 11] = [
     "name",
     "version",
@@ -32,7 +32,7 @@ pub fn content_hash(composer_json_text: &str) -> Result<String> {
 
     let mut relevant = Map::new();
     if let Value::Object(obj) = &content {
-        // `isset($content[$key])` : une valeur null compte comme absente.
+        // `isset($content[$key])`: a null value counts as absent.
         for key in RELEVANT_KEYS {
             if let Some(v) = obj.get(key).filter(|v| !v.is_null()) {
                 relevant.insert(key.to_owned(), v.clone());
@@ -49,9 +49,9 @@ pub fn content_hash(composer_json_text: &str) -> Result<String> {
         }
     }
 
-    // ksort($relevantContent) : tri des clés de premier niveau. Toutes les clés
-    // possibles ici sont non numériques → l'ordre lexicographique octet à octet
-    // de PHP (strcmp) est celui de Rust.
+    // ksort($relevantContent): sort of the top-level keys. All the keys possible
+    // here are non-numeric, so PHP's byte-wise lexicographic order (strcmp) is
+    // the same as Rust's.
     let mut entries: Vec<(String, Value)> = relevant.into_iter().collect();
     entries.sort_by(|(a, _), (b, _)| a.cmp(b));
     let sorted: Map<String, Value> = entries.into_iter().collect();
@@ -62,7 +62,7 @@ pub fn content_hash(composer_json_text: &str) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-/// `hash('md5', $s)` en hexadécimal.
+/// `hash('md5', $s)` in hexadecimal.
 pub fn md5_hex(data: &[u8]) -> String {
     let mut h = Md5::new();
     h.update(data);
@@ -75,14 +75,14 @@ mod tests {
 
     #[test]
     fn minimal_manifest_is_stable() {
-        // Vecteur auto-généré puis figé après validation contre l'oracle PHP
-        // (tests/oracle_content_hash.rs fait la validation vivante).
+        // Auto-generated vector, frozen after validation against the PHP oracle
+        // (tests/oracle_content_hash.rs does the live validation).
         let h = content_hash(r#"{"require":{"php":">=8.1"}}"#).expect("hash");
         assert_eq!(h.len(), 32);
-        // Les clés hors liste ne participent pas au hash.
+        // Keys outside the list do not take part in the hash.
         let h2 = content_hash(r#"{"require":{"php":">=8.1"},"description":"x"}"#).expect("hash");
         assert_eq!(h, h2);
-        // Les clés pertinentes si.
+        // Relevant keys do.
         let h3 = content_hash(r#"{"require":{"php":">=8.2"}}"#).expect("hash");
         assert_ne!(h, h3);
     }
@@ -93,7 +93,7 @@ mod tests {
             content_hash(r#"{"require":{},"config":{"platform":{"php":"8.2.0"}}}"#).expect("hash");
         let b = content_hash(r#"{"require":{},"config":{"sort-packages":true}}"#).expect("hash");
         let c = content_hash(r#"{"require":{}}"#).expect("hash");
-        assert_ne!(a, c); // config.platform compte
-        assert_eq!(b, c); // le reste de config ne compte pas
+        assert_ne!(a, c); // config.platform counts
+        assert_eq!(b, c); // the rest of config does not
     }
 }

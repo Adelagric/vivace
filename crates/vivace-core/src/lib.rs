@@ -1,4 +1,4 @@
-//! vivace-core — manifestes, plateforme, fetch et installation.
+//! vivace-core: manifests, platform, fetch and installation.
 
 pub mod binproxy;
 pub mod clone;

@@ -1,11 +1,11 @@
-//! Détection de la plateforme locale (PHP, extensions) et vérification que le
-//! lock est installable dessus — l'équivalent pratique de l'étape « lock
-//! installability » de Composer, sans solveur : contraintes `platform`/
-//! `platform-dev` du lock + `require` php/ext-* de chaque paquet verrouillé.
+//! Detection of the local platform (PHP, extensions) and check that the lock
+//! is installable on it, the practical equivalent of Composer's "lock
+//! installability" step, without a solver: `platform`/`platform-dev`
+//! constraints of the lock + php/ext-* `require` of each locked package.
 //!
-//! La détection shell-out UNE fois vers `php -r` et met le résultat en cache
-//! (clé : chemin canonique + mtime + taille du binaire php) — indispensable au
-//! budget no-op < 50 ms, le démarrage de PHP coûtant ~30-60 ms à lui seul.
+//! Detection shells out ONCE to `php -r` and caches the result (key:
+//! canonical path + mtime + size of the php binary), which is essential to
+//! the no-op budget of < 50 ms, since PHP startup alone costs ~30-60 ms.
 
 use crate::constraint;
 use crate::error::{Error, Result};
@@ -19,7 +19,7 @@ use std::process::Command;
 pub struct Platform {
     pub php_version: String,
     pub is_64bit: bool,
-    /// nom d'extension (minuscule) → version (phpversion(ext), sinon version PHP).
+    /// extension name (lowercase) -> version (phpversion(ext), else the PHP version).
     pub extensions: BTreeMap<String, String>,
 }
 
@@ -33,10 +33,10 @@ struct CachedPlatform {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct PlatformFailure {
-    /// "php", "ext-mbstring", …
+    /// "php", "ext-mbstring", ...
     pub requirement: String,
     pub constraint: String,
-    /// Paquet demandeur (None = section platform du lock).
+    /// Requesting package (None = the lock's platform section).
     pub required_by: Option<String>,
     pub reason: FailureReason,
 }
@@ -76,11 +76,11 @@ echo json_encode([
 "#;
 
 impl Platform {
-    /// Détecte via `php` (surchargable par $VIVACE_PHP), avec cache disque.
+    /// Detects through `php` (overridable with $VIVACE_PHP), with a disk cache.
     pub fn detect() -> Result<Option<Platform>> {
         let php = std::env::var("VIVACE_PHP").unwrap_or_else(|_| "php".to_owned());
         let Some((path, mtime_unix, size)) = binary_identity(&php) else {
-            return Ok(None); // pas de php : l'appelant décide (reqs présentes → erreur)
+            return Ok(None); // no php: the caller decides (requirements present -> error)
         };
 
         let cache_file = cache_dir().join("platform.json");
@@ -126,8 +126,8 @@ impl Platform {
         Ok(Some(platform))
     }
 
-    /// Applique `config.platform` du composer.json racine (surcharge des
-    /// versions détectées ; `false` désactive une entrée).
+    /// Applies `config.platform` from the root composer.json (overrides the
+    /// detected versions; `false` disables an entry).
     pub fn apply_overrides(&mut self, root_manifest: &Value) {
         let Some(overrides) = root_manifest
             .get("config")
@@ -188,8 +188,8 @@ fn binary_identity(php: &str) -> Option<(String, i64, u64)> {
     Some((canonical.to_string_lossy().into_owned(), mtime, meta.len()))
 }
 
-/// Vérifie le lock contre la plateforme. `ignored` : noms à ignorer, `*` final
-/// accepté (`ext-*`), ou la liste spéciale `["*"]` pour tout ignorer.
+/// Checks the lock against the platform. `ignored`: names to ignore, trailing
+/// `*` accepted (`ext-*`), or the special list `["*"]` to ignore everything.
 pub fn check(
     lock: &Lock,
     platform: &Platform,
@@ -211,9 +211,9 @@ pub fn check(
         if let Some(require) = p.raw.get("require").and_then(Value::as_object) {
             for (name, cons) in require {
                 let lname = name.to_ascii_lowercase();
-                // Un platform package n'a jamais de `/` (sinon c'est un vendor
-                // comme php-http/*). composer-plugin-api / composer-runtime-api
-                // sont exclus : satisfaits par construction côté vivace.
+                // A platform package never has a `/` (otherwise it is a vendor
+                // such as php-http/*). composer-plugin-api / composer-runtime-api
+                // are excluded: satisfied by construction on the vivace side.
                 let is_platform = !lname.contains('/')
                     && (lname == "php"
                         || lname.starts_with("php-")
@@ -232,8 +232,8 @@ pub fn check(
         if is_ignored(&requirement, ignored) {
             continue;
         }
-        // lib-* : non détecté en v1 → seule la présence dans la section
-        // platform du lock nous concerne, et on la signale comme Unsupported.
+        // lib-*: not detected in v1, so only its presence in the lock's
+        // platform section concerns us, and we report it as Unsupported.
         if requirement.starts_with("lib-") {
             failures.push(PlatformFailure {
                 requirement,

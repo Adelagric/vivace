@@ -1,15 +1,15 @@
-//! Port de `Composer\Config\JsonConfigSource` pour composer.json (pas
-//! auth.json) : chaque édition passe par `JsonManipulator` sur le texte du
-//! fichier ; si le manipulateur renonce (`false`), Composer relit le
-//! fichier, applique la même modification au tableau décodé et réécrit
-//! tout avec `JsonFile::write` (indentation détectée, tableaux vides
-//! rendus `{}` pour les clés qui sont des objets dans le schéma).
+//! Port of `Composer\Config\JsonConfigSource` for composer.json (not
+//! auth.json): every edit goes through `JsonManipulator` on the file text;
+//! if the manipulator gives up (`false`), Composer re-reads the file,
+//! applies the same modification to the decoded array and rewrites
+//! everything with `JsonFile::write` (detected indentation, empty arrays
+//! rendered as `{}` for keys that are objects in the schema).
 //!
-//! Non porté : la validation `LAX_SCHEMA` après chaque écriture. Composer
-//! restaure le fichier et échoue si le résultat viole le schéma, ce qui
-//! revient à refuser d'éditer un manifeste déjà invalide (`"name"` en
-//! majuscules, contrainte qui n'est pas une chaîne…) ; ici l'édition a
-//! lieu. Un manifeste valide donne le même résultat des deux côtés.
+//! Not ported: the `LAX_SCHEMA` validation after each write. Composer
+//! restores the file and fails if the result violates the schema, which
+//! amounts to refusing to edit an already invalid manifest (uppercase
+//! `"name"`, non-string constraint...); here the edit goes through. A valid
+//! manifest gives the same result on both sides.
 
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -37,13 +37,13 @@ pub enum ConfigSourceError {
 
 type Result<T> = std::result::Result<T, ConfigSourceError>;
 
-/// Le composer.json d'un projet, édité en place.
+/// A project's composer.json, edited in place.
 pub struct JsonConfigSource {
     path: PathBuf,
 }
 
-/// Édition à tenter par le manipulateur, et son équivalent sur le tableau
-/// décodé pour le repli.
+/// Edit to attempt with the manipulator, and its equivalent on the decoded
+/// array for the fallback.
 enum Edit<'a> {
     RemoveSubNode(&'a str, &'a str),
     RemoveMainKeyIfEmpty(&'a str),
@@ -56,15 +56,15 @@ impl JsonConfigSource {
         Self { path: path.into() }
     }
 
-    /// `removeLink` : retire `$name` de la section, puis la section si
-    /// elle est vide.
+    /// `removeLink`: removes `$name` from the section, then the section if
+    /// it is empty.
     pub fn remove_link(&self, link_type: &str, name: &str) -> Result<()> {
         self.manipulate(Edit::RemoveSubNode(link_type, name))?;
         self.manipulate(Edit::RemoveMainKeyIfEmpty(link_type))
     }
 
-    /// `addLink` (le tri est décidé par l'appelant, comme RequireCommand
-    /// lit `config.sort-packages`).
+    /// `addLink` (sorting is decided by the caller, as RequireCommand reads
+    /// `config.sort-packages`).
     pub fn add_link(
         &self,
         link_type: &str,
@@ -75,16 +75,15 @@ impl JsonConfigSource {
         self.manipulate(Edit::AddLink(link_type, name, constraint, sort))
     }
 
-    /// `removeConfigSetting` pour une clé de `config` (`allow-plugins`,
+    /// `removeConfigSetting` for a `config` key (`allow-plugins`,
     /// `allow-plugins.vendor/name`).
     pub fn remove_config_setting(&self, name: &str) -> Result<()> {
         self.manipulate(Edit::RemoveConfigSetting(name))
     }
 
-    /// `manipulateJson` : manipulateur d'abord, repli sur la réécriture
-    /// complète.
+    /// `manipulateJson`: manipulator first, fallback to the full rewrite.
     fn manipulate(&self, edit: Edit<'_>) -> Result<()> {
-        // `$this->file->exists()` : sinon Composer part d'un squelette.
+        // `$this->file->exists()`: otherwise Composer starts from a skeleton.
         let contents = match std::fs::read_to_string(&self.path) {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -107,7 +106,7 @@ impl JsonConfigSource {
         if done {
             return self.write_text(&manipulator.contents());
         }
-        // Repli : `$this->file->read()` puis la modification sur le tableau.
+        // Fallback: `$this->file->read()` then the modification on the array.
         let mut config: Value = serde_json::from_str(&contents).map_err(|e| {
             ConfigSourceError::Encode(format!("cannot decode {}: {e}", self.path.display()))
         })?;
@@ -120,9 +119,9 @@ impl JsonConfigSource {
                     }
                 }
                 Edit::RemoveMainKeyIfEmpty(key) => {
-                    // `0 === count($config[$type])` : un tableau vide (ou
-                    // absent — count(null) est une TypeError en PHP 8, que
-                    // le manipulateur a déjà écartée en rendant `true`).
+                    // `0 === count($config[$type])`: an empty array (or an
+                    // absent one; count(null) is a TypeError in PHP 8, which
+                    // the manipulator already ruled out by returning `true`).
                     let empty = match root.get(key) {
                         Some(Value::Object(m)) => m.is_empty(),
                         Some(Value::Array(a)) => a.is_empty(),
@@ -133,19 +132,19 @@ impl JsonConfigSource {
                     }
                 }
                 Edit::RemoveConfigSetting(name) => {
-                    // Ni auth ni `policy.` : `unset($config['config'][$key])`
-                    // avec la clé telle quelle (`allow-plugins.x` ne retire
-                    // donc rien).
+                    // Neither auth nor `policy.`: `unset($config['config'][$key])`
+                    // with the key as is (so `allow-plugins.x` removes
+                    // nothing).
                     if let Some(Value::Object(cfg)) = root.get_mut("config") {
                         cfg.shift_remove(name);
                     }
                 }
                 Edit::AddLink(t, n, c, _) => {
-                    // `$config[$type][$name] = $value` : la section devient
-                    // un tableau si elle n'en est pas un.
+                    // `$config[$type][$name] = $value`: the section becomes
+                    // an array if it is not one.
                     let replacement = match root.get(t) {
                         Some(Value::Object(_)) => None,
-                        // Une liste est un tableau à clés entières.
+                        // A list is an array with integer keys.
                         Some(Value::Array(a)) => Some(Value::Object(
                             a.iter()
                                 .enumerate()
@@ -190,8 +189,8 @@ impl JsonConfigSource {
     }
 }
 
-/// Les tableaux vides que `JsonFile::write` doit rendre `{}` (objets dans
-/// le schéma) : `config.*` sensibles, `autoload.psr-*`, sections racines.
+/// The empty arrays `JsonFile::write` must render as `{}` (objects in the
+/// schema): relevant `config.*`, `autoload.psr-*`, root sections.
 fn fixup_empty_objects(root: &mut Map<String, Value>) {
     let is_empty_array = |v: &Value| match v {
         Value::Object(m) => m.is_empty(),
@@ -255,8 +254,8 @@ fn fixup_empty_objects(root: &mut Map<String, Value>) {
     }
 }
 
-/// `JsonFile::encode` avec une indentation autre que 4 espaces : chaque
-/// début de ligne de 4n espaces devient n indentations.
+/// `JsonFile::encode` with an indentation other than 4 spaces: every line
+/// start of 4n spaces becomes n indents.
 pub fn reindent(text: &str, indent: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (i, line) in text.split('\n').enumerate() {
@@ -265,8 +264,8 @@ pub fn reindent(text: &str, indent: &str) -> String {
         }
         let spaces = line.len() - line.trim_start_matches(' ').len();
         if spaces >= 4 {
-            // `#^ {4,}#m` → `str_repeat($indent, (int) (strlen / 4))` : le
-            // reste de la division disparaît.
+            // `#^ {4,}#m` -> `str_repeat($indent, (int) (strlen / 4))`: the
+            // remainder of the division is dropped.
             out.push_str(&indent.repeat(spaces / 4));
             out.push_str(&line[spaces..]);
         } else {
@@ -276,7 +275,7 @@ pub fn reindent(text: &str, indent: &str) -> String {
     out
 }
 
-/// Chemin du manifeste d'un projet (`Factory::getComposerFile`).
+/// Path of a project's manifest (`Factory::getComposerFile`).
 pub fn composer_file(project: &Path) -> PathBuf {
     match std::env::var("COMPOSER") {
         Ok(f) if !f.trim().is_empty() => project.join(f.trim()),

@@ -1,7 +1,7 @@
-//! Utilitaires de chemins pour le générateur : les ports exacts de
-//! Composer\Util\Filesystem vivent dans vivace-core::pathutil ; ici les
-//! variantes « répertoires » qu'utilise AutoloadGenerator (`$directories =
-//! true`), et `var_export` en octets bruts / `preg_quote`.
+//! Path utilities for the generator: the exact ports of
+//! Composer\Util\Filesystem live in vivace-core::pathutil; this module holds
+//! the "directories" variants used by AutoloadGenerator (`$directories =
+//! true`), plus raw-byte `var_export` and `preg_quote`.
 
 pub use vivace_core::pathutil::{normalize_path, php_str};
 
@@ -15,7 +15,7 @@ pub fn find_shortest_path_code(from: &str, to: &str, static_code: bool) -> Strin
     vivace_core::pathutil::find_shortest_path_code(from, to, true, static_code)
 }
 
-/// `var_export()` d'une chaîne PHP en octets bruts (noms de classes non-UTF-8).
+/// `var_export()` of a PHP string as raw bytes (non-UTF-8 class names).
 pub fn php_str_bytes(s: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len() + 2);
     out.push(b'\'');
@@ -30,7 +30,7 @@ pub fn php_str_bytes(s: &[u8]) -> Vec<u8> {
     out
 }
 
-/// `preg_quote($s)` (délimiteur `{`… non passé : Composer quote sans délimiteur).
+/// `preg_quote($s)` (no `{` delimiter passed: Composer quotes without a delimiter).
 pub fn preg_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

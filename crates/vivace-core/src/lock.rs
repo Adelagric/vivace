@@ -1,7 +1,7 @@
-//! Lecture de composer.lock. Vue typée minimale par-dessus le JSON brut :
-//! `installed.json`/`installed.php` devront resservir les entrées **à
-//! l'identique**, donc chaque paquet garde sa valeur brute (`raw`) et n'expose
-//! en champs typés que ce dont l'installeur a besoin.
+//! Reading composer.lock. Minimal typed view over the raw JSON:
+//! `installed.json`/`installed.php` will have to serve the entries back
+//! **unchanged**, so each package keeps its raw value (`raw`) and only exposes
+//! as typed fields what the installer needs.
 
 use crate::error::{Error, Result};
 use serde_json::{Map, Value};
@@ -12,7 +12,7 @@ pub struct Lock {
     pub content_hash: Option<String>,
     pub packages: Vec<LockPackage>,
     pub packages_dev: Vec<LockPackage>,
-    /// Contraintes plateforme du projet (php, ext-*, lib-*) → constraint.
+    /// Project platform constraints (php, ext-*, lib-*) -> constraint.
     pub platform: Vec<(String, String)>,
     pub platform_dev: Vec<(String, String)>,
     pub plugin_api_version: Option<String>,
@@ -44,7 +44,7 @@ impl LockPackage {
         self.str_field("version").unwrap_or("")
     }
 
-    /// Type de paquet, défaut Composer : "library".
+    /// Package type, Composer default: "library".
     pub fn package_type(&self) -> &str {
         self.str_field("type").unwrap_or("library")
     }
@@ -57,7 +57,7 @@ impl LockPackage {
         self.raw.get("dist")?.get("reference")?.as_str()
     }
 
-    /// shasum sha1 de la dist si non vide (souvent vide sur Packagist).
+    /// sha1 shasum of the dist if non-empty (often empty on Packagist).
     pub fn dist_shasum(&self) -> Option<&str> {
         self.raw
             .get("dist")?
@@ -79,7 +79,7 @@ impl LockPackage {
         }
     }
 
-    /// `target-dir` (legacy PSR-0) : le paquet s'installe dans
+    /// `target-dir` (legacy PSR-0): the package installs into
     /// vendor/<name>/<target-dir>.
     pub fn target_dir(&self) -> Option<&str> {
         self.str_field("target-dir")
@@ -87,7 +87,7 @@ impl LockPackage {
             .filter(|t| !t.is_empty())
     }
 
-    /// Chemin d'installation relatif à vendor/ (`name` ou `name/target-dir`).
+    /// Install path relative to vendor/ (`name` or `name/target-dir`).
     pub fn install_subpath(&self) -> String {
         match self.target_dir() {
             Some(t) => format!("{}/{}", self.name(), t),
@@ -119,8 +119,8 @@ fn parse_packages(v: Option<&Value>) -> Vec<LockPackage> {
         .unwrap_or_default()
 }
 
-/// `platform` est `{}` ou `{"php": ">=8.2", "ext-mbstring": "*"}` — et, quirk
-/// d'encodage PHP, parfois `[]` (array vide) quand il n'y a rien.
+/// `platform` is `{}` or `{"php": ">=8.2", "ext-mbstring": "*"}` and, PHP
+/// encoding quirk, sometimes `[]` (empty array) when there is nothing.
 fn parse_platform(v: Option<&Value>) -> Vec<(String, String)> {
     v.and_then(Value::as_object)
         .map(|m| {
@@ -166,7 +166,7 @@ impl Lock {
         Self::parse(&text)
     }
 
-    /// Paquets à installer selon --no-dev.
+    /// Packages to install according to --no-dev.
     pub fn wanted_packages(&self, with_dev: bool) -> impl Iterator<Item = &LockPackage> {
         self.packages
             .iter()
@@ -195,7 +195,7 @@ mod tests {
         let p = &lock.packages[0];
         assert_eq!(p.name(), "a/b");
         assert_eq!(p.dist_kind(), DistKind::Zip);
-        assert_eq!(p.dist_shasum(), None); // vide → None
+        assert_eq!(p.dist_shasum(), None); // empty -> None
         assert_eq!(p.bins(), vec!["bin/tool"]);
         assert_eq!(lock.platform, vec![("php".to_owned(), ">=8.1".to_owned())]);
         assert_eq!(lock.wanted_packages(false).count(), 1);

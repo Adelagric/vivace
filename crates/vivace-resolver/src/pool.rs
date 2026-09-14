@@ -1,8 +1,7 @@
-//! Port de `Composer\DependencyResolver\{Request, PoolBuilder, Pool}` et de
-//! `Composer\Repository\RepositorySet` (docs/reference/resolver/). Le pool
-//! est la liste ordonnée des paquets que le solveur verra : l'ordre est
-//! celui de Composer, index par index, parce que les identifiants de
-//! littéraux en dépendent.
+//! Port of `Composer\DependencyResolver\{Request, PoolBuilder, Pool}` and
+//! `Composer\Repository\RepositorySet` (docs/reference/resolver/). The pool
+//! is the ordered list of packages the solver will see: the order is
+//! Composer's, index by index, because the literal ids depend on it.
 
 use crate::constraint::Constraint;
 use crate::intervals;
@@ -25,7 +24,7 @@ impl From<RepoError> for PoolError {
     }
 }
 
-/// Tableau PHP à clés chaînes : ordre d'insertion, réécriture en place.
+/// String-keyed PHP array: insertion order, in-place rewrite.
 #[derive(Debug, Clone)]
 pub struct OrderedMap<V>(pub Vec<(String, V)>);
 
@@ -75,9 +74,9 @@ pub enum UpdateMode {
     ListedWithTransitiveDeps,
 }
 
-/// `Composer\DependencyResolver\Request`. Les paquets sont des index
-/// d'arène ; les tableaux PHP indexés par `spl_object_id` deviennent des
-/// listes ordonnées sans doublon.
+/// `Composer\DependencyResolver\Request`. Packages are arena indices; the
+/// PHP arrays keyed by `spl_object_id` become ordered lists without
+/// duplicates.
 #[derive(Debug, Clone, Default)]
 pub struct Request {
     pub locked_repository: Option<Vec<usize>>,
@@ -143,8 +142,8 @@ impl Request {
     }
 
     pub fn update_allow_transitive_dependencies(&self) -> bool {
-        // `$this->updateAllowTransitiveDependencies !== self::UPDATE_ONLY_LISTED`
-        // : vrai aussi quand aucune liste n'a été posée (`false !== 0`).
+        // `$this->updateAllowTransitiveDependencies !== self::UPDATE_ONLY_LISTED`:
+        // also true when no list was set (`false !== 0`).
         self.update_mode != Some(UpdateMode::OnlyListed)
     }
 
@@ -175,9 +174,9 @@ impl Request {
     }
 }
 
-/// Un dépôt du `RepositorySet`, dans l'ordre d'ajout.
+/// A repository of the `RepositorySet`, in insertion order.
 pub enum Repository {
-    /// `RootPackageRepository` : [alias racine ?, racine].
+    /// `RootPackageRepository`: [root alias?, root].
     Root(Vec<usize>),
     /// `PlatformRepository`.
     Platform(Vec<usize>),
@@ -188,7 +187,7 @@ pub enum Repository {
 
 /// `Composer\Repository\RepositorySet`.
 pub struct RepositorySet {
-    /// name → version → (alias, alias_normalized) (`getRootAliasesPerPackage`).
+    /// name -> version -> (alias, alias_normalized) (`getRootAliasesPerPackage`).
     pub root_aliases: BTreeMap<String, BTreeMap<String, (String, String)>>,
     pub root_references: BTreeMap<String, String>,
     pub acceptable_stabilities: BTreeMap<String, i32>,
@@ -243,7 +242,7 @@ impl RepositorySet {
         self.repositories.push(repo);
     }
 
-    /// `createPool` sans optimiseur ni filtres.
+    /// `createPool` without optimizer or filters.
     pub fn create_pool(
         &self,
         request: &mut Request,
@@ -254,24 +253,23 @@ impl RepositorySet {
     }
 }
 
-/// `Composer\DependencyResolver\Pool` : identifiants 1-based dans l'ordre
-/// de construction.
-/// Versions retirées par une liste de filtrage : nom → (version, entrées).
+/// `Composer\DependencyResolver\Pool`: 1-based ids in construction order.
+/// Versions removed by a filter list: name -> (version, entries).
 pub type FilterListRemoved = BTreeMap<String, Vec<(String, Vec<crate::repository::FilterEntry>)>>;
 
 #[derive(Debug, Clone, Default)]
 pub struct Pool {
-    /// Identité du pool (`spl_object_id($pool)` chez Composer) : les caches
-    /// de la politique sont indexés par pool.
+    /// Pool identity (`spl_object_id($pool)` in Composer): the policy caches
+    /// are keyed by pool.
     pub identity: u64,
-    /// id - 1 → index d'arène.
+    /// id - 1 -> arena index.
     pub packages: Vec<usize>,
     id_of: HashMap<usize, usize>,
     package_by_name: HashMap<String, Vec<usize>>,
     pub unacceptable_fixed_or_locked: Vec<usize>,
     pub warnings: Vec<String>,
-    /// `filterListRemovedVersions` : ce qu'une liste de filtrage a retiré
-    /// (le générateur de règles et le solveur le consultent).
+    /// `filterListRemovedVersions`: what a filter list removed (the rule
+    /// generator and the solver consult it).
     pub filter_list_removed: FilterListRemoved,
 }
 
@@ -306,7 +304,7 @@ impl Pool {
         self.packages.is_empty()
     }
 
-    /// `packageById` → index d'arène.
+    /// `packageById` -> arena index.
     pub fn package_by_id(&self, id: usize) -> usize {
         self.packages[id - 1]
     }
@@ -319,7 +317,7 @@ impl Pool {
         self.package_by_id(literal.unsigned_abs() as usize)
     }
 
-    /// `whatProvides` → identifiants de pool.
+    /// `whatProvides` -> pool ids.
     pub fn what_provides(
         &self,
         arena: &[Package],
@@ -346,10 +344,10 @@ impl Pool {
         }
         let provides = &candidate.provides;
         let replaces = &candidate.replaces;
-        // `isset($replaces[0]) || isset($provides[0])` : clés numériques
-        // (liens self.version d'un alias) → parcours par cible ; sinon
-        // recherche par clé (`isset($provides[$name])`), qui n'est pas
-        // toujours la cible (lib-* de la plateforme).
+        // `isset($replaces[0]) || isset($provides[0])`: numeric keys
+        // (self.version links of an alias) -> scan by target; otherwise
+        // lookup by key (`isset($provides[$name])`), which is not always the
+        // target (platform lib-*).
         if replaces.has_numeric_keys() || provides.has_numeric_keys() {
             for link in provides.iter().chain(replaces.iter()) {
                 if link.target == name && constraint.is_none_or(|c| c.matches(&link.constraint)) {
@@ -378,8 +376,8 @@ impl Pool {
             .is_some_and(|versions| versions.iter().any(|(v, _)| v == version))
     }
 
-    /// Le même pool réduit à `kept` (identifiants renumérotés), les
-    /// versions retirées et les avertissements conservés.
+    /// The same pool reduced to `kept` (renumbered ids), removed versions
+    /// and warnings preserved.
     pub fn with_packages(&self, kept: Vec<usize>, arena: &[Package]) -> Pool {
         let mut pool = Pool::new(kept, self.unacceptable_fixed_or_locked.clone(), arena);
         pool.warnings = self.warnings.clone();
@@ -405,12 +403,12 @@ pub fn package_name_regexp(pattern: &str) -> Regex {
 
 struct PoolBuilder<'a> {
     set: &'a RepositorySet,
-    /// base arena idx → [(index de pool, alias arena idx)].
+    /// base arena idx -> [(pool index, alias arena idx)].
     alias_map: HashMap<usize, Vec<(usize, usize)>>,
     packages_to_load: OrderedMap<Constraint>,
     loaded_packages: BTreeMap<String, Constraint>,
     loaded_per_repo: BTreeMap<usize, BTreeMap<String, BTreeSet<String>>>,
-    /// Index de pool → arena idx (`unset` = None).
+    /// Pool index -> arena idx (`unset` = None).
     packages: Vec<Option<usize>>,
     unacceptable: Vec<usize>,
     update_allow_list: Vec<String>,
@@ -1064,7 +1062,7 @@ impl<'a> PoolBuilder<'a> {
     }
 }
 
-/// `ArrayRepository::loadPackages` (dépôt racine).
+/// `ArrayRepository::loadPackages` (root repository).
 pub fn array_repository_load_packages(
     members: &[usize],
     package_name_map: &[(String, Constraint)],
@@ -1107,8 +1105,9 @@ pub fn array_repository_load_packages(
     (names_found, result)
 }
 
-/// `Package::setSourceDistReferences`, appliqué au paquet de base et à ses
-/// alias (un `AliasPackage` délègue ses références au paquet aliasé).
+/// `Package::setSourceDistReferences`, applied to the base package and its
+/// aliases (an `AliasPackage` delegates its references to the aliased
+/// package).
 pub fn set_source_dist_references(arena: &mut [Package], idx: usize, reference: &str) {
     static HOSTS: OnceLock<Regex> = OnceLock::new();
     static SHA: OnceLock<Regex> = OnceLock::new();
@@ -1170,8 +1169,8 @@ mod tests {
 
     #[test]
     fn match_looks_up_links_by_php_key() {
-        // lib-libxslt replace : clé `xsl`, cible `lib-xsl` → introuvable par
-        // `lib-xsl` (isset($replaces['lib-xsl']) est faux chez Composer).
+        // lib-libxslt replace: key `xsl`, target `lib-xsl` -> not found by
+        // `lib-xsl` (isset($replaces['lib-xsl']) is false in Composer).
         let mut lib = Package::new("lib-libxslt", "1.1.35.0", "1.1.35", Origin::Platform);
         lib.replaces.insert(Link {
             key: Some("xsl".into()),
@@ -1182,8 +1181,8 @@ mod tests {
             kind: LinkType::Replace,
         });
         assert!(!Pool::matches(&lib, "lib-xsl", None));
-        // Par la clé, `match` répond oui — mais `packageByName` ne connaît
-        // que les cibles, donc `whatProvides('xsl')` reste vide.
+        // By key, `match` says yes, but `packageByName` only knows the
+        // targets, so `whatProvides('xsl')` stays empty.
         assert!(Pool::matches(&lib, "xsl", None));
         let pool = Pool::new(vec![0], Vec::new(), std::slice::from_ref(&lib));
         assert_eq!(
@@ -1194,7 +1193,7 @@ mod tests {
             pool.what_provides(std::slice::from_ref(&lib), "lib-xsl", None),
             Vec::<usize>::new()
         );
-        // Avec des clés numériques (alias self.version), parcours par cible.
+        // With numeric keys (self.version alias), scan by target.
         let cfg = json!({"name": "acme/lib", "version": "dev-main", "default-branch": true,
             "replace": {"acme/old": "self.version"}});
         let mut arena = Vec::new();

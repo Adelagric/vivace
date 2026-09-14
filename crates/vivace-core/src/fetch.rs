@@ -1,10 +1,10 @@
-//! Téléchargement des dists, interopérable avec le cache de Composer :
-//! même layout (`<cache>/files/<vendor>/<pkg>/<sha1-de-l-url>.zip`), lu ET
-//! alimenté, donc un cache chauffé par l'un sert à l'autre. Auth minimale
-//! v1 : `github-oauth`, `http-basic`, `bearer` (auth.json du projet,
-//! COMPOSER_AUTH, puis auth.json de COMPOSER_HOME). Le shasum du lock, quand
-//! il existe, est vérifié au téléchargement ET à la relecture du cache
-//! (méta-analyse F7 : un cache partagé se relit avec méfiance).
+//! Dist downloads, interoperable with Composer's cache: same layout
+//! (`<cache>/files/<vendor>/<pkg>/<sha1-of-url>.zip`), both read AND fed, so
+//! a cache warmed by one serves the other. Minimal v1 auth: `github-oauth`,
+//! `http-basic`, `bearer` (project auth.json, COMPOSER_AUTH, then the
+//! COMPOSER_HOME auth.json). The lock's shasum, when present, is checked on
+//! download AND when reading back from the cache (meta-analysis F7: a shared
+//! cache is read back with suspicion).
 
 use crate::error::{Error, Result};
 use serde_json::Value;
@@ -20,8 +20,8 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// Fusionne (du moins prioritaire au plus prioritaire) : auth.json de
-    /// COMPOSER_HOME, variable COMPOSER_AUTH, auth.json du projet.
+    /// Merges (from lowest to highest priority): the COMPOSER_HOME auth.json,
+    /// the COMPOSER_AUTH variable, the project auth.json.
     pub fn load(project_dir: &Path) -> Auth {
         let mut auth = Auth::default();
         if let Some(home) = composer_home() {
@@ -73,11 +73,11 @@ impl Auth {
         }
     }
 
-    /// Valeur de l'en-tête Authorization pour cet hôte, le cas échéant.
+    /// Value of the Authorization header for this host, if any.
     pub fn authorization_for(&self, host: &str) -> Option<String> {
         let host = host.to_ascii_lowercase();
-        // Les dists GitHub passent par api.github.com / codeload.github.com
-        // mais le token est rangé sous github.com.
+        // GitHub dists go through api.github.com / codeload.github.com
+        // but the token is stored under github.com.
         if host == "github.com" || host.ends_with(".github.com") {
             if let Some(t) = self.github_oauth.get("github.com") {
                 return Some(format!("token {t}"));
@@ -98,7 +98,7 @@ impl Auth {
     }
 }
 
-/// `Factory::useXdg` : vrai dès qu'une variable d'environnement `XDG_*` existe.
+/// `Factory::useXdg`: true as soon as any `XDG_*` environment variable exists.
 fn use_xdg() -> bool {
     std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("XDG_"))
 }
@@ -109,9 +109,9 @@ fn user_dir() -> Option<PathBuf> {
         .map(|h| PathBuf::from(h.trim_end_matches('/')))
 }
 
-/// `Factory::getHomeDir` (docs/reference/Factory.php) : COMPOSER_HOME, sinon
-/// le premier répertoire existant parmi `$XDG_CONFIG_HOME/composer` (si XDG
-/// est en usage) et `~/.composer`, sinon le premier candidat.
+/// `Factory::getHomeDir` (docs/reference/Factory.php): COMPOSER_HOME, else
+/// the first existing directory among `$XDG_CONFIG_HOME/composer` (if XDG is
+/// in use) and `~/.composer`, else the first candidate.
 pub fn composer_home() -> Option<PathBuf> {
     if let Ok(h) = std::env::var("COMPOSER_HOME") {
         if !h.is_empty() {
@@ -135,10 +135,10 @@ pub fn composer_home() -> Option<PathBuf> {
         .or_else(|| dirs.first().cloned())
 }
 
-/// `Factory::getCacheDir` : COMPOSER_CACHE_DIR ; sinon `$COMPOSER_HOME/cache`
-/// si COMPOSER_HOME est défini ; Darwin → `~/Library/Caches/composer` ;
-/// `~/.composer/cache` s'il existe ; XDG → `$XDG_CACHE_HOME/composer` ;
-/// sinon `<home>/cache`.
+/// `Factory::getCacheDir`: COMPOSER_CACHE_DIR; else `$COMPOSER_HOME/cache`
+/// if COMPOSER_HOME is set; Darwin -> `~/Library/Caches/composer`;
+/// `~/.composer/cache` if it exists; XDG -> `$XDG_CACHE_HOME/composer`;
+/// else `<home>/cache`.
 pub fn composer_cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("COMPOSER_CACHE_DIR") {
         if !d.is_empty() {
@@ -169,9 +169,9 @@ pub fn composer_cache_dir() -> PathBuf {
     home.join("cache")
 }
 
-/// Chemin de cache d'une dist, identique à Composer : sha1 de l'URL COMPLÈTE
-/// (délibéré chez Composer : évite l'empoisonnement inter-dépôts), clé
-/// assainie sur `[a-z0-9._/-]`.
+/// Cache path of a dist, identical to Composer's: sha1 of the FULL URL
+/// (deliberate in Composer: prevents cross-repository poisoning), key
+/// sanitised to `[a-z0-9._/-]`.
 pub fn dist_cache_path(cache_root: &Path, name: &str, url: &str) -> PathBuf {
     let mut h = Sha1::new();
     h.update(url.as_bytes());
@@ -199,7 +199,7 @@ fn sha1_hex(bytes: &[u8]) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Réponse d'un GET conditionnel de métadonnées.
+/// Response of a conditional metadata GET.
 #[derive(Debug, Clone)]
 pub enum MetadataResponse {
     NotModified,
@@ -238,8 +238,8 @@ impl Fetcher {
         })
     }
 
-    /// Octets de la dist : cache d'abord (shasum revérifié), réseau sinon
-    /// (3 tentatives, backoff), cache alimenté en temp+rename.
+    /// Bytes of the dist: cache first (shasum re-checked), network otherwise
+    /// (3 attempts, backoff), cache fed through temp+rename.
     pub async fn dist_bytes(
         &self,
         name: &str,
@@ -251,7 +251,7 @@ impl Fetcher {
         if let Ok(bytes) = std::fs::read(&cache_path) {
             match expected_sha1 {
                 Some(exp) if sha1_hex(&bytes) != exp => {
-                    // Entrée de cache corrompue/empoisonnée : on la jette.
+                    // Corrupted/poisoned cache entry: throw it away.
                     let _ = std::fs::remove_file(&cache_path);
                 }
                 _ => return Ok((bytes, Provenance::Cache)),
@@ -300,9 +300,9 @@ impl Fetcher {
         })
     }
 
-    /// GET de métadonnées (packages.json, fichiers p2) : `Ok(None)` sur 404
-    /// (paquet inconnu, toléré par Composer), erreur sinon ; 3 tentatives
-    /// sur les erreurs de transport.
+    /// Metadata GET (packages.json, p2 files): `Ok(None)` on 404 (unknown
+    /// package, tolerated by Composer), error otherwise; 3 attempts on
+    /// transport errors.
     pub async fn metadata_bytes(&self, url: &str) -> Result<Option<Vec<u8>>> {
         match self.metadata_fetch(url, None).await? {
             MetadataResponse::Body { bytes, .. } => Ok(Some(bytes)),
@@ -310,10 +310,9 @@ impl Fetcher {
         }
     }
 
-    /// GET conditionnel de métadonnées : `If-Modified-Since` quand le cache
-    /// POST `application/x-www-form-urlencoded` (l'API des avis de
-    /// sécurité : `packages[]=…`), délai de 10 s comme Composer, une
-    /// seule tentative ; 404 → `NotFound`.
+    /// `application/x-www-form-urlencoded` POST (the security advisories
+    /// API: `packages[]=...`), 10 s timeout like Composer, a single attempt;
+    /// 404 -> `NotFound`.
     pub async fn post_form(&self, url: &str, body: &str) -> Result<MetadataResponse> {
         let mut req = self
             .client
@@ -352,8 +351,9 @@ impl Fetcher {
         })
     }
 
-    /// a une date, 304 → `NotModified`, 404 → `NotFound`, sinon le corps et
-    /// l'en-tête `Last-Modified` ; 3 tentatives sur les erreurs de transport.
+    /// Conditional metadata GET: `If-Modified-Since` when the cache has a
+    /// date, 304 -> `NotModified`, 404 -> `NotFound`, else the body and the
+    /// `Last-Modified` header; 3 attempts on transport errors.
     pub async fn metadata_fetch(
         &self,
         url: &str,
@@ -399,7 +399,7 @@ impl Fetcher {
                             Err(e) => last_err = e.to_string(),
                         },
                         Err(e) => {
-                            // Les 4xx autres que 404 ne se retentent pas.
+                            // 4xx other than 404 are not retried.
                             if e.status().is_some_and(|s| s.is_client_error()) {
                                 return Err(Error::Http {
                                     url: url.to_owned(),
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn cache_layout_matches_composer() {
-        // Vérifié contre le cache réel de Composer en M0 : la clé est
+        // Checked against Composer's real cache in M0: the key is
         // files/<name>/<sha1(url)>.zip.
         let p = dist_cache_path(
             Path::new("/c"),

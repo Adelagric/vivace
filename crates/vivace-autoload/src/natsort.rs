@@ -1,14 +1,13 @@
-//! Port de `strnatcasecmp` (ext/standard/strnatcmp.c) : comparaison
-//! « naturelle » insensible à la casse, utilisée par PackageSorter pour
-//! départager les paquets de même poids (`symfony/polyfill-php80` avant
-//! `-php82`, ce que strcmp ne garantit pas pour des nombres de longueurs
-//! différentes).
+//! Port of `strnatcasecmp` (ext/standard/strnatcmp.c): case-insensitive
+//! "natural" comparison, used by PackageSorter to break ties between packages
+//! of equal weight (`symfony/polyfill-php80` before `-php82`, which strcmp
+//! does not guarantee for numbers of different lengths).
 
 use std::cmp::Ordering;
 
 fn compare_right(a: &[u8], b: &[u8]) -> (Ordering, usize, usize) {
-    // Le plus long run de chiffres gagne ; à longueur égale, le premier
-    // chiffre différent tranche (biais mémorisé).
+    // The longest digit run wins; at equal length, the first differing
+    // digit decides (remembered as the bias).
     let mut bias = Ordering::Equal;
     let (mut i, mut j) = (0usize, 0usize);
     loop {
@@ -30,7 +29,7 @@ fn compare_right(a: &[u8], b: &[u8]) -> (Ordering, usize, usize) {
 }
 
 fn compare_left(a: &[u8], b: &[u8]) -> (Ordering, usize, usize) {
-    // Fractions (un zéro en tête) : le premier chiffre différent tranche.
+    // Fractional parts (leading zero): the first differing digit decides.
     let (mut i, mut j) = (0usize, 0usize);
     loop {
         let ca = a.get(i).copied().filter(|c| c.is_ascii_digit());
@@ -55,7 +54,7 @@ pub fn strnatcasecmp(a: &str, b: &str) -> Ordering {
     let (mut ai, mut bi) = (0usize, 0usize);
     let mut leading = true;
     loop {
-        // Zéros de tête (au tout début seulement).
+        // Leading zeros (at the very start only).
         while leading && ai + 1 < a.len() && a[ai] == b'0' && a[ai + 1].is_ascii_digit() {
             ai += 1;
         }
@@ -63,7 +62,7 @@ pub fn strnatcasecmp(a: &str, b: &str) -> Ordering {
             bi += 1;
         }
         leading = false;
-        // Blancs consécutifs.
+        // Consecutive whitespace.
         while ai < a.len() && a[ai].is_ascii_whitespace() {
             ai += 1;
         }

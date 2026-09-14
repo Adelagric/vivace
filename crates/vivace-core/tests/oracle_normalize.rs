@@ -1,4 +1,4 @@
-//! Différentiel de normalize_pretty contre VersionParser::normalize du phar.
+//! Differential of normalize_pretty against the phar's VersionParser::normalize.
 
 use std::io::Write as _;
 use std::process::{Command, Stdio};

@@ -1,14 +1,14 @@
-//! Port de `Composer\Policy\PolicyConfig` et des classes de politique
-//! (docs/reference/policy/*.php) : ce que `config.policy` et la config
-//! héritée `config.audit` disent des trois filtres du pool — avis de
-//! sécurité, listes de filtrage (malware), paquets abandonnés — après la
-//! fusion global/projet de `Config::merge`, les variables d'environnement
-//! (`COMPOSER_POLICY`, `COMPOSER_POLICY_*_BLOCK`, `COMPOSER_NO_BLOCKING`…)
-//! et `--no-blocking`.
+//! Port of `Composer\Policy\PolicyConfig` and the policy classes
+//! (docs/reference/policy/*.php): what `config.policy` and the legacy
+//! `config.audit` say about the three pool filters (security advisories,
+//! filter lists (malware), abandoned packages) after the global/project
+//! merge of `Config::merge`, the environment variables (`COMPOSER_POLICY`,
+//! `COMPOSER_POLICY_*_BLOCK`, `COMPOSER_NO_BLOCKING`...) and
+//! `--no-blocking`.
 //!
-//! Non porté : les listes personnalisées (`policy.<autre nom>`) et
-//! `audit.abandoned`/`policy.*.audit` (mode d'audit, sans effet sur le
-//! blocage) — les premières sont refusées, le second est ignoré.
+//! Not ported: custom lists (`policy.<other name>`) and
+//! `audit.abandoned`/`policy.*.audit` (audit mode, no effect on blocking);
+//! the former are rejected, the latter is ignored.
 
 use serde_json::{Map, Value};
 
@@ -18,7 +18,7 @@ use crate::constraint::{parse_constraints, Constraint};
 #[error("{0}")]
 pub struct PolicyError(pub String);
 
-/// Une règle d'ignorance par paquet (`IgnorePackageRule`).
+/// A per-package ignore rule (`IgnorePackageRule`).
 #[derive(Debug, Clone)]
 pub struct IgnorePackageRule {
     pub package_name: String,
@@ -28,7 +28,7 @@ pub struct IgnorePackageRule {
     pub on_audit: bool,
 }
 
-/// Une règle d'ignorance par identifiant d'avis (`IgnoreIdRule`).
+/// A per-advisory-id ignore rule (`IgnoreIdRule`).
 #[derive(Debug, Clone)]
 pub struct IgnoreIdRule {
     pub id: String,
@@ -46,7 +46,7 @@ pub struct IgnoreSeverityRule {
     pub on_audit: bool,
 }
 
-/// Règles par paquet, dans l'ordre de déclaration (tableau PHP).
+/// Per-package rules, in declaration order (PHP array).
 pub type IgnoreMap = Vec<(String, Vec<IgnorePackageRule>)>;
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ pub struct AdvisoriesPolicy {
 #[derive(Debug, Clone)]
 pub struct MalwarePolicy {
     pub block: bool,
-    /// `all`, `update` ou `install`.
+    /// `all`, `update` or `install`.
     pub block_scope: String,
     pub ignore: IgnoreMap,
     pub ignore_source: Vec<String>,
@@ -72,8 +72,8 @@ pub struct AbandonedPolicy {
     pub ignore: IgnoreMap,
 }
 
-/// `IgnoreUnreachable` : un dépôt injoignable est ignoré (avertissement)
-/// ou fatal, par opération.
+/// `IgnoreUnreachable`: an unreachable repository is ignored (warning) or
+/// fatal, per operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IgnoreUnreachable {
     pub audit: bool,
@@ -93,12 +93,12 @@ impl IgnoreUnreachable {
 
 #[derive(Debug, Clone)]
 pub struct PolicyConfig {
-    /// `policy: false` (ou `COMPOSER_POLICY=0`) : tout est désactivé.
+    /// `policy: false` (or `COMPOSER_POLICY=0`): everything is disabled.
     pub enabled: bool,
     pub advisories: AdvisoriesPolicy,
     pub malware: MalwarePolicy,
     pub abandoned: AbandonedPolicy,
-    /// Noms des listes personnalisées déclarées (non portées).
+    /// Names of the declared custom lists (not ported).
     pub custom_lists: Vec<String>,
     pub ignore_unreachable: IgnoreUnreachable,
 }
@@ -106,8 +106,8 @@ pub struct PolicyConfig {
 const NON_LIST_KEYS: &[&str] = &["ignore-unreachable"];
 const BUILTIN_LIST_NAMES: &[&str] = &["advisories", "malware", "abandoned"];
 
-/// `Platform::getBoolEnv` : `0`/`1`/`false`/`true`/`off`/`on`, vide =
-/// absent, autre valeur = erreur.
+/// `Platform::getBoolEnv`: `0`/`1`/`false`/`true`/`off`/`on`, empty =
+/// absent, any other value = error.
 pub fn bool_env(name: &str) -> Result<Option<bool>, PolicyError> {
     match std::env::var(name) {
         Ok(v) if !v.is_empty() => match v.as_str() {
@@ -121,11 +121,11 @@ pub fn bool_env(name: &str) -> Result<Option<bool>, PolicyError> {
     }
 }
 
-/// La valeur fusionnée de `config.policy` et `config.audit` (défauts de
-/// `Config`, puis la config globale, puis le projet — `Config::merge`).
+/// The merged value of `config.policy` and `config.audit` (`Config`
+/// defaults, then the global config, then the project: `Config::merge`).
 #[derive(Debug, Clone)]
 pub struct RawPolicyConfig {
-    /// `true`, `false` ou un objet.
+    /// `true`, `false` or an object.
     pub policy: Value,
     pub audit: Value,
 }
@@ -140,7 +140,7 @@ impl Default for RawPolicyConfig {
 }
 
 impl RawPolicyConfig {
-    /// `Config::merge` pour les clés `audit` et `policy` d'un `config`.
+    /// `Config::merge` for the `audit` and `policy` keys of a `config`.
     pub fn merge(&mut self, config: &Map<String, Value>) {
         if let Some(val) = config.get("audit") {
             let current_ignores = self
@@ -221,8 +221,8 @@ impl RawPolicyConfig {
         }
     }
 
-    /// `Config::get('policy')` : `COMPOSER_POLICY=0` désactive, `=1`
-    /// réactive un `false`.
+    /// `Config::get('policy')`: `COMPOSER_POLICY=0` disables, `=1`
+    /// re-enables a `false`.
     pub fn effective_policy(&self) -> Result<Value, PolicyError> {
         Ok(match bool_env("COMPOSER_POLICY")? {
             Some(false) => Value::Bool(false),
@@ -236,10 +236,9 @@ fn is_php_array(v: &Value) -> bool {
     matches!(v, Value::Array(_) | Value::Object(_))
 }
 
-/// `array_merge($a, $b)` sur des tableaux décodés : les clés textuelles
-/// de `b` remplacent celles de `a` (à leur place), les entrées de liste
-/// s'ajoutent à la fin. Une liste résultat sans clé textuelle reste une
-/// liste.
+/// `array_merge($a, $b)` on decoded arrays: the string keys of `b` replace
+/// those of `a` (in place), list entries are appended at the end. A result
+/// list without any string key stays a list.
 fn php_array_merge(a: &Value, b: &Value) -> Value {
     fn entries(v: &Value) -> Vec<(Option<String>, Value)> {
         match v {
@@ -247,7 +246,7 @@ fn php_array_merge(a: &Value, b: &Value) -> Value {
             Value::Object(m) => m
                 .iter()
                 .map(|(k, x)| {
-                    // Une clé numérique canonique est un entier PHP.
+                    // A canonical numeric key is a PHP integer.
                     let is_int = k == "0"
                         || (k.starts_with(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
                             && k.bytes().all(|c| c.is_ascii_digit()));
@@ -286,7 +285,7 @@ fn php_array_merge(a: &Value, b: &Value) -> Value {
     Value::Object(m)
 }
 
-/// `is_int($key)` d'un tableau décodé : liste, ou clé numérique canonique.
+/// `is_int($key)` of a decoded array: list, or canonical numeric key.
 fn php_entries(v: &Value) -> Vec<(Option<String>, Value)> {
     match v {
         Value::Array(items) => items.iter().map(|x| (None, x.clone())).collect(),
@@ -332,7 +331,7 @@ fn legacy_single(
     let mut on_block = true;
     let mut on_audit = true;
     if key.is_none() && value.is_string() {
-        // entrée de liste : pas de raison
+        // list entry: no reason
     } else if let Some(s) = value.as_str() {
         reason = Some(s.to_owned());
     } else if let Value::Object(v) = value {
@@ -350,8 +349,8 @@ fn legacy_single(
     Ok((reason, on_block, on_audit))
 }
 
-/// `ListPolicyConfig::parseLegacyAuditIgnore` : `audit.ignore` mêle
-/// identifiants et noms de paquets (un `/` fait le nom).
+/// `ListPolicyConfig::parseLegacyAuditIgnore`: `audit.ignore` mixes ids
+/// and package names (a `/` makes it a name).
 fn parse_legacy_audit_ignore(
     config: &Value,
 ) -> Result<(IgnoreMap, Vec<IgnoreIdRule>), PolicyError> {
@@ -386,7 +385,7 @@ fn parse_legacy_audit_ignore(
     Ok((packages, ids))
 }
 
-/// `parseLegacyIgnoreWithApply` (abandonnés).
+/// `parseLegacyIgnoreWithApply` (abandoned packages).
 fn parse_legacy_ignore_with_apply(config: &Value) -> Result<IgnoreMap, PolicyError> {
     let mut out: IgnoreMap = Vec::new();
     for (key, value) in php_entries(config) {
@@ -395,7 +394,7 @@ fn parse_legacy_ignore_with_apply(config: &Value) -> Result<IgnoreMap, PolicyErr
             None => php_to_string(&value),
         };
         let (reason, on_block, on_audit) = legacy_single(&key, &value)?;
-        // `$result[$packageName] = [rule]` : une seule règle par nom.
+        // `$result[$packageName] = [rule]`: a single rule per name.
         out.retain(|(n, _)| *n != name);
         out.push((
             name.clone(),
@@ -481,7 +480,7 @@ fn parse_ignore_map(config: &Value) -> Result<IgnoreMap, PolicyError> {
                 },
             ),
             (Some(k), Value::Array(list)) => {
-                // `isset($value[0])` faux pour `[]` : un objet de règle vide.
+                // `isset($value[0])` is false for `[]`: an empty rule object.
                 if list.is_empty() {
                     let r = from_rule_object(k, &Map::new())?;
                     push_rule(&mut rules, r);
@@ -586,8 +585,8 @@ fn parse_ignore_id_map(config: &Value) -> Result<Vec<IgnoreIdRule>, PolicyError>
     Ok(rules)
 }
 
-/// `AdvisoriesPolicyConfig::parseLegacySeverityWithApply` : liste de
-/// sévérités, ou map sévérité → raison / `{apply, reason}`.
+/// `AdvisoriesPolicyConfig::parseLegacySeverityWithApply`: list of
+/// severities, or map severity -> reason / `{apply, reason}`.
 fn parse_legacy_ignore_severity(config: &Value) -> Result<Vec<IgnoreSeverityRule>, PolicyError> {
     let mut rules: Vec<IgnoreSeverityRule> = Vec::new();
     for (key, value) in php_entries(config) {
@@ -607,8 +606,8 @@ fn parse_legacy_ignore_severity(config: &Value) -> Result<Vec<IgnoreSeverityRule
     Ok(rules)
 }
 
-/// `IgnoreSeverityRule::parseIgnoreSeverityMap` et la forme héritée
-/// (`audit.ignore-severity` : liste de sévérités ou map sévérité → raison).
+/// `IgnoreSeverityRule::parseIgnoreSeverityMap` and the legacy form
+/// (`audit.ignore-severity`: list of severities or map severity -> reason).
 fn parse_ignore_severity(config: &Value) -> Result<Vec<IgnoreSeverityRule>, PolicyError> {
     let mut rules: Vec<IgnoreSeverityRule> = Vec::new();
     for (key, value) in php_entries(config) {
@@ -642,7 +641,7 @@ fn parse_ignore_severity(config: &Value) -> Result<Vec<IgnoreSeverityRule>, Poli
 }
 
 impl PolicyConfig {
-    /// `PolicyConfig::fromConfig` + les variables d'environnement.
+    /// `PolicyConfig::fromConfig` + the environment variables.
     pub fn from_raw(raw: &RawPolicyConfig) -> Result<PolicyConfig, PolicyError> {
         let policy = raw.effective_policy()?;
         if policy == Value::Bool(false) {
@@ -815,8 +814,8 @@ impl PolicyConfig {
                 update: true,
             }
         };
-        // `COMPOSER_AUDIT_ABANDONED` : sans effet sur le blocage, mais une
-        // valeur invalide est fatale chez Composer.
+        // `COMPOSER_AUDIT_ABANDONED`: no effect on blocking, but an invalid
+        // value is fatal in Composer.
         if let Ok(v) = std::env::var("COMPOSER_AUDIT_ABANDONED") {
             if !["ignore", "report", "fail"].contains(&v.as_str()) {
                 return Err(PolicyError(format!(
@@ -847,9 +846,9 @@ impl PolicyConfig {
         })
     }
 
-    /// `BaseCommand::createPolicyConfig` : `--no-blocking`,
+    /// `BaseCommand::createPolicyConfig`: `--no-blocking`,
     /// `--no-security-blocking`, `COMPOSER_NO_BLOCKING`,
-    /// `COMPOSER_NO_SECURITY_BLOCKING` → `withBlockingDisabled`.
+    /// `COMPOSER_NO_SECURITY_BLOCKING` -> `withBlockingDisabled`.
     pub fn apply_no_blocking(&mut self, option: bool) -> Result<(), PolicyError> {
         let no_blocking = option
             || bool_env("COMPOSER_NO_BLOCKING")?.unwrap_or(false)
@@ -862,7 +861,7 @@ impl PolicyConfig {
         Ok(())
     }
 
-    /// `ListPolicyConfig::shouldBlock` pour la liste malware.
+    /// `ListPolicyConfig::shouldBlock` for the malware list.
     pub fn malware_blocks(&self, scope: &str) -> bool {
         if !self.malware.block {
             return false;
@@ -874,14 +873,14 @@ impl PolicyConfig {
     }
 }
 
-/// `AdvisoriesPolicyConfig::getIgnoreListForOperation('block')` : ids puis
-/// noms → raison (une map PHP : `array_key_exists`).
+/// `AdvisoriesPolicyConfig::getIgnoreListForOperation('block')`: ids then
+/// names -> reason (a PHP map: `array_key_exists`).
 pub fn advisory_ignore_list_for_block(p: &AdvisoriesPolicy) -> Vec<(String, Option<String>)> {
     let mut out: Vec<(String, Option<String>)> = Vec::new();
     let mut set = |key: String, reason: Option<String>| {
         match out.iter_mut().find(|(k, _)| *k == key) {
-            // `mergeReason` : la première raison connue est gardée si la
-            // nouvelle est vide.
+            // `mergeReason`: the first known reason is kept if the new one
+            // is empty.
             Some(slot) => {
                 if reason.is_some() {
                     slot.1 = reason;
@@ -914,8 +913,8 @@ pub fn advisory_ignore_severity_for_block(p: &AdvisoriesPolicy) -> Vec<(String, 
         .collect()
 }
 
-/// `getFlatIgnoreForOperation('block')` d'une liste (abandonnés, malware) :
-/// nom → raison.
+/// `getFlatIgnoreForOperation('block')` of a list (abandoned, malware):
+/// name -> reason.
 pub fn flat_ignore_for_block(map: &IgnoreMap) -> Vec<(String, Option<String>)> {
     let mut out: Vec<(String, Option<String>)> = Vec::new();
     for (name, rules) in map {

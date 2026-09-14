@@ -1,13 +1,13 @@
-//! Les filtres que `PoolBuilder::buildPool` applique au pool avant
-//! l'optimiseur : `SecurityAdvisoryPoolFilter` (avis de sécurité et
-//! paquets abandonnés) puis `FilterListPoolFilter` (listes de filtrage,
-//! la liste malware de Packagist en tête), pilotés par
+//! The filters `PoolBuilder::buildPool` applies to the pool before the
+//! optimizer: `SecurityAdvisoryPoolFilter` (security advisories and
+//! abandoned packages) then `FilterListPoolFilter` (filter lists, with
+//! Packagist's malware list first), driven by
 //! [`crate::policy_config::PolicyConfig`].
 //!
-//! Les versions retirées par une liste sont gardées dans
-//! `Pool::filter_list_removed` : le générateur de règles et le solveur en
-//! ont besoin. Les versions retirées pour un avis ne servent qu'aux
-//! explications de Composer (non portées) et ne sont pas gardées.
+//! Versions removed by a list are kept in `Pool::filter_list_removed`: the
+//! rule generator and the solver need them. Versions removed because of an
+//! advisory only serve Composer's explanations (not ported) and are not
+//! kept.
 
 use std::collections::BTreeMap;
 
@@ -27,7 +27,7 @@ use crate::repository::{AdvisoriesByName, Advisory, ComposerRepository, FilterEn
 #[error("{0}")]
 pub struct FilterError(pub String);
 
-/// `BasePackage::packageNamesToRegexp` (`{^(?:a|b)$}iD`), `None` sans nom.
+/// `BasePackage::packageNamesToRegexp` (`{^(?:a|b)$}iD`), `None` without names.
 fn package_names_regexp(names: &[String]) -> Option<Regex> {
     if names.is_empty() {
         return None;
@@ -47,9 +47,9 @@ fn matches_regex(re: &Option<Regex>, name: &str) -> bool {
         .is_some_and(|r| r.is_match(name.as_bytes()).unwrap_or(false))
 }
 
-/// `name → MultiConstraint(= v1, = v2, …)` des paquets donnés (alias
-/// racine exclus), comme `getMatchingSecurityAdvisories` et
-/// `getMatchingFilterLists` le construisent.
+/// `name -> MultiConstraint(= v1, = v2, ...)` of the given packages (root
+/// aliases excluded), as `getMatchingSecurityAdvisories` and
+/// `getMatchingFilterLists` build it.
 fn constraints_by_name(packages: &[usize], arena: &[Package]) -> Vec<(String, Constraint)> {
     let mut by_name: Vec<(String, Vec<Constraint>)> = Vec::new();
     for &idx in packages {
@@ -60,7 +60,7 @@ fn constraints_by_name(packages: &[usize], arena: &[Package]) -> Vec<(String, Co
         let c = Constraint::new(Op::Eq, &p.version);
         match by_name.iter_mut().find(|(n, _)| *n == p.name) {
             Some((_, list)) => {
-                // `$constraintsByName[$name][$version]` : une par version.
+                // `$constraintsByName[$name][$version]`: one per version.
                 if !list.iter().any(|existing| existing == &c) {
                     list.push(c);
                 }
@@ -84,9 +84,9 @@ fn composer_repos(repositories: &[Repository]) -> Vec<&ComposerRepository> {
         .collect()
 }
 
-/// `RepositorySet::getSecurityAdvisoriesForConstraints` : les avis de
-/// tous les dépôts, fusionnés par nom ; un dépôt injoignable est ignoré
-/// (et rapporté) ou fatal.
+/// `RepositorySet::getSecurityAdvisoriesForConstraints`: the advisories of
+/// all repositories, merged by name; an unreachable repository is ignored
+/// (and reported) or fatal.
 fn security_advisories_for_constraints(
     repositories: &[Repository],
     map: &[(String, Constraint)],
@@ -96,8 +96,8 @@ fn security_advisories_for_constraints(
 ) -> Result<AdvisoriesByName, FilterError> {
     let mut all: AdvisoriesByName = Vec::new();
     for repo in composer_repos(repositories) {
-        // `RepositorySet::__construct`/`getSecurityAdvisoriesForConstraints` :
-        // seule une TransportException relève d'`ignore-unreachable`.
+        // `RepositorySet::__construct`/`getSecurityAdvisoriesForConstraints`:
+        // only a TransportException falls under `ignore-unreachable`.
         let result = repo.has_security_advisories().and_then(|has| {
             if has {
                 repo.get_security_advisories(map, allow_partial)
@@ -122,8 +122,8 @@ fn security_advisories_for_constraints(
     Ok(all)
 }
 
-/// `Auditor::needsCompleteAdvisoryLoad` : des avis partiels et une règle
-/// d'ignorance qui n'est pas un identifiant `PKSA-`.
+/// `Auditor::needsCompleteAdvisoryLoad`: partial advisories and an ignore
+/// rule that is not a `PKSA-` identifier.
 fn needs_complete_advisory_load(
     advisories: &AdvisoriesByName,
     ignore_list: &[(String, Option<String>)],
@@ -140,7 +140,7 @@ fn needs_complete_advisory_load(
     ignore_list.iter().any(|(id, _)| !id.starts_with("PKSA-"))
 }
 
-/// `Auditor::processAdvisories` : ce qui reste après les ignorances.
+/// `Auditor::processAdvisories`: what remains after the ignore rules.
 fn process_advisories(
     all: AdvisoriesByName,
     ignore_list: &[(String, Option<String>)],
@@ -182,8 +182,8 @@ fn process_advisories(
     out
 }
 
-/// `isAbandoned()` d'un paquet complet : `abandoned` vrai ou nom de
-/// remplaçant.
+/// `isAbandoned()` of a complete package: `abandoned` true or a replacement
+/// name.
 fn is_abandoned(p: &Package) -> bool {
     match p.raw.get("abandoned") {
         Some(serde_json::Value::Bool(b)) => *b,
@@ -192,8 +192,8 @@ fn is_abandoned(p: &Package) -> bool {
     }
 }
 
-/// `SecurityAdvisoryPoolFilter::filter` : retire les paquets abandonnés
-/// (si `abandoned.block`) et les versions non-dev couvertes par un avis.
+/// `SecurityAdvisoryPoolFilter::filter`: removes abandoned packages (if
+/// `abandoned.block`) and non-dev versions covered by an advisory.
 pub fn security_advisory_filter(
     pool: Pool,
     arena: &[Package],
@@ -270,8 +270,8 @@ pub fn security_advisory_filter(
     Ok(pool.with_packages(kept, arena))
 }
 
-/// `getMatchingAdvisories` : jamais pour une version dev ; sur chacun des
-/// `getNames(false)` (nom + `replace`).
+/// `getMatchingAdvisories`: never for a dev version; on each of the
+/// `getNames(false)` (name + `replace`).
 fn matching_advisories<'a>(p: &Package, advisory_map: &'a AdvisoriesByName) -> Vec<&'a Advisory> {
     if p.is_dev() {
         return Vec::new();
@@ -291,10 +291,10 @@ fn matching_advisories<'a>(p: &Package, advisory_map: &'a AdvisoriesByName) -> V
     out
 }
 
-/// `FilterListPoolFilter::filter` en portée `update` ou `install` : les
-/// versions signalées par une liste active ; les versions verrouillées
-/// (ou identiques à une version du lock) sont jugées contre les listes
-/// de portée `install`.
+/// `FilterListPoolFilter::filter` in `update` or `install` scope: the
+/// versions flagged by an active list; locked versions (or versions
+/// identical to a lock version) are judged against the `install`-scoped
+/// lists.
 pub fn filter_list_filter(
     pool: Pool,
     arena: &[Package],
@@ -304,8 +304,9 @@ pub fn filter_list_filter(
     block_scope: &str,
     warnings: &mut Vec<String>,
 ) -> Result<Pool, FilterError> {
-    // Une liste personnalisée sans source ni dépôt qui l'annonce est
-    // inerte chez Composer ; sinon elle demande un fournisseur non porté.
+    // A custom list with no source and no repository advertising it is
+    // inert in Composer; otherwise it requires a provider that is not
+    // ported.
     if !policy.custom_lists.is_empty() {
         for repo in composer_repos(repositories) {
             if let Ok(lists) = repo.get_filter_lists() {
@@ -356,8 +357,8 @@ pub fn filter_list_filter(
     let mut by_list: Vec<(String, Vec<FilterEntry>)> = Vec::new();
     let mut unreachable = Vec::new();
     for repo in composer_repos(repositories) {
-        // `FilterListProviderSet` : `hasFilter()` (packages.json) comme
-        // `getFilter()` ne remontent que leurs TransportException dans
+        // `FilterListProviderSet`: `hasFilter()` (packages.json) and
+        // `getFilter()` alike only surface their TransportException under
         // `ignore-unreachable`.
         let provider_lists = match repo.get_filter_lists() {
             Ok(l) => l,
@@ -474,8 +475,8 @@ pub fn filter_list_filter(
     Ok(out)
 }
 
-/// `FilterListAuditor::matchingEntries` pour l'opération `block` : les
-/// entrées des listes actives qui couvrent la version, sauf ignorance.
+/// `FilterListAuditor::matchingEntries` for the `block` operation: the
+/// entries of the active lists covering the version, unless ignored.
 fn matching_entries(
     p: &Package,
     filter_map: &BTreeMap<String, Vec<(String, Vec<FilterEntry>)>>,
@@ -504,7 +505,7 @@ fn matching_entries(
             if !active_lists.contains(list) {
                 continue;
             }
-            // `applyMalwareIgnoreSource` : les entrées d'une source ignorée.
+            // `applyMalwareIgnoreSource`: the entries of an ignored source.
             let entries: Vec<&FilterEntry> = entries
                 .iter()
                 .filter(|e| {
@@ -514,8 +515,8 @@ fn matching_entries(
                 })
                 .collect();
             if matches_regex(&ignored_re, &name) && list == "malware" {
-                // `isPackageIgnored` : une règle dont le motif et la
-                // contrainte couvrent la version écarte la liste.
+                // `isPackageIgnored`: a rule whose pattern and constraint
+                // cover the version dismisses the list.
                 let ignored = ignore_map.iter().any(|(_, rules)| {
                     rules.iter().any(|r| {
                         r.on_block
@@ -540,9 +541,9 @@ fn matching_entries(
     out
 }
 
-/// Le texte de Composer pour un verrouillé retiré :
-/// `getFilterListEntryForPackageVersion` + le problème
-/// `RULE_LOCKED_FILTER_LIST_REMOVED` de `Problem::getPrettyString`.
+/// Composer's text for a removed locked package:
+/// `getFilterListEntryForPackageVersion` + the
+/// `RULE_LOCKED_FILTER_LIST_REMOVED` problem of `Problem::getPrettyString`.
 pub fn locked_removed_problem_text(pool: &Pool, p: &Package) -> String {
     let mut lists: Vec<(String, Vec<String>)> = Vec::new();
     if let Some(versions) = pool.filter_list_removed.get(&p.name) {

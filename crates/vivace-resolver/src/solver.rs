@@ -1,5 +1,5 @@
-//! Port de `Composer\DependencyResolver\Solver` (CDCL) et du squelette de
-//! `Problem` (les règles fautives ; les messages arrivent avec R5).
+//! Port of `Composer\DependencyResolver\Solver` (CDCL) and of the skeleton
+//! of `Problem` (the offending rules; messages come with R5).
 
 use crate::decisions::{Decisions, SolverBug};
 use crate::package::Package;
@@ -12,12 +12,12 @@ use crate::transaction::LockTransaction;
 use crate::watch::{RuleWatchGraph, RuleWatchNode};
 use std::collections::{HashMap, HashSet};
 
-/// `Composer\DependencyResolver\Problem` : sections de règles.
+/// `Composer\DependencyResolver\Problem`: rule sections.
 #[derive(Debug, Clone, Default)]
 pub struct Problem {
-    /// section → règles (identifiants, ou règles hors jeu pour les
-    /// requêtes racine insatisfaisables). Une section n'existe qu'à partir
-    /// de sa première règle (`nextSection` ne fait qu'avancer l'index).
+    /// section -> rules (ids, or out-of-band rules for unsatisfiable root
+    /// requests). A section only exists from its first rule on
+    /// (`nextSection` merely advances the index).
     pub sections: Vec<Vec<ProblemRule>>,
     seen: HashSet<usize>,
     pending_section: bool,
@@ -88,9 +88,9 @@ pub struct Solver<'a> {
     /// `(literals, level)`.
     branches: Vec<(Vec<i64>, i64)>,
     pub problems: Vec<Problem>,
-    /// `learnedPool[why]` : règles ayant mené à une règle apprise.
+    /// `learnedPool[why]`: rules that led to a learned rule.
     learned_pool: Vec<Vec<usize>>,
-    /// règle apprise → `why`.
+    /// learned rule -> `why`.
     learned_why: HashMap<usize, usize>,
 }
 
@@ -169,8 +169,8 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
-    /// `checkForFilterListRemovedLockedPackages` : un paquet verrouillé
-    /// dont la version a été retirée par une liste de filtrage.
+    /// `checkForFilterListRemovedLockedPackages`: a locked package whose
+    /// version was removed by a filter list.
     fn check_for_filter_list_removed_locked_packages(&mut self, request: &Request) {
         for idx in request.locked_packages_all() {
             let p = &self.arena[idx];
@@ -314,9 +314,9 @@ impl<'a> Solver<'a> {
             }
             level = new_level;
             self.revert(level);
-            // Un doublon n'entre pas dans le RuleSet mais sert quand même
-            // de nœud de surveillance et de raison (`add` rend sans rien
-            // faire, le reste du code PHP continue avec l'objet).
+            // A duplicate does not enter the RuleSet but still serves as a
+            // watch node and as a reason (`add` returns without doing
+            // anything, the rest of the PHP code carries on with the object).
             let (new_id, _) = self.rules.add(new_rule, RuleType::Learned);
             self.learned_why.insert(new_id, why);
             let mut node = RuleWatchNode::new(&self.rules, new_id);
@@ -351,7 +351,7 @@ impl<'a> Solver<'a> {
         self.set_propagate_learn(level, selected, rule)
     }
 
-    /// `analyze` : (literal appris, niveau, nouvelle règle, why).
+    /// `analyze`: (learned literal, level, new rule, why).
     fn analyze(&mut self, level: i64, rule: usize) -> Result<(i64, i64, Rule, usize), SolveError> {
         let analyzed_rule = rule;
         let mut rule = rule;
@@ -429,8 +429,8 @@ impl<'a> Solver<'a> {
                         continue;
                     }
                 }
-                // `else` de `if (0 !== $num && 0 === --$num)` : atteint quand
-                // num était 0, ou quand la décrémentation ne l'a pas annulé.
+                // `else` of `if (0 !== $num && 0 === --$num)`: reached when
+                // num was 0, or when the decrement did not bring it to 0.
                 let decision = self.decisions.at_offset(decision_id as usize);
                 rule = decision.reason;
                 if self.rules.rules[rule].kind == RuleKind::MultiConflict {
@@ -510,7 +510,7 @@ impl<'a> Solver<'a> {
             }
             seen.insert(literal.abs());
         }
-        // `foreach ($this->decisions …)` : de la dernière à la première.
+        // `foreach ($this->decisions ...)`: from last to first.
         for i in (0..self.decisions.len()).rev() {
             let decision = self.decisions.at_offset(i);
             if !seen.contains(&decision.literal.abs()) {
@@ -542,10 +542,10 @@ impl<'a> Solver<'a> {
                 }
             }
             if level < system_level {
-                // `foreach ($iterator as $rule)` sur les règles REQUEST, puis
-                // `$iterator->next(); if valid → continue` : après un
-                // `break` (retour en arrière) ailleurs qu'à la dernière règle,
-                // on repart du début.
+                // `foreach ($iterator as $rule)` over the REQUEST rules, then
+                // `$iterator->next(); if valid -> continue`: after a `break`
+                // (backtrack) anywhere but at the last rule, we start over
+                // from the beginning.
                 let request_rules: Vec<usize> = self.rules.ids_of_type(RuleType::Request).to_vec();
                 let mut position = 0;
                 let mut broke = false;

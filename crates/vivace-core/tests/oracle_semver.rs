@@ -1,9 +1,8 @@
-//! Différentiel du sous-ensemble de contraintes contre l'oracle
-//! `Composer\Semver\Semver::satisfies` du phar réel : toute paire
-//! (version, contrainte) que vivace accepte de parser doit donner le même
-//! verdict que Composer. Les paires que vivace refuse (hors sous-ensemble)
-//! sont comptées mais pas comparées — le refus explicite est un comportement
-//! prévu, le mensonge ne l'est pas.
+//! Differential of the constraint subset against the real phar's
+//! `Composer\Semver\Semver::satisfies` oracle: every (version, constraint)
+//! pair that vivace agrees to parse must give the same verdict as Composer.
+//! Pairs that vivace refuses (outside the subset) are counted but not
+//! compared; an explicit refusal is expected behaviour, lying is not.
 
 use std::io::Write as _;
 use std::process::{Command, Stdio};
@@ -160,7 +159,7 @@ fn matches_semver_satisfies() {
         diverging.len(),
         diverging.join("\n")
     );
-    // Le refus doit rester l'exception dans ce sous-ensemble choisi pour être couvert.
+    // Refusal must remain the exception in this subset, chosen to be covered.
     assert!(
         refused * 20 <= compared,
         "trop de refus: {refused} refusées vs {compared} comparées"

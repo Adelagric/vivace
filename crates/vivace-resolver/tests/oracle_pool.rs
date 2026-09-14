@@ -1,9 +1,9 @@
-//! Oracle du pool : pour chaque instantané (fixtures/registry/*.tar.gz), le
-//! pool construit par Composer (tools/oracle-pool.php, sans optimiseur ni
-//! filtres) et celui de vivace-resolver doivent être identiques paquet par
-//! paquet, dans l'ordre — nom, version, dépôt d'origine, alias, références,
-//! liens. Le dépôt local est injecté par COMPOSER_HOME/config.json comme
-//! dans harness/update.sh.
+//! Pool oracle: for each snapshot (fixtures/registry/*.tar.gz), the pool
+//! built by Composer (tools/oracle-pool.php, without optimizer or filters)
+//! and the one built by vivace-resolver must be identical package by
+//! package, in order: name, version, origin repository, alias, references,
+//! links. The local repository is injected through COMPOSER_HOME/config.json
+//! as in harness/update.sh.
 
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -49,8 +49,8 @@ fn phar() -> PathBuf {
 }
 
 fn links(l: &Links) -> Value {
-    // Tableau PHP : clé du lien, ou numéros 0.. pour les entrées sans clé
-    // (array_merge). Vide → `[]` chez json_encode.
+    // PHP array: the link key, or numbers 0.. for keyless entries
+    // (array_merge). Empty -> `[]` in json_encode.
     if l.is_empty() {
         return Value::Array(Vec::new());
     }
@@ -115,9 +115,9 @@ fn setup(fx: &str) -> Setup {
             .success(),
         "{fx}: archive"
     );
-    // Comme harness/lib/registry.sh : les politiques de blocage déclarées
-    // comme sur Packagist (avis partiels dans les p2, résumé malware vide
-    // si l'instantané n'en a pas).
+    // As in harness/lib/registry.sh: the blocking policies declared as on
+    // Packagist (partial advisories in the p2 files, empty malware summary
+    // if the snapshot has none).
     if !reg.join("summary.json").is_file() {
         std::fs::write(
             reg.join("summary.json"),
@@ -150,8 +150,8 @@ fn setup(fx: &str) -> Setup {
         &std::fs::read_to_string(src.join("composer.json")).expect("composer.json"),
     )
     .expect("json");
-    // Les dépôts distants du manifeste (packages.drupal.org) ne sont pas
-    // joignables hors ligne : l'oracle et le port lisent le seul instantané.
+    // The manifest's remote repositories (packages.drupal.org) are not
+    // reachable offline: the oracle and the port read only the snapshot.
     if let Some(obj) = manifest.as_object_mut() {
         obj.remove("repositories");
     }
@@ -175,7 +175,7 @@ fn setup(fx: &str) -> Setup {
     }
 }
 
-/// Cas de mise à jour partielle : (fixture, paquets, mode -w/-W).
+/// Partial update case: (fixture, packages, -w/-W mode).
 const PARTIAL: &[(&str, &[&str], &str)] = &[
     ("laravel", &["laravel/pint"], ""),
     ("symfony", &["doctrine/orm"], "-w"),
@@ -216,10 +216,10 @@ fn oracle_with(s: &Setup, solve: bool, update: &[&str], mode: &str) -> Value {
     serde_json::from_slice(&out.stdout).expect("oracle json")
 }
 
-/// Le paquet de plateforme `composer` porte la version de Composer
-/// lui-même : le port émule 2.10.3, l'oracle est le phar sous test. Sous un
-/// autre Composer (job de dérive), cette différence est attendue et n'est
-/// pas une dérive du port : elle est neutralisée, et signalée.
+/// The `composer` platform package carries the version of Composer itself:
+/// the port emulates 2.10.3, the oracle is the phar under test. Under
+/// another Composer (drift job), this difference is expected and is not a
+/// drift of the port: it is neutralized, and reported.
 fn same_modulo_composer_version(e: &Value, g: &Value) -> bool {
     if e == g {
         return true;
@@ -279,8 +279,8 @@ fn pool_matches_composer_on_snapshots() {
         }
         let s = setup(fx);
         let expected = oracle(&s, false);
-        // Même variable d'environnement que l'oracle (lue par la détection de
-        // version racine) ; les fixtures s'enchaînent dans un seul test.
+        // Same environment variable as the oracle (read by root version
+        // detection); the fixtures run back to back in a single test.
         std::env::set_var("COMPOSER_ROOT_VERSION", &s.root_version);
         let mut session = UpdateSession::prepare(&s.project, Some(&s.home), true)
             .unwrap_or_else(|e| panic!("{fx}: {e}"));
@@ -297,8 +297,8 @@ fn pool_matches_composer_on_snapshots() {
     assert_eq!(total, 0, "pool ≠ Composer");
 }
 
-/// R2 : pool optimisé, règles, décisions dans l'ordre, opérations et paquets
-/// du lock identiques à Composer.
+/// R2: optimized pool, rules, decisions in order, operations and lock
+/// packages identical to Composer.
 #[test]
 fn solve_matches_composer_on_snapshots() {
     let only: Option<String> = std::env::var("VIVACE_ORACLE_FIXTURE").ok();
@@ -312,8 +312,8 @@ fn solve_matches_composer_on_snapshots() {
     assert_eq!(total, 0, "solve ≠ Composer");
 }
 
-/// Mises à jour partielles : la machinerie `skippedLoad` / `unlockPackage`
-/// de PoolBuilder, exercée sur les mêmes instantanés.
+/// Partial updates: PoolBuilder's `skippedLoad` / `unlockPackage`
+/// machinery, exercised on the same snapshots.
 #[test]
 fn partial_updates_match_composer() {
     let only: Option<String> = std::env::var("VIVACE_ORACLE_FIXTURE").ok();

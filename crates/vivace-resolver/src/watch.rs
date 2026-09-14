@@ -1,6 +1,6 @@
-//! Port de `RuleWatchGraph`, `RuleWatchNode`, `RuleWatchChain` : deux
-//! littéraux surveillés par règle (tous pour une MultiConflictRule), une
-//! chaîne par littéral, parcourue en tête de liste (`unshift`).
+//! Port of `RuleWatchGraph`, `RuleWatchNode`, `RuleWatchChain`: two watched
+//! literals per rule (all of them for a MultiConflictRule), one chain per
+//! literal, inserted at the head of the list (`unshift`).
 
 use crate::decisions::{Decisions, SolverBug};
 use crate::rule::{RuleKind, RuleSet};
@@ -59,7 +59,7 @@ impl RuleWatchNode {
 #[derive(Debug, Default)]
 pub struct RuleWatchGraph {
     pub nodes: Vec<RuleWatchNode>,
-    /// littéral → nœuds, tête de liste en premier.
+    /// literal -> nodes, head of the list first.
     chains: HashMap<i64, VecDeque<usize>>,
 }
 
@@ -68,7 +68,7 @@ impl RuleWatchGraph {
         RuleWatchGraph::default()
     }
 
-    /// `insert` : rien pour une assertion.
+    /// `insert`: nothing for an assertion.
     pub fn insert(&mut self, rules: &RuleSet, node: RuleWatchNode) {
         let rule = &rules.rules[node.rule];
         if rule.is_assertion() {
@@ -86,7 +86,7 @@ impl RuleWatchGraph {
         }
     }
 
-    /// `propagateLiteral` : rend la règle en conflit, le cas échéant.
+    /// `propagateLiteral`: returns the conflicting rule, if any.
     pub fn propagate_literal(
         &mut self,
         rules: &RuleSet,
@@ -112,8 +112,8 @@ impl RuleWatchGraph {
                         .find(|&l| l != literal && l != other_watch && !decisions.conflict(l));
                     if let Some(alternative) = alternative {
                         self.move_watch(literal, alternative, node_id, cursor);
-                        // `continue` sans `next()` : l'élément suivant a pris
-                        // cette position.
+                        // `continue` without `next()`: the next element has
+                        // taken this position.
                         continue;
                     }
                     if decisions.conflict(other_watch) {
@@ -136,8 +136,8 @@ impl RuleWatchGraph {
         Ok(None)
     }
 
-    /// `moveWatch` : retire le nœud de la chaîne courante (à la position du
-    /// curseur) et le met en tête de la chaîne cible.
+    /// `moveWatch`: removes the node from the current chain (at the cursor
+    /// position) and puts it at the head of the target chain.
     fn move_watch(&mut self, from: i64, to: i64, node_id: usize, cursor: usize) {
         self.nodes[node_id].move_watch(from, to);
         if let Some(chain) = self.chains.get_mut(&from) {

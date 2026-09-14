@@ -1,6 +1,6 @@
-//! Port de `Composer\DependencyResolver\DefaultPolicy` : le choix des
-//! versions préférées (stabilité, plus haute/plus basse, alias racine,
-//! remplacement, même vendor, identifiant de pool).
+//! Port of `Composer\DependencyResolver\DefaultPolicy`: the choice of
+//! preferred versions (stability, highest/lowest, root alias, replacement,
+//! same vendor, pool id).
 
 use crate::constraint::{Constraint, Op};
 use crate::package::Package;
@@ -14,10 +14,10 @@ pub struct DefaultPolicy {
     pub prefer_lowest: bool,
     /// `COMPOSER_PREFER_DEV_OVER_PRERELEASE`.
     pub prefer_dev_over_prerelease: bool,
-    /// `--minimal-changes` : name → version préférée.
+    /// `--minimal-changes`: name -> preferred version.
     pub preferred_versions: Option<HashMap<String, String>>,
-    /// `preferredPackageResultCachePerPool` / `sortingCachePerPool` :
-    /// (identité du pool, clé).
+    /// `preferredPackageResultCachePerPool` / `sortingCachePerPool`:
+    /// (pool identity, key).
     result_cache: HashMap<(u64, String), Vec<i64>>,
     sorting_cache: HashMap<(u64, String), Ordering>,
 }
@@ -92,7 +92,7 @@ impl DefaultPolicy {
         if let Some(cached) = self.result_cache.get(&key) {
             return cached.clone();
         }
-        // groupLiteralsByName (ordre de première apparition).
+        // groupLiteralsByName (order of first appearance).
         let mut groups: Vec<(String, Vec<i64>)> = Vec::new();
         for &literal in &literals {
             let name = &arena[pool.literal_to_package(literal)].name;
@@ -139,7 +139,7 @@ impl DefaultPolicy {
         o
     }
 
-    /// `compareByPriority` sur deux littéraux (positifs) du pool.
+    /// `compareByPriority` on two (positive) pool literals.
     pub fn compare_by_priority(
         pool: &Pool,
         arena: &[Package],
@@ -240,9 +240,9 @@ mod tests {
     use super::*;
     use crate::package::Origin;
 
-    /// Les caches sont par pool (`spl_object_id($pool)`) : la même politique
-    /// sert à l'optimiseur (pool complet) puis au solveur (pool réduit, ids
-    /// renumérotés).
+    /// Caches are per pool (`spl_object_id($pool)`): the same policy serves
+    /// the optimizer (full pool) and then the solver (reduced pool,
+    /// renumbered ids).
     #[test]
     fn caches_are_scoped_to_the_pool() {
         let mut arena = vec![Package::new(

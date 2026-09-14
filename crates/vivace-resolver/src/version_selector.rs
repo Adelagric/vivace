@@ -1,11 +1,11 @@
-//! Port de `Composer\Package\Version\VersionSelector`
-//! (docs/reference/VersionSelector.php) : le meilleur candidat d'un nom
-//! (stabilité préférée, puis version décroissante, filtré par les
-//! exigences de plateforme) et la contrainte recommandée pour `require`
-//! (`^x.y`, `@stability`, alias de branche).
+//! Port of `Composer\Package\Version\VersionSelector`
+//! (docs/reference/VersionSelector.php): the best candidate for a name
+//! (preferred stability, then descending version, filtered by platform
+//! requirements) and the recommended constraint for `require` (`^x.y`,
+//! `@stability`, branch alias).
 //!
-//! La collecte des candidats (`RepositorySet::findPackages`) est laissée à
-//! l'appelant : `find_best_candidate` reçoit les indices déjà chargés.
+//! Collecting the candidates (`RepositorySet::findPackages`) is left to the
+//! caller: `find_best_candidate` receives already loaded indices.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,8 +19,8 @@ use crate::platform::is_platform_package;
 use crate::platform_filter::PlatformRequirementFilter;
 use crate::version::{stability_rank, DEFAULT_BRANCH_ALIAS};
 
-/// `$this->platformConstraints` : nom → `[Constraint('==', version)]` des
-/// paquets du `PlatformRepository`.
+/// `$this->platformConstraints`: name -> `[Constraint('==', version)]` of
+/// the `PlatformRepository` packages.
 pub fn platform_constraints(
     platform: &[usize],
     arena: &[Package],
@@ -35,17 +35,17 @@ pub fn platform_constraints(
     out
 }
 
-/// Un avertissement `Cannot use …` ; `verbose` vaut `IOInterface::VERBOSE`
-/// (répétition pour le même couple paquet/cible, cachée en mode normal).
+/// A `Cannot use ...` warning; `verbose` means `IOInterface::VERBOSE`
+/// (a repeat for the same package/target pair, hidden in normal mode).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Warning {
     pub message: String,
     pub verbose: bool,
 }
 
-/// `findBestCandidate` sur des candidats déjà trouvés : tri par stabilité
-/// préférée puis version, filtre de plateforme, alias `9999999-dev` rendu
-/// par son paquet de base. Les avertissements sont rendus dans l'ordre.
+/// `findBestCandidate` on already found candidates: sort by preferred
+/// stability then version, platform filter, a `9999999-dev` alias returned
+/// as its base package. Warnings are returned in order.
 pub fn find_best_candidate(
     candidates: &[usize],
     arena: &[Package],
@@ -56,9 +56,9 @@ pub fn find_best_candidate(
 ) -> Option<usize> {
     let min_priority = stability_rank(preferred_stability);
     let mut sorted: Vec<usize> = candidates.to_vec();
-    // `usort` : les stabilités acceptées d'abord (version décroissante),
-    // puis les autres par stabilité croissante ; un ordre total, donc
-    // indépendant de l'algorithme de tri (stable des deux côtés).
+    // `usort`: accepted stabilities first (descending version), then the
+    // others by ascending stability; a total order, hence independent of
+    // the sorting algorithm (stable on both sides).
     sorted.sort_by(|&a, &b| {
         let (pa, pb) = (&arena[a], &arena[b]);
         let (ra, rb) = (stability_rank(pa.stability), stability_rank(pb.stability));
@@ -142,8 +142,8 @@ pub fn find_best_candidate(
     Some(idx)
 }
 
-/// `findRecommendedRequireVersion` ; `php_version` est
-/// `PHP_MAJOR.MINOR.RELEASE` du PHP local (pour la règle des `ext-*`).
+/// `findRecommendedRequireVersion`; `php_version` is the local PHP's
+/// `PHP_MAJOR.MINOR.RELEASE` (for the `ext-*` rule).
 pub fn find_recommended_require_version(
     pkg: &Package,
     arena: &[Package],
@@ -158,9 +158,9 @@ pub fn find_recommended_require_version(
     if !pkg.is_dev() {
         return transform_version(&pkg.version, &pkg.pretty_version, pkg.stability);
     }
-    // `$loader->getBranchAlias($dumper->dump($package))` : la version
-    // jolie, `extra` et `default-branch` du paquet (d'un alias : ceux du
-    // paquet aliasé, sauf la version).
+    // `$loader->getBranchAlias($dumper->dump($package))`: the package's
+    // pretty version, `extra` and `default-branch` (for an alias: those of
+    // the aliased package, except the version).
     let base = pkg.alias_of.map(|b| &arena[b]).unwrap_or(pkg);
     let mut dumped = Map::new();
     dumped.insert("version".into(), Value::String(pkg.pretty_version.clone()));
@@ -189,8 +189,8 @@ pub fn find_recommended_require_version(
     pkg.pretty_version.clone()
 }
 
-/// `transformVersion` : `x.y.z.w` → `^x.y` (`^0.y.z` sous 1.0), suffixe
-/// `@stability` hors stable ; sinon la version jolie telle quelle.
+/// `transformVersion`: `x.y.z.w` -> `^x.y` (`^0.y.z` below 1.0), suffix
+/// `@stability` when not stable; otherwise the pretty version as is.
 fn transform_version(version: &str, pretty_version: &str, stability: &str) -> String {
     let parts: Vec<&str> = version.split('.').collect();
     let fourth_ok = parts.len() == 4 && parts[3].starts_with(|c: char| c.is_ascii_digit());

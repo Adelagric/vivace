@@ -1,13 +1,13 @@
-//! Génération des fichiers d'état de vendor/composer/ :
-//! - `installed.json` : entrées du lock re-dumpées dans l'ordre de clés
-//!   canonique d'ArrayDumper (docs/reference/ArrayDumper.php), enrichies de
-//!   `version_normalized`, `installation-source` et `install-path`, triées par
-//!   (nom, version), au format JsonFile (pretty 4 espaces, slashes/unicode non
-//!   échappés) ;
-//! - `installed.php` : port de FilesystemRepository::generateInstalledVersions
-//!   + dumpToPhpCode (paquets réels, virtuels replaced/provided, racine) ;
-//! - `InstalledVersions.php` : copie vendorée du fichier de Composer 2.10.3
-//!   (c'est un fichier COPIÉ par Composer, pas généré — test de drift dédié).
+//! Generation of the vendor/composer/ state files:
+//! - `installed.json`: lock entries re-dumped in ArrayDumper's canonical key
+//!   order (docs/reference/ArrayDumper.php), enriched with
+//!   `version_normalized`, `installation-source` and `install-path`, sorted by
+//!   (name, version), in JsonFile format (pretty 4 spaces, slashes/unicode
+//!   unescaped);
+//! - `installed.php`: port of FilesystemRepository::generateInstalledVersions
+//!   + dumpToPhpCode (real packages, replaced/provided virtual ones, root);
+//! - `InstalledVersions.php`: vendored copy of the Composer 2.10.3 file (it
+//!   is a file COPIED by Composer, not generated; dedicated drift test).
 
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -19,8 +19,8 @@ use serde_json::{Map, Value};
 
 pub const INSTALLED_VERSIONS_PHP: &str = include_str!("../assets/InstalledVersions.php");
 
-/// Ordre canonique des clés d'une entrée de paquet (ArrayDumper::dump, puis
-/// install-path apposé par FilesystemRepository).
+/// Canonical key order of a package entry (ArrayDumper::dump, then
+/// install-path appended by FilesystemRepository).
 const ENTRY_KEY_ORDER: [&str; 33] = [
     "name",
     "version",
@@ -57,7 +57,7 @@ const ENTRY_KEY_ORDER: [&str; 33] = [
     "funding",
 ];
 
-/// Le paquet racine du projet (composer.json), pour installed.php.
+/// The project's root package (composer.json), for installed.php.
 #[derive(Debug, Clone)]
 pub struct RootPackage {
     pub name: String,
@@ -66,16 +66,16 @@ pub struct RootPackage {
     pub reference: Option<String>,
     pub package_type: String,
     pub dev: bool,
-    /// Alias de branche (`extra.branch-alias`) : version jolie de l'alias.
+    /// Branch alias (`extra.branch-alias`): pretty version of the alias.
     pub aliases: Vec<String>,
-    /// Le même alias, normalisé (`RootAliasPackage::getVersion()`).
+    /// The same alias, normalised (`RootAliasPackage::getVersion()`).
     pub alias_normalized: Option<String>,
 }
 
 impl RootPackage {
-    /// Comme RootPackageLoader : `version` du composer.json, sinon
-    /// COMPOSER_ROOT_VERSION, sinon devinée depuis git, sinon
-    /// `1.0.0+no-version-set` (voir root_version.rs).
+    /// Like RootPackageLoader: `version` from composer.json, else
+    /// COMPOSER_ROOT_VERSION, else guessed from git, else
+    /// `1.0.0+no-version-set` (see root_version.rs).
     pub fn detect(manifest: &Value, project_dir: &std::path::Path, dev: bool) -> RootPackage {
         let name = manifest
             .get("name")
@@ -101,7 +101,7 @@ impl RootPackage {
         }
     }
 
-    /// Sans détection VCS ni environnement (tests, cas sans projet sur disque).
+    /// Without VCS or environment detection (tests, cases with no project on disk).
     pub fn from_manifest(manifest: &Value, dev: bool) -> RootPackage {
         let mut r = RootPackage::detect(
             manifest,
@@ -119,9 +119,9 @@ impl RootPackage {
     }
 }
 
-/// `install_path` d'installed.php (dumpToPhpCode) : `__DIR__ . '/<rel>'`,
-/// ou la chaîne exportée telle quelle si Composer n'a pas trouvé de chemin
-/// relatif (absolu).
+/// `install_path` of installed.php (dumpToPhpCode): `__DIR__ . '/<rel>'`,
+/// or the string exported as is if Composer found no relative path
+/// (absolute).
 fn install_path_code(install_path: &str) -> String {
     if install_path.starts_with('/') {
         php_str(install_path)
@@ -130,7 +130,7 @@ fn install_path_code(install_path: &str) -> String {
     }
 }
 
-/// installed.json complet (texte, avec le newline final de JsonFile::write).
+/// Full installed.json (text, with JsonFile::write's trailing newline).
 pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<String> {
     let mut entries: Vec<&LockPackage> = lock.wanted_packages(with_dev).collect();
     entries.sort_by(|a, b| a.name().cmp(b.name()).then(a.version().cmp(b.version())));
@@ -143,8 +143,8 @@ pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<St
             "version_normalized".to_owned(),
             Value::String(normalize_pretty(p.version()).unwrap_or_else(|_| p.version().to_owned())),
         );
-        // ArrayDumper : la clé n'existe que si une source d'installation a
-        // été choisie — jamais pour un metapackage (rien n'est installé).
+        // ArrayDumper: the key only exists if an installation source was
+        // chosen, never for a metapackage (nothing is installed).
         if !p.is_metapackage() {
             src.insert(
                 "installation-source".to_owned(),
@@ -156,7 +156,7 @@ pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<St
                 entry.insert(key.to_owned(), v);
             }
         }
-        // Clés hors liste (rares) : après, dans leur ordre d'origine.
+        // Keys outside the list (rare): afterwards, in their original order.
         for (k, v) in src {
             entry.insert(k, v);
         }
@@ -189,14 +189,14 @@ pub fn installed_json(lock: &Lock, with_dev: bool, layout: &Layout) -> Result<St
     Ok(text)
 }
 
-/// Une entrée du tableau `versions` d'installed.php.
+/// An entry of the `versions` array of installed.php.
 #[derive(Debug, Default)]
 struct VersionEntry {
     pretty_version: Option<String>,
     version: Option<String>,
     reference: Option<Option<String>>,
     package_type: Option<String>,
-    install_path: Option<Option<String>>, // None = pas encore posé ; Some(None) = null
+    install_path: Option<Option<String>>, // None = not set yet; Some(None) = null
     dev_requirement: Option<bool>,
     aliases: Vec<String>,
     replaced: Vec<String>,
@@ -220,7 +220,7 @@ fn is_platform_package(name: &str) -> bool {
         || (n.starts_with("lib-") && !n.contains('/'))
 }
 
-/// installed.php complet (port de generateInstalledVersions + dumpToPhpCode).
+/// Full installed.php (port of generateInstalledVersions + dumpToPhpCode).
 pub fn installed_php(
     lock: &Lock,
     root: &RootPackage,
@@ -262,8 +262,8 @@ pub fn installed_php(
                 .map(|ip| install_path_code(&ip)),
         );
         entry.dev_requirement = Some(is_dev);
-        // Paquet de branche : Composer charge un AliasPackage (branch-alias ou
-        // default-branch) et installed.php liste sa version jolie.
+        // Branch package: Composer loads an AliasPackage (branch-alias or
+        // default-branch) and installed.php lists its pretty version.
         let default_branch = p
             .raw
             .get("default-branch")
@@ -276,7 +276,7 @@ pub fn installed_php(
         }
     }
 
-    // Paquets virtuels : replace puis provide (mêmes règles que Composer).
+    // Virtual packages: replace then provide (same rules as Composer).
     for p in &packages {
         let is_dev = dev_names.contains(p.name());
         for (kind, is_replace) in [("replace", true), ("provide", false)] {
@@ -308,7 +308,7 @@ pub fn installed_php(
         }
     }
 
-    // replace/provide du composer.json racine (ex. polyfills remplacés).
+    // replace/provide of the root composer.json (e.g. replaced polyfills).
     for (kind, is_replace) in [("replace", true), ("provide", false)] {
         if let Some(map) = root_manifest.get(kind).and_then(Value::as_object) {
             for (target, constraint) in map {
@@ -336,7 +336,7 @@ pub fn installed_php(
         }
     }
 
-    // La racine fait partie de versions.
+    // The root is part of versions.
     {
         let entry = versions.entry(root.name.clone()).or_default();
         entry.pretty_version = Some(root.pretty_version.clone());
@@ -353,8 +353,8 @@ pub fn installed_php(
         e.provided.sort();
     }
 
-    // Rendu au format dumpToPhpCode (4 espaces par niveau, var_export des
-    // scalaires, install_path en expression __DIR__).
+    // Rendered in dumpToPhpCode format (4 spaces per level, var_export of
+    // scalars, install_path as a __DIR__ expression).
     let mut out = String::from("<?php return array(\n");
     out.push_str("    'root' => array(\n");
     push_kv(&mut out, 2, "name", &php_str(&root.name));
@@ -534,7 +534,7 @@ mod tests {
         assert_eq!(v["packages"][1]["install-path"], Value::Null, "metapackage");
         assert_eq!(v["dev"], true);
         assert_eq!(v["dev-package-names"][0], "d/tool");
-        // Ordre des clés : version_normalized juste après version.
+        // Key order: version_normalized right after version.
         let entry_text = text.split("\"a/lib\"").nth(1).expect("entry");
         let vn = entry_text.find("version_normalized").expect("vn");
         let dist = entry_text.find("\"dist\"").expect("dist");

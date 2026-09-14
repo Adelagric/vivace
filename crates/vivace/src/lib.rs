@@ -1,11 +1,11 @@
-//! vivace — installeur Composer-compatible rapide.
-//! stdout : rien pour l'instant (réservé aux sorties machine) ; tout le
-//! narratif va sur stderr. Codes retour : 0 ok, 1 erreur d'exécution,
-//! 2 usage (clap), 3 hors-scope sans fallback possible, 4 plateforme.
+//! vivace: a fast, Composer-compatible installer.
+//! stdout: nothing for now (reserved for machine-readable output); all
+//! narrative goes to stderr. Exit codes: 0 ok, 1 runtime error,
+//! 2 usage (clap), 3 out of scope with no fallback possible, 4 platform.
 //!
-//! Le binaire `vivace` n'est qu'un appel à [`run`] : un autre programme
-//! peut embarquer les commandes telles quelles (`vivace::run(["vivace",
-//! "install", …])`) et obtenir le même code retour.
+//! The `vivace` binary is just a call to [`run`]: another program can
+//! embed the commands as they are (`vivace::run(["vivace", "install", …])`)
+//! and get the same exit code.
 
 mod require;
 
@@ -21,28 +21,28 @@ use std::sync::Arc;
     about = "Fast, Composer-compatible installer"
 )]
 enum Cli {
-    /// Installe les dépendances depuis composer.lock (drop-in `composer install`).
+    /// Install dependencies from composer.lock (drop-in `composer install`).
     Install(InstallArgs),
-    /// Régénère l'autoloader (drop-in `composer dump-autoload`).
+    /// Regenerate the autoloader (drop-in `composer dump-autoload`).
     #[command(name = "dump-autoload", alias = "dumpautoload")]
     DumpAutoload(DumpArgs),
-    /// Résout les dépendances et écrit composer.lock (drop-in `composer update`).
+    /// Resolve dependencies and write composer.lock (drop-in `composer update`).
     #[command(alias = "upgrade")]
     Update(UpdateArgs),
-    /// Retire des paquets de composer.json, puis met à jour (drop-in `composer remove`).
+    /// Remove packages from composer.json, then update (drop-in `composer remove`).
     #[command(alias = "rm")]
     Remove(RemoveArgs),
-    /// Ajoute des paquets à composer.json, puis met à jour (drop-in `composer require`).
+    /// Add packages to composer.json, then update (drop-in `composer require`).
     #[command(alias = "r")]
     Require(RequireArgs),
 }
 
 #[derive(clap::Args, Debug)]
 struct RequireArgs {
-    /// Paquets à requérir : `vendor/name`, `vendor/name:^1.0`, `vendor/name ^1.0`.
+    /// Packages to require: `vendor/name`, `vendor/name:^1.0`, `vendor/name ^1.0`.
     #[arg(value_name = "PACKAGES")]
     packages: Vec<String>,
-    /// Ajouter à require-dev.
+    /// Add to require-dev.
     #[arg(long)]
     dev: bool,
     #[arg(long)]
@@ -53,17 +53,17 @@ struct RequireArgs {
     prefer_dist: bool,
     #[arg(long)]
     prefer_install: Option<String>,
-    /// Contrainte exacte (la version trouvée) au lieu de `^x.y`.
+    /// Exact constraint (the version found) instead of `^x.y`.
     #[arg(long)]
     fixed: bool,
     #[arg(long)]
     no_suggest: bool,
     #[arg(long)]
     no_progress: bool,
-    /// Ne pas mettre à jour les dépendances (implique --no-install).
+    /// Do not update dependencies (implies --no-install).
     #[arg(long)]
     no_update: bool,
-    /// Écrire le lock sans installer.
+    /// Write the lock file without installing.
     #[arg(long)]
     no_install: bool,
     #[arg(long)]
@@ -74,19 +74,19 @@ struct RequireArgs {
     no_blocking: bool,
     #[arg(long)]
     no_security_blocking: bool,
-    /// Mise à jour avec --no-dev.
+    /// Run the update with --no-dev.
     #[arg(long)]
     update_no_dev: bool,
-    /// Mettre aussi à jour les dépendances, sauf celles requises par la racine (`-w`).
+    /// Also update dependencies, except those required by the root (`-w`).
     #[arg(short = 'w', long)]
     update_with_dependencies: bool,
-    /// Alias de --update-with-dependencies.
+    /// Alias for --update-with-dependencies.
     #[arg(long)]
     with_dependencies: bool,
-    /// Mettre aussi à jour les dépendances, exigences racine comprises (`-W`).
+    /// Also update dependencies, root requirements included (`-W`).
     #[arg(short = 'W', long)]
     update_with_all_dependencies: bool,
-    /// Alias de --update-with-all-dependencies.
+    /// Alias for --update-with-all-dependencies.
     #[arg(long)]
     with_all_dependencies: bool,
     #[arg(short = 'm', long)]
@@ -95,7 +95,7 @@ struct RequireArgs {
     prefer_stable: bool,
     #[arg(long)]
     prefer_lowest: bool,
-    /// Trier les paquets de la section (aussi `config.sort-packages`).
+    /// Sort the packages of the section (also `config.sort-packages`).
     #[arg(long)]
     sort_packages: bool,
     #[arg(short = 'o', long)]
@@ -120,7 +120,7 @@ struct RequireArgs {
     no_scripts: bool,
     #[arg(long)]
     no_plugins: bool,
-    /// Ne pas générer l'autoloader.
+    /// Do not generate the autoloader.
     #[arg(long)]
     no_autoloader: bool,
     #[arg(long)]
@@ -133,45 +133,45 @@ struct RequireArgs {
 
 #[derive(clap::Args, Debug)]
 struct RemoveArgs {
-    /// Paquets à retirer ; motifs `vendor/*` acceptés.
+    /// Packages to remove; `vendor/*` patterns accepted.
     #[arg(value_name = "PACKAGES")]
     packages: Vec<String>,
-    /// Retirer de require-dev.
+    /// Remove from require-dev.
     #[arg(long)]
     dev: bool,
-    /// Ne pas mettre à jour les dépendances (implique --no-install).
+    /// Do not update dependencies (implies --no-install).
     #[arg(long)]
     no_update: bool,
-    /// Écrire le lock sans installer.
+    /// Write the lock file without installing.
     #[arg(long)]
     no_install: bool,
-    /// Accepté pour compatibilité : vivace n'audite pas (encore).
+    /// Accepted for compatibility: vivace does not audit (yet).
     #[arg(long)]
     no_audit: bool,
-    /// Mise à jour avec --no-dev.
+    /// Run the update with --no-dev.
     #[arg(long)]
     update_no_dev: bool,
-    /// Déprécié chez Composer (comportement par défaut).
+    /// Deprecated in Composer (default behaviour).
     #[arg(short = 'w', long)]
     update_with_dependencies: bool,
-    /// Mettre aussi à jour les dépendances qui sont des exigences racine (`-W`).
+    /// Also update dependencies that are root requirements (`-W`).
     #[arg(short = 'W', long)]
     update_with_all_dependencies: bool,
-    /// Alias de --update-with-all-dependencies.
+    /// Alias for --update-with-all-dependencies.
     #[arg(long)]
     with_all_dependencies: bool,
-    /// Ne mettre à jour que les paquets listés.
+    /// Only update the listed packages.
     #[arg(long)]
     no_update_with_dependencies: bool,
-    /// Retirer tous les paquets verrouillés que rien ne requiert.
+    /// Remove every locked package that nothing requires.
     #[arg(long)]
     unused: bool,
     #[arg(long)]
     dry_run: bool,
     #[arg(short = 'm', long)]
     minimal_changes: bool,
-    /// Acceptés pour compatibilité : vivace n'est jamais interactif, n'audite
-    /// pas et n'applique pas de politique de blocage.
+    /// Accepted for compatibility: vivace is never interactive, does not
+    /// audit and applies no blocking policy.
     #[arg(short = 'n', long)]
     no_interaction: bool,
     #[arg(long)]
@@ -194,7 +194,7 @@ struct RemoveArgs {
     no_scripts: bool,
     #[arg(long)]
     no_plugins: bool,
-    /// Ne pas générer l'autoloader.
+    /// Do not generate the autoloader.
     #[arg(long)]
     no_autoloader: bool,
     #[arg(short = 'o', long)]
@@ -215,37 +215,37 @@ struct RemoveArgs {
 
 #[derive(clap::Args, Debug)]
 struct UpdateArgs {
-    /// Paquets à mettre à jour (les autres restent verrouillés) ; motifs `vendor/*` acceptés.
+    /// Packages to update (the others stay locked); `vendor/*` patterns accepted.
     #[arg(value_name = "PACKAGES")]
     packages: Vec<String>,
-    /// Mettre aussi à jour leurs dépendances, sauf celles requises par la racine (`-w`).
+    /// Also update their dependencies, except those required by the root (`-w`).
     #[arg(short = 'w', long)]
     with_dependencies: bool,
-    /// Mettre aussi à jour leurs dépendances, exigences racine comprises (`-W`).
+    /// Also update their dependencies, root requirements included (`-W`).
     #[arg(short = 'W', long)]
     with_all_dependencies: bool,
-    /// Écrire le lock sans installer.
+    /// Write the lock file without installing.
     #[arg(long)]
     no_install: bool,
-    /// Ne pas installer les paquets de require-dev (ils sont quand même résolus).
+    /// Do not install require-dev packages (they are still resolved).
     #[arg(long)]
     no_dev: bool,
-    /// Ne pas générer l'autoloader.
+    /// Do not generate the autoloader.
     #[arg(long)]
     no_autoloader: bool,
     #[arg(short = 'o', long)]
     optimize_autoloader: bool,
     #[arg(short = 'a', long)]
     classmap_authoritative: bool,
-    /// Accepté pour compatibilité : vivace n'exécute jamais les scripts.
+    /// Accepted for compatibility: vivace never runs scripts.
     #[arg(long)]
     no_scripts: bool,
     #[arg(long)]
     no_plugins: bool,
-    /// Accepté pour compatibilité : vivace n'audite pas (encore).
+    /// Accepted for compatibility: vivace does not audit (yet).
     #[arg(long)]
     no_audit: bool,
-    /// Désactiver les politiques de blocage (avis de sécurité, malware).
+    /// Disable blocking policies (security advisories, malware).
     #[arg(long)]
     no_blocking: bool,
     #[arg(long)]
@@ -270,20 +270,20 @@ struct UpdateArgs {
 
 #[derive(clap::Args, Debug)]
 struct DumpArgs {
-    /// Ne pas inclure les paquets de require-dev dans l'autoloader.
+    /// Do not include require-dev packages in the autoloader.
     #[arg(long)]
     no_dev: bool,
-    /// Classmap optimisée : tous les répertoires PSR sont scannés.
+    /// Optimized classmap: every PSR directory is scanned.
     #[arg(short = 'o', long)]
     optimize: bool,
-    /// Classmap autoritaire (implique -o).
+    /// Authoritative classmap (implies -o).
     #[arg(short = 'a', long)]
     classmap_authoritative: bool,
     #[arg(long)]
     ignore_platform_reqs: bool,
     #[arg(long = "ignore-platform-req", value_name = "REQ")]
     ignore_platform_req: Vec<String>,
-    /// Comme Composer : aucun plugin, même émulé (composer/installers).
+    /// Like Composer: no plugin, not even emulated ones (composer/installers).
     #[arg(long)]
     no_plugins: bool,
     #[arg(long, value_name = "DIR")]
@@ -292,63 +292,63 @@ struct DumpArgs {
 
 #[derive(clap::Args, Debug)]
 struct InstallArgs {
-    /// Ne pas installer les paquets de require-dev.
+    /// Do not install require-dev packages.
     #[arg(long)]
     no_dev: bool,
-    /// Ne pas générer l'autoloader.
+    /// Do not generate the autoloader.
     #[arg(long)]
     no_autoloader: bool,
-    /// Classmap optimisée (`-o`).
+    /// Optimized classmap (`-o`).
     #[arg(short = 'o', long)]
     optimize_autoloader: bool,
-    /// Classmap autoritaire (`-a`, implique -o).
+    /// Authoritative classmap (`-a`, implies -o).
     #[arg(short = 'a', long)]
     classmap_authoritative: bool,
-    /// Accepté pour compatibilité : vivace n'exécute jamais les scripts.
+    /// Accepted for compatibility: vivace never runs scripts.
     #[arg(long)]
     no_scripts: bool,
-    /// Comme Composer : aucun plugin, même émulé (composer/installers) — tout
-    /// s'installe dans vendor/.
+    /// Like Composer: no plugin, not even emulated ones (composer/installers);
+    /// everything installs into vendor/.
     #[arg(long)]
     no_plugins: bool,
-    /// Ignorer toutes les exigences de plateforme.
+    /// Ignore all platform requirements.
     #[arg(long)]
     ignore_platform_reqs: bool,
-    /// Ignorer une exigence de plateforme précise (répétable, motifs `ext-*`).
+    /// Ignore one specific platform requirement (repeatable, `ext-*` patterns).
     #[arg(long = "ignore-platform-req", value_name = "REQ")]
     ignore_platform_req: Vec<String>,
-    /// Ne jamais déléguer à composer (échoue explicitement hors scope).
+    /// Never delegate to composer (fail explicitly when out of scope).
     #[arg(long)]
     no_fallback: bool,
-    /// N'utiliser que les caches locaux (aucun accès réseau).
+    /// Only use local caches (no network access).
     #[arg(long)]
     offline: bool,
-    /// Désactiver les politiques de blocage (liste malware du lock).
+    /// Disable blocking policies (the lock's malware list).
     #[arg(long)]
     no_blocking: bool,
     #[arg(long)]
     no_security_blocking: bool,
-    /// Refusé, comme chez Composer (`composer update --no-install`).
+    /// Rejected, as in Composer (`composer update --no-install`).
     #[arg(long)]
     no_install: bool,
-    /// Vérifications (politiques, portée, plateforme) sans rien écrire ;
-    /// Composer affiche en plus les opérations.
+    /// Checks (policies, scope, platform) without writing anything;
+    /// Composer additionally prints the operations.
     #[arg(long)]
     dry_run: bool,
-    /// Répertoire du projet (défaut : répertoire courant).
+    /// Project directory (default: current directory).
     #[arg(long, value_name = "DIR")]
     working_dir: Option<PathBuf>,
-    /// Interne : lancer `composer install` en sous-processus au lieu de
-    /// remplacer le processus (quand l'appelant a encore du travail après).
+    /// Internal: run `composer install` as a subprocess instead of
+    /// replacing the process (when the caller still has work to do after).
     #[arg(skip)]
     spawn_fallback: bool,
-    /// Interne : installation qui suit une résolution (`doInstall` avec
-    /// `alreadySolved`) — le pool du lock a déjà été filtré.
+    /// Internal: install following a resolution (`doInstall` with
+    /// `alreadySolved`); the lock pool has already been filtered.
     #[arg(skip)]
     after_update: bool,
 }
 
-/// `VIVACE_TRACE=1` : durée de chaque phase sur stderr (diagnostic perf).
+/// `VIVACE_TRACE=1`: duration of each phase on stderr (perf diagnostics).
 fn trace(label: &str, since: std::time::Instant) {
     if std::env::var_os("VIVACE_TRACE").is_some() {
         eprintln!(
@@ -358,10 +358,10 @@ fn trace(label: &str, since: std::time::Instant) {
     }
 }
 
-/// Exécute une ligne de commande vivace (`args[0]` est le nom du
-/// programme, comme `std::env::args()`), erreurs d'exécution comprises :
-/// le code retour est celui du binaire. Une erreur d'usage (clap) affiche
-/// l'aide ou le message et rend 2 ; `--help`/`--version` rendent 0.
+/// Run a vivace command line (`args[0]` is the program name, as in
+/// `std::env::args()`), runtime errors included: the return value is the
+/// binary's exit code. A usage error (clap) prints the help or the message
+/// and returns 2; `--help`/`--version` return 0.
 pub fn run<I, T>(args: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -370,7 +370,7 @@ where
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(e) => {
-            // `e.exit()` écrit l'aide sur stdout, l'erreur sur stderr.
+            // `e.exit()` writes the help to stdout, the error to stderr.
             let _ = e.print();
             return e.exit_code();
         }
@@ -394,9 +394,9 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     }
 }
 
-/// Racine du projet, absolue : tous les chemins relatifs écrits dans vendor/
-/// (proxies bin, install-path) en découlent et ne doivent pas dépendre du
-/// répertoire courant.
+/// Absolute project root: every relative path written into vendor/ (bin
+/// proxies, install-path) derives from it and must not depend on the
+/// current directory.
 fn project_dir(working_dir: Option<&std::path::Path>) -> anyhow::Result<PathBuf> {
     let cwd = std::env::current_dir().context("cannot determine the current directory")?;
     Ok(match working_dir {
@@ -406,9 +406,9 @@ fn project_dir(working_dir: Option<&std::path::Path>) -> anyhow::Result<PathBuf>
     })
 }
 
-/// `Plugin::preAutoloadDump` du scaffold Drupal : écrit
-/// vendor/drupal/DrupalInstalled.php et rend les entrées de classmap à
-/// ajouter à la racine. Rien sans scaffold émulé.
+/// `Plugin::preAutoloadDump` of the Drupal scaffold: writes
+/// vendor/drupal/DrupalInstalled.php and returns the classmap entries to
+/// add to the root. Nothing without an emulated scaffold.
 fn scaffold_pre_dump(
     project: &std::path::Path,
     profile: Option<vivace_core::scaffold::Profile>,
@@ -436,8 +436,8 @@ fn scaffold_pre_dump(
     Ok(pre.root_classmap)
 }
 
-/// Profil du scaffold Drupal pour `dump-autoload` : plugin verrouillé,
-/// autorisé, et copie installée à empreinte connue.
+/// Drupal scaffold profile for `dump-autoload`: plugin locked, allowed,
+/// and installed copy with a known fingerprint.
 fn scaffold_profile_installed(
     layout: &vivace_core::layout::Layout,
     lock: &vivace_core::lock::Lock,
@@ -490,7 +490,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let lock = vivace_core::lock::Lock::read(&lock_path)?;
     trace("read manifests", t0);
 
-    // Fraîcheur du lock : même comportement que Composer, un avertissement.
+    // Lock freshness: same behaviour as Composer, a warning.
     if let (Ok(actual), Some(expected)) = (
         vivace_core::content_hash::content_hash(&manifest_text),
         lock.content_hash.as_deref(),
@@ -505,9 +505,9 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
 
     let with_dev = !args.no_dev && std::env::var("COMPOSER_NO_DEV").as_deref() != Ok("1");
 
-    // `Installer::doInstall` passe le pool du lock par le filtre de listes
-    // en portée install : une version verrouillée signalée (liste malware)
-    // n'est pas installée.
+    // `Installer::doInstall` runs the lock pool through the list filter in
+    // install scope: a flagged locked version (malware list) is not
+    // installed.
     if !args.after_update {
         let http = http_transport(&project, args.offline)?;
         let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
@@ -533,7 +533,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         trace("policy", t0);
     }
 
-    // Hors-scope → fallback exec composer (par défaut) ou erreur explicite.
+    // Out of scope: exec composer as fallback (default) or fail explicitly.
     let scope = vivace_core::scope::analyze(&project, &lock, &manifest, with_dev, !args.no_plugins);
     if !scope.is_native_ok() {
         return fallback_or_fail(args, &project, &scope);
@@ -560,7 +560,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     }
     trace("scope", t0);
 
-    // Plateforme.
+    // Platform.
     let mut ignored = args.ignore_platform_req.clone();
     if args.ignore_platform_reqs {
         ignored.push("*".to_owned());
@@ -624,7 +624,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         &project, &lock, &manifest, layout, store, fetcher, &opts,
     )) {
         Ok(r) => r,
-        // Refus d'émulation détecté avant toute écriture : vendor/ est intact.
+        // Emulation refusal detected before any write: vendor/ is intact.
         Err(vivace_core::Error::Unsupported(msg)) => {
             let scope = vivace_core::scope::ScopeReport {
                 issues: vec![vivace_core::scope::ScopeIssue::Layout(msg)],
@@ -665,7 +665,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         autoload_note = format!(", autoloader with {} classes", report.classes);
         trace("autoload dump", t0);
     }
-    // POST_INSTALL_CMD : le scaffold écrit après l'autoloader, comme le plugin.
+    // POST_INSTALL_CMD: the scaffold writes after the autoloader, like the plugin.
     if let Some(sc) = &report.scaffold {
         sc.plan
             .apply()
@@ -709,7 +709,7 @@ fn dump_autoload(
         Some(serde_json::Value::Bool(true)) => vivace_autoload::PlatformCheckMode::Full,
         _ => vivace_autoload::PlatformCheckMode::PhpOnly,
     };
-    // Comme InstallCommand : les flags OU la config du composer.json.
+    // Like InstallCommand: the flags OR the composer.json config.
     let cfg_bool = |key: &str| {
         manifest
             .get("config")
@@ -753,7 +753,7 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
     )
     .context("invalid composer.json")?;
     let lock = vivace_core::lock::Lock::read(&project.join("composer.lock"))?;
-    // Mode dev : celui de l'état installé (installed.json), comme Composer.
+    // Dev mode: that of the installed state (installed.json), like Composer.
     let installed_dev = std::fs::read_to_string(project.join("vendor/composer/installed.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
@@ -777,8 +777,9 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
             return Ok(3);
         }
     };
-    // preAutoloadDump lit le dépôt local (installed.json, dev compris si le
-    // vendor a été posé avec) : l'état installé, pas le mode de ce dump.
+    // preAutoloadDump reads the local repository (installed.json, dev
+    // included if vendor/ was laid out with it): the installed state, not
+    // this dump's mode.
     let profile =
         scaffold_profile_installed(&layout, &lock, &manifest, installed_dev, !args.no_plugins)?;
     let extra = scaffold_pre_dump(&project, profile, &lock, &manifest, installed_dev)?;
@@ -866,11 +867,11 @@ fn which_composer() -> Option<PathBuf> {
         .find(|c| c.is_file())
 }
 
-/// `composer update` : résolution (port exact du solveur de Composer),
-/// écriture du lock si ses données changent, puis `install`.
-/// Transport réseau des dépôts composer distants : le Fetcher de
-/// vivace-core (auth de Composer, retries), rendu synchrone, avec un lot
-/// parallèle (Composer : curl multi, 12 téléchargements à la fois).
+/// `composer update`: resolution (exact port of Composer's solver), lock
+/// written if its data changes, then `install`.
+/// Network transport for remote composer repositories: the vivace-core
+/// Fetcher (Composer auth, retries), made synchronous, with a parallel
+/// batch (Composer: curl multi, 12 downloads at a time).
 fn http_transport(
     project: &std::path::Path,
     offline: bool,
@@ -909,7 +910,7 @@ fn http_transport(
                 .map_err(|e| e.to_string())
         })
     };
-    // Lot en parallèle (Composer : curl multi, 12 téléchargements à la fois).
+    // Parallel batch (Composer: curl multi, 12 downloads at a time).
     let http_many: vivace_resolver::repository::HttpFetchMany = {
         let runtime = runtime.clone();
         let fetcher = fetcher.clone();
@@ -942,7 +943,7 @@ fn http_transport(
             })
         })
     };
-    // POST de formulaire (API des avis de sécurité).
+    // Form POST (security advisories API).
     let http_post: vivace_resolver::repository::HttpPost = {
         let runtime = runtime.clone();
         let fetcher = fetcher.clone();
@@ -960,7 +961,7 @@ fn http_transport(
 }
 
 fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
-    // Mise à jour partielle : `update a/b [-w|-W]` (UpdateCommand).
+    // Partial update: `update a/b [-w|-W]` (UpdateCommand).
     let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
     for p in &args.packages {
         if ["lock", "nothing", "mirrors"].contains(&p.as_str()) {
@@ -983,15 +984,15 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
         vivace_resolver::session::UpdateOptions::partial(&args.packages, transitive)
     };
     options.no_blocking = args.no_blocking || args.no_security_blocking;
-    // BaseCommand : COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST valent
-    // les options.
+    // BaseCommand: COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST count as
+    // the options.
     let prefer_stable = args.prefer_stable || env_flag("COMPOSER_PREFER_STABLE");
     let prefer_lowest = args.prefer_lowest || env_flag("COMPOSER_PREFER_LOWEST");
     run_update_resolved(args, options, prefer_stable, prefer_lowest)
 }
 
-/// Résolution, écriture du lock et installation, une fois la liste et le
-/// mode de mise à jour décidés (partagé par `update` et `remove`).
+/// Resolution, lock write and install, once the list and the update mode
+/// are decided (shared by `update` and `remove`).
 fn run_update_resolved(
     args: &UpdateArgs,
     options: vivace_resolver::session::UpdateOptions,
@@ -1005,7 +1006,7 @@ fn run_update_resolved(
     install_after_update(args)
 }
 
-/// L'installation qui suit l'écriture du lock (`Installer::run` avec
+/// The install that follows the lock write (`Installer::run` with
 /// `setInstall(true)`).
 fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     run_install(&InstallArgs {
@@ -1029,10 +1030,10 @@ fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     })
 }
 
-/// Résolution et écriture du lock : 0, ou 2 sur un ensemble insoluble.
-/// Le résultat de la résolution : le statut (0, ou 2 sur un ensemble
-/// insoluble) et les données du lock, écrites ou non (`config.lock: false`
-/// résout sans écrire — Composer garde alors un lock « virtuel »).
+/// Resolution and lock write: 0, or 2 on an unsolvable set.
+/// The outcome of the resolution: the status (0, or 2 on an unsolvable
+/// set) and the lock data, written or not (`config.lock: false` resolves
+/// without writing; Composer then keeps a "virtual" lock).
 struct Resolved {
     status: i32,
     lock: Option<serde_json::Value>,
@@ -1066,9 +1067,9 @@ fn resolve_and_lock(
     trace("prepare", t0);
     session.prefer_stable = prefer_stable;
     session.prefer_lowest = prefer_lowest;
-    // BaseCommand : COMPOSER_IGNORE_PLATFORM_REQS vaut l'option,
-    // COMPOSER_IGNORE_PLATFORM_REQ (liste séparée par des virgules) vaut la
-    // liste quand elle est vide.
+    // BaseCommand: COMPOSER_IGNORE_PLATFORM_REQS counts as the option,
+    // COMPOSER_IGNORE_PLATFORM_REQ (comma-separated list) counts as the
+    // list when it is empty.
     let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
     let ignore_all = args.ignore_platform_reqs || env_flag("COMPOSER_IGNORE_PLATFORM_REQS");
     let mut ignore_list = args.ignore_platform_req.clone();
@@ -1092,8 +1093,8 @@ fn resolve_and_lock(
     };
     eprintln!("Loading composer repositories with package information");
     eprintln!("Updating dependencies");
-    // `Installer::run` : un ensemble insoluble vaut le code 2
-    // (`SolverProblemsException`), toute autre erreur est une exception.
+    // `Installer::run`: an unsolvable set means exit code 2
+    // (`SolverProblemsException`), any other error is an exception.
     let (lock, report) = match session.update(&manifest_text, &filter) {
         Ok(r) => r,
         Err(e) if e.kind == vivace_resolver::session::SessionErrorKind::Unsolvable => {
@@ -1110,8 +1111,8 @@ fn resolve_and_lock(
     let lock_path = project.join("composer.lock");
     let mut text =
         vivace_core::phpjson::php_json_encode_with(&lock, vivace_core::phpjson::FLAGS_JSONFILE)?;
-    // `JsonFile::read` retient l'indentation du lock existant, `write` la
-    // réutilise.
+    // `JsonFile::read` remembers the existing lock's indentation, `write`
+    // reuses it.
     let old_text = std::fs::read_to_string(&lock_path).ok();
     if let Some(old) = &old_text {
         let indent = vivace_resolver::json_manipulator::detect_indenting(old)
@@ -1121,13 +1122,13 @@ fn resolve_and_lock(
         }
     }
     text.push('\n');
-    // `JsonFile::write` passe par `filePutContentsIfModified` : le fichier
-    // n'est réécrit que si ses octets changent. (`Locker::setLockData`
-    // compare aussi les données décodées, mais `{}` contre `[]` y rend la
-    // comparaison toujours fausse pour un lock ordinaire ; les octets sont
-    // le critère observable.)
+    // `JsonFile::write` goes through `filePutContentsIfModified`: the file
+    // is only rewritten if its bytes change. (`Locker::setLockData` also
+    // compares the decoded data, but `{}` versus `[]` makes that comparison
+    // always false for an ordinary lock; the bytes are the observable
+    // criterion.)
     let unchanged = old_text.as_deref() == Some(text.as_str());
-    // `config.lock: false` : Composer résout sans écrire de lock.
+    // `config.lock: false`: Composer resolves without writing a lock.
     let write_lock = config_lock_enabled(&manifest_text);
     if report.transaction.transaction.operations.is_empty() {
         eprintln!("Nothing to modify in lock file");
@@ -1161,8 +1162,8 @@ fn resolve_and_lock(
     })
 }
 
-/// `Config::get('lock')` : projet puis config globale, `"false"` et les
-/// valeurs fausses de PHP désactivent.
+/// `Config::get('lock')`: project then global config; `"false"` and PHP's
+/// falsy values disable it.
 fn config_lock_enabled(manifest_text: &str) -> bool {
     let manifest: serde_json::Value = serde_json::from_str(manifest_text).unwrap_or_default();
     match require::config_value(&manifest, "lock") {
@@ -1176,8 +1177,8 @@ fn config_lock_enabled(manifest_text: &str) -> bool {
     }
 }
 
-/// `join_all` minimal (pas de dépendance futures) : les tâches tournent
-/// concurremment sur le runtime, résultats dans l'ordre.
+/// Minimal `join_all` (no futures dependency): the tasks run concurrently
+/// on the runtime, results in order.
 async fn futures_join_all<F: std::future::Future + Send + 'static>(tasks: Vec<F>) -> Vec<F::Output>
 where
     F::Output: Send + 'static,
@@ -1190,10 +1191,10 @@ where
     out
 }
 
-/// `RemoveCommand::execute` : édition de composer.json par
-/// `JsonConfigSource`, nettoyage d'`allow-plugins`, puis mise à jour
-/// partielle (liste = paquets retirés, mode « avec dépendances sauf
-/// exigences racine » par défaut), composer.json restauré si elle échoue.
+/// `RemoveCommand::execute`: composer.json edited through
+/// `JsonConfigSource`, `allow-plugins` cleaned up, then a partial update
+/// (list = removed packages, "with dependencies except root requirements"
+/// mode by default), composer.json restored if it fails.
 fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     use vivace_resolver::config_source::{composer_file, JsonConfigSource};
     let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
@@ -1209,9 +1210,10 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     }
     let project = project_dir(args.working_dir.as_deref())?;
     let file = composer_file(&project);
-    // Le nom affiché par Composer est le chemin tel que `Factory` le donne.
-    // Un autre manifeste (`COMPOSER=alt.json`, lock `alt.lock`) n'est pas
-    // suivi par la résolution : refusé plutôt que résolu sur composer.json.
+    // The name Composer displays is the path as `Factory` gives it. An
+    // alternate manifest (`COMPOSER=alt.json`, lock `alt.lock`) is not
+    // followed by the resolution: rejected rather than resolved against
+    // composer.json.
     let file_label = match std::env::var("COMPOSER").ok().map(|f| f.trim().to_owned()) {
         Some(f) if !f.is_empty() && f != "composer.json" && f != "./composer.json" => {
             anyhow::bail!("COMPOSER={f}: an alternate manifest is not supported yet");
@@ -1232,7 +1234,7 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     }
     let mut packages: Vec<String> = args.packages.iter().map(|p| p.to_lowercase()).collect();
 
-    // `Locker::isLocked` : un lock lisible qui a une clé `packages`.
+    // `Locker::isLocked`: a readable lock that has a `packages` key.
     let locked_data: Option<serde_json::Value> =
         std::fs::read_to_string(project.join("composer.lock"))
             .ok()
@@ -1261,9 +1263,9 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     if args.update_with_dependencies {
         eprintln!("You are using the deprecated option \"update-with-dependencies\". This is now default behaviour. The --no-update-with-dependencies option can be used to remove a package without its dependencies.");
     }
-    // `$composer[$linkType][strtolower($name)] = $name` : les clés en
-    // minuscules s'ajoutent au tableau décodé (les originales restent, et
-    // `array_keys` les voit toutes).
+    // `$composer[$linkType][strtolower($name)] = $name`: the lowercase keys
+    // are added to the decoded array (the originals stay, and `array_keys`
+    // sees them all).
     let keyed = |section: &str| -> Vec<(String, String)> {
         let mut keys: Vec<(String, String)> = Vec::new();
         if let Some(m) = manifest.get(section).and_then(|v| v.as_object()) {
@@ -1330,8 +1332,8 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         return Ok(0);
     }
 
-    // `allow-plugins` : la config fusionnée (projet puis globale) ; les
-    // entrées dont la clé est un paquet retiré partent du composer.json.
+    // `allow-plugins`: the merged config (project then global); entries
+    // whose key is a removed package are dropped from composer.json.
     let updated: serde_json::Value = std::fs::read_to_string(&file)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -1354,9 +1356,9 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // `Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS_NO_ROOT_REQUIRE` par
-    // défaut ; `COMPOSER_WITH_ALL_DEPENDENCIES` vaut l'option (BaseCommand),
-    // `COMPOSER_WITH_DEPENDENCIES` n'a pas d'option ici.
+    // `Request::UPDATE_LISTED_WITH_TRANSITIVE_DEPS_NO_ROOT_REQUIRE` by
+    // default; `COMPOSER_WITH_ALL_DEPENDENCIES` counts as the option
+    // (BaseCommand), `COMPOSER_WITH_DEPENDENCIES` has no option here.
     let transitive = if args.update_with_all_dependencies
         || args.with_all_dependencies
         || env_flag("COMPOSER_WITH_ALL_DEPENDENCIES")
@@ -1374,7 +1376,7 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         flags.push_str(" --with-dependencies");
     }
     eprintln!("Running composer update {}{flags}", packages.join(" "));
-    // `setUpdateAllowList` seulement si un lock existe.
+    // `setUpdateAllowList` only if a lock exists.
     let mut options = if locked_data.is_some() {
         vivace_resolver::session::UpdateOptions::partial(&packages, transitive)
     } else {
@@ -1402,24 +1404,24 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         no_fallback: args.no_fallback,
         offline: args.offline,
         working_dir: args.working_dir.clone(),
-        // La suite de `remove` (restauration, vérification du dépôt local)
-        // doit tourner même si l'installation est rendue à Composer.
+        // The rest of `remove` (restore, local repository check) must run
+        // even if the install is handed over to Composer.
         spawn_fallback: true,
     };
-    // `remove` n'a pas d'option prefer-stable/lowest : seul le manifeste
-    // compte.
-    // Une exception (transport, manifeste invalide) remonte sans
-    // restauration ; seul un statut non nul d'`Installer::run` restaure.
+    // `remove` has no prefer-stable/lowest option: only the manifest
+    // counts.
+    // An exception (transport, invalid manifest) propagates without a
+    // restore; only a non-zero status from `Installer::run` restores.
     let status = run_update_resolved(&update_args, options, false, false)?;
     if status != 0 {
         eprintln!("\nRemoval failed, reverting {file_label} to its original content.");
         std::fs::write(&file, &backup)
             .with_context(|| format!("cannot restore {}", file.display()))?;
     }
-    // Le paquet est-il encore dans le dépôt local ? Celui-ci est
-    // vendor/composer/installed.json moins les paquets dont le chemin
-    // d'installation n'existe plus (`Factory::purgePackages` via
-    // `LibraryInstaller::isInstalled`) ; un metapackage compte toujours.
+    // Is the package still in the local repository? That repository is
+    // vendor/composer/installed.json minus the packages whose install path
+    // no longer exists (`Factory::purgePackages` via
+    // `LibraryInstaller::isInstalled`); a metapackage always counts.
     for package in &packages {
         if locally_installed(&project, package) {
             eprintln!("Removal failed, {package} is still present, it may be required by another package. See `composer why {package}`.");
@@ -1430,7 +1432,7 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
 }
 
 /// `$composer->getRepositoryManager()->getLocalRepository()->findPackages($name)`
-/// non vide.
+/// is non-empty.
 fn locally_installed(project: &std::path::Path, name: &str) -> bool {
     let composer_dir = project.join("vendor/composer");
     let Some(installed) = std::fs::read_to_string(composer_dir.join("installed.json"))
@@ -1459,8 +1461,8 @@ fn locally_installed(project: &std::path::Path, name: &str) -> bool {
     })
 }
 
-/// `remove --unused` : les paquets du lock (hors dev) que ni la racine ni
-/// un paquet atteint depuis elle ne requièrent, dans l'ordre du lock.
+/// `remove --unused`: the lock's packages (non-dev) required neither by
+/// the root nor by any package reachable from it, in lock order.
 fn unused_locked_packages(manifest: &serde_json::Value, lock: &serde_json::Value) -> Vec<String> {
     use std::collections::BTreeSet;
     let mut required: BTreeSet<String> = BTreeSet::new();

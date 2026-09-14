@@ -1,5 +1,5 @@
-//! Port de `Composer\Filter\PlatformRequirementFilter\*` : ce que
-//! `--ignore-platform-reqs` / `--ignore-platform-req` retirent des règles.
+//! Port of `Composer\Filter\PlatformRequirementFilter\*`: what
+//! `--ignore-platform-reqs` / `--ignore-platform-req` remove from the rules.
 
 use crate::constraint::{Constraint, Op};
 use crate::intervals;
@@ -68,8 +68,8 @@ impl PlatformRequirementFilter {
         }
     }
 
-    /// `IgnoreListPlatformRequirementFilter::filterConstraint` ; identité
-    /// pour les deux autres filtres (qui n'ont pas cette méthode).
+    /// `IgnoreListPlatformRequirementFilter::filterConstraint`; identity for
+    /// the other two filters (which do not have this method).
     pub fn filter_constraint(
         &self,
         req: &str,

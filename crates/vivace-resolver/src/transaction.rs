@@ -1,6 +1,6 @@
-//! Port de `Transaction` et `LockTransaction` : les paquets retenus par les
-//! décisions, les opérations par rapport au lock présent, les paquets à
-//! écrire dans le lock.
+//! Port of `Transaction` and `LockTransaction`: the packages kept by the
+//! decisions, the operations relative to the present lock, the packages to
+//! write into the lock.
 
 use crate::decisions::Decisions;
 use crate::package::Package;
@@ -24,7 +24,7 @@ pub enum Operation {
 fn abandoned(p: &Package) -> (bool, Option<String>) {
     match p.raw.get("abandoned") {
         None | Some(Value::Null) => (false, None),
-        // `(bool) "0"` est faux, mais `getReplacementPackage()` rend "0".
+        // `(bool) "0"` is false, but `getReplacementPackage()` returns "0".
         Some(Value::String(s)) => (!s.is_empty() && s != "0", Some(s.clone())),
         Some(Value::Bool(b)) => (*b, None),
         Some(Value::Number(n)) => (n.as_f64() != Some(0.0), None),
@@ -53,7 +53,7 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    /// `__construct($presentPackages, $resultPackages)` (index d'arène).
+    /// `__construct($presentPackages, $resultPackages)` (arena indices).
     pub fn new(arena: &[Package], present: &[usize], result: &[usize]) -> Transaction {
         // setResultPackageMaps
         let mut result_map: Vec<usize> = result.to_vec();
@@ -263,11 +263,11 @@ impl Transaction {
 /// `Composer\DependencyResolver\LockTransaction`.
 pub struct LockTransaction {
     pub transaction: Transaction,
-    /// `resultPackages['all'|'non-dev'|'dev']` (index d'arène).
+    /// `resultPackages['all'|'non-dev'|'dev']` (arena indices).
     pub all: Vec<usize>,
     pub non_dev: Vec<usize>,
     pub dev: Vec<usize>,
-    /// `presentMap` (index d'arène, ordre lock puis fixés).
+    /// `presentMap` (arena indices, lock order then fixed packages).
     pub present: Vec<usize>,
 }
 
@@ -290,7 +290,7 @@ impl LockTransaction {
         request: &Request,
         decisions: &Decisions,
     ) -> LockTransaction {
-        // getPresentMap : lock puis fixés (sans doublon).
+        // getPresentMap: lock then fixed packages (no duplicates).
         let mut present: Vec<usize> = Vec::new();
         for idx in request
             .locked_repository
@@ -304,7 +304,7 @@ impl LockTransaction {
             }
         }
         let unlockable: HashSet<usize> = request.fixed_packages.iter().copied().collect();
-        // setResultPackages : `foreach ($decisions …)` de la dernière à la première.
+        // setResultPackages: `foreach ($decisions ...)` from last to first.
         let mut all = Vec::new();
         let mut non_dev = Vec::new();
         for i in (0..decisions.len()).rev() {
@@ -346,7 +346,7 @@ impl LockTransaction {
         }
     }
 
-    /// `getNewLockPackages($devMode)` sans `updateMirrors`.
+    /// `getNewLockPackages($devMode)` without `updateMirrors`.
     pub fn new_lock_packages(&self, arena: &[Package], dev_mode: bool) -> Vec<usize> {
         let source = if dev_mode { &self.dev } else { &self.non_dev };
         source
@@ -356,7 +356,7 @@ impl LockTransaction {
             .collect()
     }
 
-    /// `getAliases($aliases)` : les alias racine utilisés, triés par nom.
+    /// `getAliases($aliases)`: the root aliases in use, sorted by name.
     pub fn aliases(
         &self,
         arena: &[Package],

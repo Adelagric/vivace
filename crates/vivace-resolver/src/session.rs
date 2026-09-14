@@ -1,8 +1,8 @@
-//! Mise en place d'un `update` : ce que `Factory::createComposer` puis
-//! `Installer::doUpdate` font avant `createPool` — racine, plateforme,
-//! dépôts (config globale + composer.json, mêmes règles de fusion que
-//! `Config::merge`), dépôt du lock, `Request`. Réplique de
-//! tools/oracle-pool.php côté Rust.
+//! Setup of an `update`: what `Factory::createComposer` then
+//! `Installer::doUpdate` do before `createPool`: root, platform,
+//! repositories (global config + composer.json, same merge rules as
+//! `Config::merge`), lock repository, `Request`. Rust-side replica of
+//! tools/oracle-pool.php.
 
 use crate::constraint::{Constraint, Op};
 use crate::lockfile::{dump_package, lock_data, lock_packages, LockInput};
@@ -32,9 +32,9 @@ pub struct SessionError {
     pub kind: SessionErrorKind,
 }
 
-/// Ce que Composer fait de l'erreur : un ensemble insoluble
-/// (`SolverProblemsException`) vaut le code retour 2 de `Installer::run`,
-/// tout le reste est une exception qui remonte.
+/// What Composer does with the error: an unsolvable set
+/// (`SolverProblemsException`) means exit code 2 from `Installer::run`,
+/// everything else is an exception that propagates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionErrorKind {
     Other,
@@ -56,7 +56,7 @@ impl From<PoolError> for SessionError {
     }
 }
 
-/// `Config::$repositories` après fusion : (nom ou index, définition).
+/// `Config::$repositories` after merging: (name or index, definition).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepoConfig {
     pub key: RepoKey,
@@ -69,8 +69,8 @@ pub enum RepoKey {
     Indexed(u64),
 }
 
-/// `Config::merge` pour la clé `repositories`, appliquée dans l'ordre
-/// (défauts, config globale, composer.json).
+/// `Config::merge` for the `repositories` key, applied in order (defaults,
+/// global config, composer.json).
 pub fn merge_repositories(current: &mut Vec<RepoConfig>, new: &Value) {
     static PACKAGIST: OnceLock<Regex> = OnceLock::new();
     let entries: Vec<(RepoKey, Value)> = match new {
@@ -95,8 +95,8 @@ pub fn merge_repositories(current: &mut Vec<RepoConfig>, new: &Value) {
         return;
     }
     current.reverse();
-    // `disableRepoByName((string) $name)` : une chaîne numérique retombe
-    // sur la clé entière du tableau PHP.
+    // `disableRepoByName((string) $name)`: a numeric string falls back to
+    // the integer key of the PHP array.
     let disable = |current: &mut Vec<RepoConfig>, name: &str| {
         let key = match name.parse::<u64>() {
             Ok(i) if i.to_string() == name => RepoKey::Indexed(i),
@@ -178,19 +178,19 @@ pub fn merge_repositories(current: &mut Vec<RepoConfig>, new: &Value) {
     current.reverse();
 }
 
-/// Configuration fusionnée utile au résolveur.
+/// Merged configuration relevant to the resolver.
 #[derive(Debug, Clone, Default)]
 pub struct MergedConfig {
     pub repositories: Vec<RepoConfig>,
-    /// `config.platform` (la dernière définition remplace la précédente).
+    /// `config.platform` (the last definition replaces the previous one).
     pub platform: Map<String, Value>,
-    /// `config.policy` et `config.audit` fusionnés (`Config::merge`).
+    /// `config.policy` and `config.audit` merged (`Config::merge`).
     pub policy: crate::policy_config::RawPolicyConfig,
 }
 
 impl MergedConfig {
-    /// Défauts + `COMPOSER_HOME/config.json` + composer.json, comme
-    /// `Factory::createConfig` puis `Config::merge($localConfig)`.
+    /// Defaults + `COMPOSER_HOME/config.json` + composer.json, like
+    /// `Factory::createConfig` then `Config::merge($localConfig)`.
     pub fn load(
         manifest: &Value,
         composer_home: Option<&Path>,
@@ -218,8 +218,8 @@ impl MergedConfig {
     }
 
     fn merge(&mut self, config: &Value) {
-        // `$this->config['platform'] = $val` : toute valeur remplace la
-        // précédente (`[]` ou `null` la vident).
+        // `$this->config['platform'] = $val`: any value replaces the
+        // previous one (`[]` or `null` clear it).
         if let Some(platform) = config.get("config").and_then(|c| c.get("platform")) {
             self.platform = platform.as_object().cloned().unwrap_or_default();
         }
@@ -232,22 +232,23 @@ impl MergedConfig {
     }
 }
 
-/// Résultat d'un `solve` : la transaction et de quoi le comparer à Composer.
+/// Result of a `solve`: the transaction and what is needed to compare it
+/// with Composer.
 pub struct SolveReport {
     pub transaction: LockTransaction,
-    /// Littéraux décidés, dans l'ordre.
+    /// Decided literals, in order.
     pub decisions: Vec<i64>,
     /// `getRuleSetSize()`.
     pub rules: usize,
-    /// Règles apprises (conflits rencontrés).
+    /// Learned rules (conflicts encountered).
     pub learned: usize,
 }
 
-/// Options d'un `update` (`Installer::setUpdateAllowList`,
+/// Options of an `update` (`Installer::setUpdateAllowList`,
 /// `setUpdateAllowTransitiveDependencies`).
 #[derive(Debug, Clone, Default)]
 pub struct UpdateOptions {
-    /// `composer update a/b c/*` : motifs, en minuscules et dédoublonnés.
+    /// `composer update a/b c/*`: patterns, lowercased and deduplicated.
     pub allow_list: Vec<String>,
     pub transitive: Option<crate::pool::UpdateMode>,
     /// `--no-blocking` / `--no-security-blocking`.
@@ -255,7 +256,7 @@ pub struct UpdateOptions {
 }
 
 impl UpdateOptions {
-    /// `Installer::setUpdateAllowList` : `strtolower` + `array_unique`.
+    /// `Installer::setUpdateAllowList`: `strtolower` + `array_unique`.
     pub fn partial(packages: &[String], transitive: crate::pool::UpdateMode) -> UpdateOptions {
         let mut allow_list: Vec<String> = Vec::new();
         for p in packages {
@@ -272,11 +273,11 @@ impl UpdateOptions {
     }
 }
 
-/// Tout ce que `Installer::doUpdate` a en main juste avant `createPool`.
+/// Everything `Installer::doUpdate` has at hand right before `createPool`.
 pub struct UpdateSession {
     pub arena: Vec<Package>,
     pub root: RootPackage,
-    /// Index d'arène de la racine figée (requires vidés) et de son alias.
+    /// Arena indices of the fixed root (requires emptied) and of its alias.
     pub fixed_root: usize,
     pub fixed_root_alias: Option<usize>,
     pub platform: Vec<usize>,
@@ -285,13 +286,13 @@ pub struct UpdateSession {
     pub request: Request,
     pub config: MergedConfig,
     pub dev_mode: bool,
-    /// `--prefer-stable` / `--prefer-lowest` de la ligne de commande.
+    /// `--prefer-stable` / `--prefer-lowest` from the command line.
     pub prefer_stable: bool,
     pub prefer_lowest: bool,
-    /// `PHP_MAJOR.MINOR.RELEASE` du PHP sondé (règle `ext-*` du
+    /// `PHP_MAJOR.MINOR.RELEASE` of the probed PHP (`ext-*` rule of the
     /// `VersionSelector`).
     pub php_version: String,
-    /// Les politiques de blocage du pool (`createPolicyConfig`).
+    /// The pool blocking policies (`createPolicyConfig`).
     pub policy_config: crate::policy_config::PolicyConfig,
 }
 
@@ -304,7 +305,7 @@ impl UpdateSession {
         Self::prepare_with(project_dir, composer_home, dev_mode, None)
     }
 
-    /// Comme `prepare`, avec un transport réseau pour les dépôts `https://`.
+    /// Like `prepare`, with a network transport for `https://` repositories.
     pub fn prepare_with(
         project_dir: &Path,
         composer_home: Option<&Path>,
@@ -314,8 +315,8 @@ impl UpdateSession {
         Self::prepare_full(project_dir, composer_home, dev_mode, http, None)
     }
 
-    /// Comme `prepare_with`, avec le répertoire `cache-repo-dir` de Composer
-    /// pour le cache des métadonnées (lu et écrit au format de Composer).
+    /// Like `prepare_with`, with Composer's `cache-repo-dir` directory for
+    /// the metadata cache (read and written in Composer's format).
     pub fn prepare_full(
         project_dir: &Path,
         composer_home: Option<&Path>,
@@ -333,8 +334,8 @@ impl UpdateSession {
         )
     }
 
-    /// Comme `prepare_full`, avec la liste d'autorisation d'une mise à jour
-    /// partielle (`composer update a/b`).
+    /// Like `prepare_full`, with the allow list of a partial update
+    /// (`composer update a/b`).
     pub fn prepare_update(
         project_dir: &Path,
         composer_home: Option<&Path>,
@@ -357,9 +358,9 @@ impl UpdateSession {
             .map_err(|e| SessionError::new(e.0))?;
         let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
         let probed = probe().map_err(|e| SessionError::new(e.0))?;
-        // `PHP_MAJOR_VERSION.PHP_MINOR_VERSION.PHP_RELEASE_VERSION` du PHP
-        // réel (pas de `config.platform.php` ici) : les trois premiers
-        // nombres de PHP_VERSION.
+        // `PHP_MAJOR_VERSION.PHP_MINOR_VERSION.PHP_RELEASE_VERSION` of the
+        // actual PHP (no `config.platform.php` here): the first three
+        // numbers of PHP_VERSION.
         let php_version = probed
             .iter()
             .find(|p| p.get("name").and_then(Value::as_str) == Some("php"))
@@ -399,9 +400,9 @@ impl UpdateSession {
             platform.push(arena.len() - 1);
         }
 
-        // `Locker::isLocked()` = fichier présent et `isset($data['packages'])` ;
-        // un lock illisible est ignoré pour une mise à jour complète
-        // (`doUpdate` avale la ParsingException), fatal pour une partielle.
+        // `Locker::isLocked()` = file present and `isset($data['packages'])`;
+        // an unreadable lock is ignored for a full update (`doUpdate`
+        // swallows the ParsingException), fatal for a partial one.
         let lock_path = project_dir.join("composer.lock");
         let lock: Option<Value> = if lock_path.is_file() {
             let text = std::fs::read_to_string(&lock_path)
@@ -427,8 +428,8 @@ impl UpdateSession {
             None => None,
         };
 
-        // `$stabilityFlags[$package->getName()] = STABILITIES[parseStability($package->getVersion())]`
-        // : la version vue est celle de l'alias racine s'il existe.
+        // `$stabilityFlags[$package->getName()] = STABILITIES[parseStability($package->getVersion())]`:
+        // the version seen is that of the root alias if there is one.
         let mut stability_flags = root.stability_flags.clone();
         let root_version = match fixed_root_alias {
             Some(a) => arena[a].version.clone(),
@@ -439,10 +440,10 @@ impl UpdateSession {
             stability_rank(parse_stability(&root_version)),
         );
 
-        // `createRepositorySet(forUpdate)` et `requirePackagesForUpdate(…, true)`
-        // prennent toujours require + require-dev, `--no-dev` ou pas ; et avec
-        // un alias racine, `$this->package` est le RootAliasPackage, dont les
-        // liens `self.version` visent la version de l'alias.
+        // `createRepositorySet(forUpdate)` and `requirePackagesForUpdate(..., true)`
+        // always take require + require-dev, `--no-dev` or not; and with a
+        // root alias, `$this->package` is the RootAliasPackage, whose
+        // `self.version` links target the alias version.
         let mut root_requires: OrderedMap<Constraint> = OrderedMap::default();
         let requires = match &root.branch_alias {
             Some((normalized, pretty)) => {
@@ -476,7 +477,7 @@ impl UpdateSession {
             set.add_repository(Repository::Locked(ids.clone()));
         }
 
-        // `Installer::run` : une mise à jour partielle exige un lock.
+        // `Installer::run`: a partial update requires a lock.
         if partial_update && locked.is_none() {
             return Err(SessionError::new(
                 "Cannot update only a partial set of packages without a lock file present. Run `composer update` to generate a lock file.",
@@ -532,7 +533,7 @@ impl UpdateSession {
         Ok(self.set.create_pool(&mut self.request, &mut self.arena)?)
     }
 
-    /// `Installer::createPolicy(true, …)` sans `--minimal-changes`.
+    /// `Installer::createPolicy(true, ...)` without `--minimal-changes`.
     pub fn policy(&self) -> DefaultPolicy {
         DefaultPolicy::new(
             self.prefer_stable || self.root.prefer_stable,
@@ -541,8 +542,8 @@ impl UpdateSession {
         )
     }
 
-    /// `Installer::extractDevPackages` : second solve sans les require-dev,
-    /// sur les seuls paquets retenus par le premier, pour classer
+    /// `Installer::extractDevPackages`: second solve without the
+    /// require-dev, on only the packages kept by the first, to classify
     /// `packages` / `packages-dev`.
     pub fn extract_dev_packages(
         &mut self,
@@ -553,8 +554,8 @@ impl UpdateSession {
         if self.root.package.dev_requires.is_empty() {
             return Ok(());
         }
-        // `$resultRepo` : chaque paquet rechargé depuis son dump (`load`, un
-        // par un), alias de branche recréés → [alias, base].
+        // `$resultRepo`: each package reloaded from its dump (`load`, one at
+        // a time), branch aliases recreated -> [alias, base].
         let dumps: Vec<Value> = transaction
             .new_lock_packages(&self.arena, false)
             .iter()
@@ -563,8 +564,8 @@ impl UpdateSession {
         let result_ids =
             crate::loader::load_packages(&dumps, Origin::Result, &mut self.arena, false)
                 .map_err(|e| SessionError::new(e.0))?;
-        // createPoolWithAllPackages : racine, plateforme, résultat, avec les
-        // alias racine appliqués au passage.
+        // createPoolWithAllPackages: root, platform, result, with the root
+        // aliases applied along the way.
         let mut members: Vec<usize> = Vec::new();
         members.extend(self.fixed_root_alias);
         members.push(self.fixed_root);
@@ -595,7 +596,7 @@ impl UpdateSession {
             }
         }
         let pool = Pool::new(pool_packages, Vec::new(), &self.arena);
-        // createRequest (sans lock) + requirePackagesForUpdate(…, false).
+        // createRequest (without lock) + requirePackagesForUpdate(..., false).
         let mut request = Request::new(None);
         if let Some(a) = self.fixed_root_alias {
             request.fix_package(a);
@@ -643,7 +644,7 @@ impl UpdateSession {
         out
     }
 
-    /// `Locker::setLockData(...)` : le JSON du lock à écrire.
+    /// `Locker::setLockData(...)`: the lock JSON to write.
     pub fn lock_json(
         &self,
         transaction: &LockTransaction,
@@ -686,9 +687,8 @@ impl UpdateSession {
         }))
     }
 
-    /// `composer update --no-install` complet : solve, extraction des
-    /// paquets dev, données du lock. Rend le JSON du lock et le rapport du
-    /// premier solve.
+    /// Full `composer update --no-install`: solve, dev package extraction,
+    /// lock data. Returns the lock JSON and the report of the first solve.
     pub fn update(
         &mut self,
         manifest_text: &str,
@@ -727,9 +727,9 @@ impl UpdateSession {
             SolveError::Bug(b) => SessionError::new(b),
         })?;
         lap("solve", &t);
-        // `ValidatingArrayLoader::validatePackage` sur chaque paquet retenu
-        // (`LockTransaction::setResultPackages`) : une SecurityException
-        // arrête l'update.
+        // `ValidatingArrayLoader::validatePackage` on every kept package
+        // (`LockTransaction::setResultPackages`): a SecurityException stops
+        // the update.
         for &idx in &report.transaction.all {
             crate::lockfile::validate_package(&self.arena[idx]).map_err(SessionError::new)?;
         }
@@ -743,12 +743,12 @@ impl UpdateSession {
         Ok((lock, report))
     }
 
-    /// `createPool` avec le PoolOptimizer (sauf `COMPOSER_POOL_OPTIMIZER=0`),
-    /// comme `Installer::doUpdate`.
-    /// `RepositorySet::findPackages($name)` sur le `CompositeRepository` de
-    /// `require` (plateforme puis dépôts du projet, tous fusionnés) avec un
-    /// `RepositorySet` réduit à `minimum-stability` (pas de drapeaux) ;
-    /// `ignore_stability` vaut `ALLOW_UNACCEPTABLE_STABILITIES`.
+    /// `createPool` with the PoolOptimizer (unless `COMPOSER_POOL_OPTIMIZER=0`),
+    /// like `Installer::doUpdate`.
+    /// `RepositorySet::findPackages($name)` on the `CompositeRepository` of
+    /// `require` (platform then project repositories, all merged) with a
+    /// `RepositorySet` reduced to `minimum-stability` (no flags);
+    /// `ignore_stability` means `ALLOW_UNACCEPTABLE_STABILITIES`.
     pub fn find_packages_for_require(
         &mut self,
         name: &str,
@@ -805,8 +805,8 @@ impl UpdateSession {
         Ok(PoolOptimizer::new().optimize(&self.request, &pool, &self.arena, policy))
     }
 
-    /// `buildPool` jusqu'aux filtres de politique (avis, listes), sans
-    /// l'optimiseur ; leurs avertissements vont dans `pool.warnings`.
+    /// `buildPool` up to the policy filters (advisories, lists), without the
+    /// optimizer; their warnings go into `pool.warnings`.
     pub fn create_filtered_pool(&mut self) -> Result<Pool, SessionError> {
         let mut pool = self.create_pool()?;
         let before = pool.len();
@@ -844,8 +844,8 @@ impl UpdateSession {
         Ok(pool)
     }
 
-    /// `Solver::solve` sur ce pool ; rend la transaction et les décisions
-    /// (littéraux du pool, dans l'ordre) avec la taille du jeu de règles.
+    /// `Solver::solve` on this pool; returns the transaction and the
+    /// decisions (pool literals, in order) with the rule set size.
     pub fn solve(
         &self,
         pool: &Pool,
@@ -867,11 +867,11 @@ impl UpdateSession {
     }
 }
 
-/// Le passage du pool du lock par le filtre de listes en portée `install`
-/// (`Installer::doInstall` → `createFilterListPoolFilter(BLOCK_SCOPE_INSTALL)`) :
-/// les problèmes de Composer pour les versions verrouillées retirées, dans
-/// l'ordre du lock ; vide quand rien ne bloque. Les avertissements
-/// (dépôts injoignables ignorés) sont rendus à part.
+/// Running the lock pool through the filter list filter in `install` scope
+/// (`Installer::doInstall` -> `createFilterListPoolFilter(BLOCK_SCOPE_INSTALL)`):
+/// Composer's problems for the removed locked versions, in lock order;
+/// empty when nothing blocks. Warnings (ignored unreachable repositories)
+/// are returned separately.
 pub fn install_policy_problems(
     project_dir: &Path,
     composer_home: Option<&Path>,
@@ -897,15 +897,15 @@ pub fn install_policy_problems(
         .map_err(|e| SessionError::new(format!("composer.lock: {e}")))?;
     let lock: Value = serde_json::from_str(&lock_text)
         .map_err(|e| SessionError::new(format!("composer.lock: {e}")))?;
-    // Seuls les dépôts `composer` portent des listes ; les autres types
-    // (que `install` accepte par ailleurs) sont laissés de côté ici.
+    // Only `composer` repositories carry lists; the other types (which
+    // `install` otherwise accepts) are left aside here.
     let mut repositories: Vec<Repository> = Vec::new();
     for repo in &config.repositories {
         if repo.definition.get("type").and_then(Value::as_str) != Some("composer") {
             continue;
         }
-        // Le constructeur ne fait aucune entrée-sortie : une erreur ici est
-        // une erreur de configuration, fatale comme chez Composer.
+        // The constructor does no I/O: an error here is a configuration
+        // error, fatal as in Composer.
         repositories.push(open_repository_with(
             repo,
             http.as_ref(),
@@ -941,8 +941,8 @@ pub fn install_policy_problems(
     Ok((problems, warnings))
 }
 
-/// `RepositoryManager::createRepository` restreint aux dépôts `composer`
-/// joignables en `file://` (les autres types arrivent avec R3).
+/// `RepositoryManager::createRepository` restricted to `composer`
+/// repositories reachable over `file://` (the other types come with R3).
 fn open_repository(
     repo: &RepoConfig,
     http: Option<&HttpTransports>,
@@ -951,9 +951,9 @@ fn open_repository(
     open_repository_with(repo, http, cache_repo_dir, false)
 }
 
-/// `for_policies` : un dépôt avec `only`/`exclude`/`canonical`
-/// (`FilterRepository`) est accepté — les chemins des avis et des listes
-/// respectent `only`/`exclude` — là où la résolution le refuse encore.
+/// `for_policies`: a repository with `only`/`exclude`/`canonical`
+/// (`FilterRepository`) is accepted (the advisory and list paths honor
+/// `only`/`exclude`) where resolution still rejects it.
 fn open_repository_with(
     repo: &RepoConfig,
     http: Option<&HttpTransports>,
@@ -1042,14 +1042,14 @@ mod tests {
     fn merges_repositories_like_composer_config() {
         let mut cfg = MergedConfig::load(&json!({}), None).unwrap();
         assert_eq!(names(&cfg.repositories), vec!["packagist.org"]);
-        // config globale : snapshot + packagist désactivé.
+        // global config: snapshot + packagist disabled.
         cfg.merge(&json!({"repositories": {"snapshot": {"type": "composer", "url": "file:///s"}, "packagist.org": false}}));
         assert_eq!(names(&cfg.repositories), vec!["snapshot"]);
-        // composer.json : un dépôt indexé passe devant.
+        // composer.json: an indexed repository goes first.
         cfg.merge(&json!({"repositories": [{"type": "composer", "url": "https://packages.drupal.org/8"}]}));
         assert_eq!(names(&cfg.repositories), vec!["0", "snapshot"]);
-        // deux indexés alors que 0 existe : 1 prend sa clé, 0 est renuméroté
-        // (`$this->repositories[] = …`) ; les nouveaux restent devant.
+        // two indexed ones while 0 exists: 1 takes its key, 0 is renumbered
+        // (`$this->repositories[] = ...`); the new ones stay in front.
         cfg.merge(
             &json!({"repositories": [{"type": "vcs", "url": "a"}, {"type": "vcs", "url": "b"}]}),
         );

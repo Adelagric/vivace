@@ -1,8 +1,8 @@
-//! Port de `Composer\Semver\VersionParser` (docs/reference/resolver/
-//! semver-VersionParser.php) : `normalize`, `normalizeBranch`,
-//! `parseStability`, `parseNumericAliasPrefix`, avec les mêmes expressions
-//! PCRE (pcre2), pour que chaque chaîne acceptée ou refusée le soit
-//! exactement comme Composer.
+//! Port of `Composer\Semver\VersionParser` (docs/reference/resolver/
+//! semver-VersionParser.php): `normalize`, `normalizeBranch`,
+//! `parseStability`, `parseNumericAliasPrefix`, with the same PCRE
+//! expressions (pcre2), so that every string is accepted or rejected exactly
+//! as Composer does.
 
 use pcre2::bytes::{Regex, RegexBuilder};
 use std::sync::OnceLock;
@@ -16,7 +16,7 @@ pub const DEFAULT_BRANCH_ALIAS: &str = "9999999-dev";
 #[error("{0}")]
 pub struct VersionError(pub String);
 
-/// Regex PCRE compilée une fois ; `caseless` = modificateur `i`.
+/// PCRE regex compiled once; `caseless` = the `i` modifier.
 pub(crate) fn regex(
     cell: &'static OnceLock<Regex>,
     pattern: &str,
@@ -30,7 +30,7 @@ pub(crate) fn regex(
     })
 }
 
-/// Groupe capturé (`""` si absent), comme `$matches[$i]` en PHP.
+/// Captured group (`""` if absent), like `$matches[$i]` in PHP.
 pub(crate) fn group<'a>(caps: &pcre2::bytes::Captures<'a>, i: usize) -> &'a str {
     caps.get(i)
         .map(|m| std::str::from_utf8(m.as_bytes()).unwrap_or(""))
@@ -39,8 +39,8 @@ pub(crate) fn group<'a>(caps: &pcre2::bytes::Captures<'a>, i: usize) -> &'a str 
 
 /// `VersionParser::parseStability`.
 pub fn parse_stability(version: &str) -> &'static str {
-    // Chemin rapide : une version purement numérique (`1.2.3.0`) est
-    // stable — aucun modificateur ne peut s'y trouver.
+    // Fast path: a purely numeric version (`1.2.3.0`) is stable, no
+    // modifier can appear in it.
     if !version.is_empty() && version.bytes().all(|c| c.is_ascii_digit() || c == b'.') {
         return "stable";
     }
@@ -70,7 +70,7 @@ pub fn parse_stability(version: &str) -> &'static str {
     "stable"
 }
 
-/// `BasePackage::STABILITIES` : rang numérique d'une stabilité.
+/// `BasePackage::STABILITIES`: numeric rank of a stability.
 pub fn stability_rank(stability: &str) -> i32 {
     match stability {
         "stable" => 0,
@@ -141,7 +141,7 @@ pub fn normalize(version: &str, full_version: Option<&str>) -> Result<String, Ve
         ),
         true,
     );
-    // Les groupes sont copiés (Vec<String>) : `version` est réassignée ensuite.
+    // Groups are copied (Vec<String>): `version` is reassigned afterwards.
     let capture_groups = |re: &Regex, subject: &str| -> Option<Vec<String>> {
         let caps = re.captures(subject.as_bytes()).ok()??;
         Some(
@@ -218,7 +218,7 @@ pub fn normalize(version: &str, full_version: Option<&str>) -> Result<String, Ve
     )))
 }
 
-/// `preg_quote` (sans délimiteur).
+/// `preg_quote` (without delimiter).
 pub fn preg_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -275,8 +275,8 @@ pub fn normalize_default_branch(name: &str) -> String {
     }
 }
 
-/// `VersionParser::parseNameVersionPairs` : `a/b:^1`, `a/b=^1`, `a/b ^1`
-/// (deux arguments, sauf si le second ressemble à un nom de paquet).
+/// `VersionParser::parseNameVersionPairs`: `a/b:^1`, `a/b=^1`, `a/b ^1`
+/// (two arguments, unless the second looks like a package name).
 pub fn parse_name_version_pairs(pairs: &[String]) -> Vec<(String, Option<String>)> {
     static SPLIT: OnceLock<Regex> = OnceLock::new();
     static WILDCARD: OnceLock<Regex> = OnceLock::new();
@@ -320,8 +320,8 @@ pub fn parse_name_version_pairs(pairs: &[String]) -> Vec<(String, Option<String>
     result
 }
 
-/// `{^\d+(\.\d+)?$}` : une contrainte « trop stricte » (`1` ou `1.2`),
-/// dont `require` avertit.
+/// `{^\d+(\.\d+)?$}`: an "overly strict" constraint (`1` or `1.2`) that
+/// `require` warns about.
 pub fn looks_too_strict(constraint: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
     regex(&RE, r"^\d+(\.\d+)?$", false)

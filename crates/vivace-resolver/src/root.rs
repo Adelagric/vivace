@@ -1,9 +1,9 @@
-//! Le paquet racine tel que `RootPackageLoader::load` le construit
-//! (docs/reference/RootPackageLoader.php) : version (composer.json,
-//! COMPOSER_ROOT_VERSION, git, sinon `1.0.0+no-version-set`), liens,
-//! `minimum-stability`, `prefer-stable`, et les trois extractions depuis les
-//! contraintes des requires : alias (`X as Y`), drapeaux de stabilité (`@dev`,
-//! branches), références (`#sha`).
+//! The root package as `RootPackageLoader::load` builds it
+//! (docs/reference/RootPackageLoader.php): version (composer.json,
+//! COMPOSER_ROOT_VERSION, git, otherwise `1.0.0+no-version-set`), links,
+//! `minimum-stability`, `prefer-stable`, and the three extractions from the
+//! require constraints: aliases (`X as Y`), stability flags (`@dev`,
+//! branches), references (`#sha`).
 
 use crate::constraint::parse_constraints;
 use crate::loader;
@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 
 pub const DEFAULT_PRETTY_VERSION: &str = "1.0.0+no-version-set";
 
-/// `RootPackage::getAliases()` : un alias déclaré dans un require.
+/// `RootPackage::getAliases()`: an alias declared in a require.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootAlias {
     pub package: String,
@@ -31,14 +31,14 @@ pub struct RootAlias {
 #[derive(Debug, Clone)]
 pub struct RootPackage {
     pub package: Package,
-    /// `RootAliasPackage` : (alias normalisé, alias joli) si `extra.branch-alias` s'applique.
+    /// `RootAliasPackage`: (normalized alias, pretty alias) if `extra.branch-alias` applies.
     pub branch_alias: Option<(String, String)>,
     pub minimum_stability: String,
     pub prefer_stable: bool,
-    /// name → rang de stabilité (`BasePackage::STABILITIES`).
+    /// name -> stability rank (`BasePackage::STABILITIES`).
     pub stability_flags: BTreeMap<String, i32>,
     pub aliases: Vec<RootAlias>,
-    /// name → référence git.
+    /// name -> git reference.
     pub references: BTreeMap<String, String>,
     /// `config.platform`.
     pub platform_overrides: Map<String, Value>,
@@ -50,8 +50,8 @@ pub struct RootPackage {
 pub struct RootError(pub String);
 
 impl RootPackage {
-    /// Charge composer.json (déjà parsé) avec la version racine devinée par
-    /// vivace-core (même règles que RootPackageLoader + VersionGuesser).
+    /// Loads composer.json (already parsed) with the root version guessed by
+    /// vivace-core (same rules as RootPackageLoader + VersionGuesser).
     pub fn load(manifest: &Value, project_dir: &Path) -> Result<RootPackage, RootError> {
         let mut config = manifest
             .as_object()
@@ -95,11 +95,11 @@ impl RootPackage {
         for links in [&package.requires, &package.dev_requires] {
             let map: Vec<(String, String)> = links
                 .iter()
-                // `$link->getConstraint()->getPrettyString()` : pour
-                // `self.version`, la version de la racine.
+                // `$link->getConstraint()->getPrettyString()`: for
+                // `self.version`, the root version.
                 .map(|l| {
                     let pretty = if l.pretty_constraint == "self.version" {
-                        // Version jolie au moment du parseLinks (avant
+                        // Pretty version at parseLinks time (before
                         // `setPrettyVersion('1.0.0+no-version-set')`).
                         if auto_versioned {
                             "1.0.0".to_owned()
@@ -151,8 +151,8 @@ impl RootPackage {
         })
     }
 
-    /// Liens `require` + `require-dev` (`array_merge` : les dev-requires
-    /// écrasent une cible en double, à sa position).
+    /// `require` + `require-dev` links (`array_merge`: dev-requires
+    /// overwrite a duplicate target, at its position).
     pub fn all_requires(&self) -> Links {
         let mut out = self.package.requires.clone();
         for l in self.package.dev_requires.iter() {
@@ -205,7 +205,7 @@ fn extract_aliases(
     Ok(())
 }
 
-/// `preg_split` des contraintes en morceaux « et » à travers les « ou ».
+/// `preg_split` of the constraints into "and" pieces across the "or"s.
 fn split_constraints(req: &str) -> Vec<String> {
     static OR: OnceLock<Regex> = OnceLock::new();
     static AND: OnceLock<Regex> = OnceLock::new();
@@ -309,7 +309,7 @@ fn extract_references(requires: &[(String, String)], references: &mut BTreeMap<S
     }
 }
 
-/// Contrainte d'un require racine (avec `as` : la partie source).
+/// Constraint of a root require (with `as`: the source part).
 pub fn root_constraint(pretty: &str) -> Result<crate::constraint::Constraint, VersionError> {
     Ok(parse_constraints(pretty)?.constraint)
 }

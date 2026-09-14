@@ -1,13 +1,13 @@
-//! Où chaque paquet du lock s'installe : `vendor/<name>[/<target-dir>]` par
-//! LibraryInstaller, ou le chemin que composer/installers lui donne quand ce
-//! plugin est verrouillé, autorisé (`config.allow-plugins`) et porté
-//! (`installers::table_for`). Une seule passe, avant de toucher au disque ;
-//! tout ce qui n'est pas reproductible à l'octet près devient une `issue`
-//! (→ fallback Composer).
+//! Where each package of the lock gets installed: `vendor/<name>[/<target-dir>]`
+//! by LibraryInstaller, or the path composer/installers gives it when that
+//! plugin is locked, allowed (`config.allow-plugins`) and ported
+//! (`installers::table_for`). A single pass, before touching the disk;
+//! anything not reproducible byte for byte becomes an `issue` (falls back to
+//! Composer).
 //!
-//! Le chemin est relatif à la racine du projet et normalisé (`normalizePath`,
-//! sans barre finale) — c'est la forme que Composer normalise avant de
-//! calculer `install-path` (FilesystemRepository::write).
+//! The path is relative to the project root and normalised (`normalizePath`,
+//! no trailing slash); that is the form Composer normalises before computing
+//! `install-path` (FilesystemRepository::write).
 
 use crate::installers::{self, Placement};
 use crate::lock::{Lock, LockPackage};
@@ -18,27 +18,27 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Layout {
-    /// Racine du projet, absolue (telle que donnée, pas canonicalisée : les
-    /// chemins relatifs qui en découlent ne dépendent pas des symlinks).
+    /// Project root, absolute (as given, not canonicalised: the relative paths
+    /// derived from it do not depend on symlinks).
     root: PathBuf,
-    /// name → chemin relatif au projet (absent pour un metapackage).
+    /// name -> project-relative path (absent for a metapackage).
     paths: BTreeMap<String, String>,
-    /// Tag de composer/installers émulé, si le plugin est actif.
+    /// Emulated composer/installers tag, if the plugin is active.
     pub installers_tag: Option<String>,
-    /// Paquets installés (installed.json) à retirer : name → répertoire
-    /// relatif à effacer (`vendor/<name>` ou la cible du plugin), après
-    /// vérification que Composer recalculerait le même chemin aujourd'hui.
+    /// Installed packages (installed.json) to remove: name -> relative
+    /// directory to delete (`vendor/<name>` or the plugin's target), after
+    /// checking that Composer would recompute the same path today.
     removals: BTreeMap<String, String>,
 }
 
-/// Verdict d'`allow-plugins` pour un paquet, comme PluginManager en mode non
-/// interactif.
+/// `allow-plugins` verdict for a package, like PluginManager in
+/// non-interactive mode.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PluginVerdict {
     Allowed,
-    /// Explicitement refusé : Composer saute le plugin avec un avertissement.
+    /// Explicitly refused: Composer skips the plugin with a warning.
     Blocked,
-    /// Aucune règle ne le couvre : Composer s'arrête en erreur.
+    /// No rule covers it: Composer stops with an error.
     Unlisted,
 }
 
@@ -52,7 +52,7 @@ fn absolutize(dir: &Path) -> PathBuf {
     }
 }
 
-/// `BasePackage::packageNameToRegexp` : `{^<quote(pattern) avec * → .*>$}i`.
+/// `BasePackage::packageNameToRegexp`: `{^<quote(pattern) with * -> .*>$}i`.
 fn pattern_matches(pattern: &str, name: &str) -> bool {
     let p = pattern.to_ascii_lowercase();
     let n = name.to_ascii_lowercase();
@@ -79,11 +79,11 @@ fn pattern_matches(pattern: &str, name: &str) -> bool {
     true
 }
 
-/// `Config::merge` pour `allow-plugins` : la valeur projet remplace la
-/// globale sauf si les deux sont des objets — alors
-/// `array_merge($projet, $global, $projet)` : les clés du projet d'abord,
-/// dans son ordre, puis celles que seule la config globale apporte. L'ordre
-/// compte : la première règle qui correspond décide.
+/// `Config::merge` for `allow-plugins`: the project value replaces the global
+/// one unless both are objects, in which case
+/// `array_merge($project, $global, $project)`: the project keys first, in
+/// their order, then those only the global config brings. Order matters: the
+/// first matching rule decides.
 pub fn merged_allow_plugins(project: Option<&Value>, global: Option<&Value>) -> Option<Value> {
     match (project, global) {
         (Some(Value::Object(p)), Some(Value::Object(g))) => {
@@ -101,7 +101,7 @@ pub fn merged_allow_plugins(project: Option<&Value>, global: Option<&Value>) -> 
     }
 }
 
-/// `PluginManager::parseAllowedPlugins` + `isPluginAllowed` (non interactif).
+/// `PluginManager::parseAllowedPlugins` + `isPluginAllowed` (non-interactive).
 fn plugin_verdict(allow: Option<&Value>, package: &str) -> PluginVerdict {
     match allow {
         Some(Value::Bool(true)) => PluginVerdict::Allowed,
@@ -122,7 +122,7 @@ fn plugin_verdict(allow: Option<&Value>, package: &str) -> PluginVerdict {
     }
 }
 
-/// Verdict pour `package` sous la config du projet fusionnée avec la globale.
+/// Verdict for `package` under the project config merged with the global one.
 pub fn plugin_allowed(manifest: &Value, package: &str) -> PluginVerdict {
     let allow = merged_allow_plugins(
         manifest.get("config").and_then(|c| c.get("allow-plugins")),
@@ -131,7 +131,7 @@ pub fn plugin_allowed(manifest: &Value, package: &str) -> PluginVerdict {
     plugin_verdict(allow.as_ref(), package)
 }
 
-/// `config.allow-plugins` de COMPOSER_HOME/config.json.
+/// `config.allow-plugins` from COMPOSER_HOME/config.json.
 pub fn global_allow_plugins() -> Option<Value> {
     let path = crate::fetch::composer_home()?.join("config.json");
     let text = std::fs::read_to_string(path).ok()?;
@@ -139,7 +139,7 @@ pub fn global_allow_plugins() -> Option<Value> {
     v.get("config")?.get("allow-plugins").cloned()
 }
 
-/// Chemin relatif au projet d'un paquet géré par LibraryInstaller.
+/// Project-relative path of a package handled by LibraryInstaller.
 fn vendor_rel(name: &str, target_dir: Option<&str>) -> String {
     match target_dir {
         Some(t) => format!("vendor/{name}/{t}"),
@@ -147,7 +147,7 @@ fn vendor_rel(name: &str, target_dir: Option<&str>) -> String {
     }
 }
 
-/// Décision pour un paquet (nom, type, extra) sous la configuration courante.
+/// Decision for a package (name, type, extra) under the current configuration.
 fn place(
     table: Option<&installers::Table>,
     root_extra: Option<&Value>,
@@ -190,8 +190,8 @@ fn place(
 }
 
 impl Layout {
-    /// Tout dans vendor/ (sans plugin de layout) — pour les tests et les
-    /// chemins de code qui n'ont pas de lock plugin-aware.
+    /// Everything in vendor/ (no layout plugin), for tests and code paths
+    /// that have no plugin-aware lock.
     pub fn vendor_only(project_dir: &Path, lock: &Lock, with_dev: bool) -> Layout {
         let mut paths = BTreeMap::new();
         for p in lock.wanted_packages(with_dev) {
@@ -207,8 +207,8 @@ impl Layout {
         }
     }
 
-    /// La passe complète : plugin, allow-plugins, chemins, cibles refusées,
-    /// et plan de suppression pour les paquets d'installed.json disparus.
+    /// The full pass: plugin, allow-plugins, paths, refused targets, and the
+    /// removal plan for installed.json packages that went away.
     pub fn resolve(
         project_dir: &Path,
         lock: &Lock,
@@ -222,11 +222,11 @@ impl Layout {
         let previous = installed_packages(&root);
         let has_state = root.join("vendor/composer/installed.json").is_file();
 
-        // Le plugin est-il actif ? Composer le charge depuis installed.json
-        // (PluginManager::loadInstalledPlugins) et l'installe en premier dans
-        // la transaction ; vivace n'émule que les états où les deux vues
-        // concordent — un plugin présent d'un seul côté (ajouté, retiré, ou
-        // en require-dev avec --no-dev) est une transition laissée à Composer.
+        // Is the plugin active? Composer loads it from installed.json
+        // (PluginManager::loadInstalledPlugins) and installs it first in the
+        // transaction; vivace only emulates the states where both views
+        // agree. A plugin present on one side only (added, removed, or in
+        // require-dev with --no-dev) is a transition left to Composer.
         let lock_plugin = wanted.iter().find(|p| p.name() == "composer/installers");
         let prev_plugin = previous
             .iter()
@@ -286,7 +286,7 @@ impl Layout {
                         table = Some(t);
                     }
                 }
-                PluginVerdict::Blocked => {} // Composer l'ignore : tout dans vendor/
+                PluginVerdict::Blocked => {} // Composer ignores it: everything in vendor/
                 PluginVerdict::Unlisted => {
                     return Err(vec![
                         "composer/installers is a plugin not covered by config.allow-plugins (Composer would refuse to run it)"
@@ -317,7 +317,7 @@ impl Layout {
             }
         }
 
-        // Cibles en conflit : deux paquets au même endroit, ou l'un sous l'autre.
+        // Conflicting targets: two packages at the same place, or one under the other.
         if table.is_some() {
             let mut by_path: BTreeMap<&str, &str> = BTreeMap::new();
             for (name, rel) in &paths {
@@ -343,9 +343,9 @@ impl Layout {
             }
         }
 
-        // Plan de suppression : Composer recalcule le chemin d'un paquet retiré
-        // avec la configuration courante ; on n'efface que si ce chemin est
-        // celui où le paquet a été posé (installed.json), sinon fallback.
+        // Removal plan: Composer recomputes the path of a removed package with
+        // the current configuration; we only delete if that path is the one
+        // where the package was laid out (installed.json), else fallback.
         let mut removals = BTreeMap::new();
         let wanted_names: std::collections::BTreeSet<&str> =
             wanted.iter().map(|p| p.name()).collect();
@@ -389,8 +389,8 @@ impl Layout {
             );
             match expected {
                 Ok(rel) if rel == old_rel => {
-                    // LibraryInstaller::removeCode efface getPackageBasePath :
-                    // vendor/<name> sans le target-dir.
+                    // LibraryInstaller::removeCode deletes getPackageBasePath:
+                    // vendor/<name> without the target-dir.
                     let dir = if rel.starts_with("vendor/") {
                         format!("vendor/{name}")
                     } else {
@@ -421,18 +421,18 @@ impl Layout {
         &self.root
     }
 
-    /// Chemin relatif au projet (None : metapackage ou paquet inconnu).
+    /// Project-relative path (None: metapackage or unknown package).
     pub fn rel(&self, name: &str) -> Option<&str> {
         self.paths.get(name).map(String::as_str)
     }
 
-    /// Chemin absolu d'installation.
+    /// Absolute install path.
     pub fn abs(&self, name: &str) -> Option<PathBuf> {
         self.rel(name).map(|r| self.root.join(r))
     }
 
-    /// Racine à vider avant de poser le paquet : `vendor/<name>` (target-dir
-    /// compris) pour LibraryInstaller, la cible elle-même sinon.
+    /// Root to empty before laying out the package: `vendor/<name>`
+    /// (target-dir included) for LibraryInstaller, the target itself otherwise.
     pub fn package_root(&self, name: &str) -> Option<PathBuf> {
         let rel = self.rel(name)?;
         Some(if rel.starts_with("vendor/") {
@@ -442,7 +442,7 @@ impl Layout {
         })
     }
 
-    /// `install-path` d'installed.json / installed.php : relatif à
+    /// `install-path` of installed.json / installed.php: relative to
     /// vendor/composer (`findShortestPath($repoDir, $path, true)`).
     pub fn install_path(&self, name: &str) -> Option<String> {
         let rel = self.rel(name)?;
@@ -454,7 +454,7 @@ impl Layout {
         ))
     }
 
-    /// Paquets d'installed.json à retirer, avec leur chemin absolu.
+    /// installed.json packages to remove, with their absolute path.
     pub fn removals(&self) -> impl Iterator<Item = (&str, PathBuf)> {
         self.removals
             .iter()
@@ -509,7 +509,7 @@ mod tests {
         assert!(!pattern_matches("composer/*", "other/installers"));
         assert!(pattern_matches("*/installers", "composer/installers"));
         let rules = json!({"composer/*": false, "composer/installers": true});
-        // Première règle qui matche : `composer/*` → refusé.
+        // First matching rule: `composer/*` -> refused.
         assert_eq!(
             plugin_verdict(Some(&rules), "composer/installers"),
             PluginVerdict::Blocked
@@ -639,7 +639,7 @@ mod tests {
             let err = Layout::resolve(&root(), &lock, &m, true, true).expect_err(needle);
             assert!(err.iter().any(|e| e.contains(needle)), "{needle}: {err:?}");
         }
-        // Le projet racine : template vide.
+        // The root project: empty template.
         let m =
             json!({"config": {"allow-plugins": true}, "extra": {"installer-paths": {"": ["a/b"]}}});
         let err = Layout::resolve(&root(), &lock, &m, true, true).expect_err("root");
@@ -678,8 +678,8 @@ mod tests {
             "{err:?}"
         );
 
-        // Sans le paquet déplacé, le plan est accepté ; un paquet à target-dir
-        // est effacé à vendor/<name> (getPackageBasePath), pas au sous-chemin.
+        // Without the moved package, the plan is accepted; a target-dir package
+        // is deleted at vendor/<name> (getPackageBasePath), not at the sub-path.
         std::fs::write(
             vc.join("installed.json"),
             json!({"packages": [
@@ -726,7 +726,7 @@ mod tests {
             pkg("a/lib", "library", "1.0"),
         ]));
 
-        // Ajout : installed.json sans le plugin, lock avec, et un paquet concerné.
+        // Addition: installed.json without the plugin, lock with it, and an affected package.
         std::fs::write(
             vc.join("installed.json"),
             json!({"packages": [{"name": "a/wp", "version": "1.0", "type": "wordpress-plugin", "install-path": "../a/wp"}], "dev": true, "dev-package-names": []}).to_string(),
@@ -735,7 +735,7 @@ mod tests {
         let err =
             Layout::resolve(dir.path(), &with_plugin, &manifest, true, true).expect_err("added");
         assert!(err[0].contains("added to an existing install"), "{err:?}");
-        // Même ajout sans paquet d'un type pris par le plugin : rien à transiter.
+        // Same addition without a package of a type taken by the plugin: nothing to transition.
         std::fs::write(
             vc.join("installed.json"),
             json!({"packages": [{"name": "a/lib", "version": "1.0", "type": "library", "install-path": "../a/lib"}], "dev": true, "dev-package-names": []}).to_string(),
@@ -743,7 +743,7 @@ mod tests {
         .expect("write");
         assert!(Layout::resolve(dir.path(), &libs_only, &manifest, true, true).is_ok());
 
-        // Retrait : installed.json avec le plugin et un paquet hors vendor/, lock sans.
+        // Removal: installed.json with the plugin and a package outside vendor/, lock without.
         std::fs::write(
             vc.join("installed.json"),
             json!({"packages": [
@@ -759,12 +759,12 @@ mod tests {
             "{err:?}"
         );
 
-        // --no-plugins : Composer ignore le plugin des deux côtés, tout en vendor/.
+        // --no-plugins: Composer ignores the plugin on both sides, everything in vendor/.
         let l =
             Layout::resolve(dir.path(), &with_plugin, &manifest, true, false).expect("no-plugins");
         assert_eq!(l.rel("a/wp"), Some("vendor/a/wp"));
         assert!(l.installers_tag.is_none());
-        // Pas d'état sur disque : le lock décide (install frais).
+        // No on-disk state: the lock decides (fresh install).
         std::fs::remove_file(vc.join("installed.json")).expect("rm");
         let l = Layout::resolve(dir.path(), &with_plugin, &manifest, true, true).expect("fresh");
         assert_eq!(l.rel("a/wp"), Some("wp-content/plugins/wp"));

@@ -1,6 +1,6 @@
-//! Spike M0 — chiffrer le plafond de gain sur fetch + extraction.
-//! Jetable : pas de bin proxies, pas d'installed.*, pas d'autoload, pas d'auth.
-//! Usage : spike <fixture-dir> [--offline]   (extrait dans <fixture-dir>/vendor-spike)
+//! M0 spike: measure the upper bound of the gain on fetch + extraction.
+//! Throwaway: no bin proxies, no installed.*, no autoload, no auth.
+//! Usage: spike <fixture-dir> [--offline]   (extracts into <fixture-dir>/vendor-spike)
 
 use sha1::{Digest, Sha1};
 use std::io::Read;
@@ -32,7 +32,7 @@ fn cache_path(cache: &Path, d: &Dist) -> PathBuf {
     cache.join("files").join(&d.name).join(format!("{sha}.zip"))
 }
 
-/// Extraction avec strip du dossier racine unique des dists GitHub.
+/// Extraction that strips the single root directory of GitHub dists.
 fn extract(zip_bytes: &[u8], dest: &Path) -> anyhow::Result<()> {
     let mut ar = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))?;
     std::fs::create_dir_all(dest)?;
@@ -40,7 +40,7 @@ fn extract(zip_bytes: &[u8], dest: &Path) -> anyhow::Result<()> {
         let mut f = ar.by_index(i)?;
         let Some(raw) = f.enclosed_name() else {
             continue;
-        }; // zip-slip: rejeté par enclosed_name
+        }; // zip-slip: rejected by enclosed_name
         let stripped: PathBuf = raw.components().skip(1).collect();
         if stripped.as_os_str().is_empty() {
             continue;

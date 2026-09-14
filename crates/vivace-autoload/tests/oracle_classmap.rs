@@ -1,7 +1,7 @@
-//! Différentiel de la détection de classes contre l'oracle réel :
-//! `Composer\ClassMapGenerator\PhpFileParser::findClasses` (via le phar), sur
-//! TOUS les fichiers .php/.inc des vendors des fixtures laravel et sylius
-//! (≈ 50k fichiers, un seul process PHP). Toute divergence est listée.
+//! Diff of class detection against the real oracle:
+//! `Composer\ClassMapGenerator\PhpFileParser::findClasses` (via the phar), on
+//! ALL .php/.inc files of the laravel and sylius fixture vendors (about 50k
+//! files, a single PHP process). Every divergence is listed.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -116,7 +116,7 @@ fn find_classes_matches_oracle_on_fixtures() {
     for f in &files {
         let key = f.to_string_lossy().into_owned();
         let Some(Some(exp)) = expected.get(&key) else {
-            continue; // l'oracle a levé (fichier illisible/binaire) : non comparé
+            continue; // the oracle threw (unreadable/binary file): not compared
         };
         let contents = std::fs::read(f).expect("read");
         let ours: Vec<String> = finder

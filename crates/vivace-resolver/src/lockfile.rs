@@ -1,6 +1,6 @@
-//! Écriture du lock : port d'`ArrayDumper::dump` (depuis les métadonnées
-//! brutes et le modèle, avec les normalisations d'`ArrayLoader`), de
-//! `Locker::lockPackages` et de `Locker::setLockData` ; encodage JsonFile.
+//! Lock writing: port of `ArrayDumper::dump` (from the raw metadata and the
+//! model, with `ArrayLoader`'s normalizations), of `Locker::lockPackages`
+//! and of `Locker::setLockData`; JsonFile encoding.
 
 use crate::package::Package;
 use crate::root::RootAlias;
@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
-/// `empty()` PHP.
+/// PHP `empty()`.
 pub fn php_empty(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) | Some(Value::Bool(false)) => true,
@@ -21,13 +21,13 @@ pub fn php_empty(v: Option<&Value>) -> bool {
     }
 }
 
-/// `is_array` PHP sur du JSON décodé en tableau associatif.
+/// PHP `is_array` on JSON decoded as an associative array.
 fn is_array(v: &Value) -> bool {
     matches!(v, Value::Array(_) | Value::Object(_))
 }
 
-/// Comparaison PHP 8 de deux chaînes (`sort`/`strcmp` : les chaînes
-/// numériques se comparent en nombres, les autres octet à octet).
+/// PHP 8 comparison of two strings (`sort`/`strcmp`: numeric strings
+/// compare as numbers, the others byte by byte).
 pub fn php_compare_strings(a: &str, b: &str) -> Ordering {
     fn numeric(s: &str) -> Option<f64> {
         let t = s.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
@@ -50,8 +50,8 @@ pub fn php_compare_strings(a: &str, b: &str) -> Ordering {
     }
 }
 
-/// Tri par insertion stable (zend_insert_sort pour n ≤ 16 ; au-delà
-/// zend_sort devient hybride et un ordre non total peut différer).
+/// Stable insertion sort (zend_insert_sort for n <= 16; beyond that
+/// zend_sort becomes hybrid and a non-total order may differ).
 fn insertion_sort<T>(items: &mut [T], cmp: impl Fn(&T, &T) -> Ordering) {
     for i in 1..items.len() {
         let mut j = i;
@@ -90,9 +90,9 @@ fn ksort(map: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// `ArrayLoader` : `new \DateTime($time, UTC)` puis `format(DATE_RFC3339)`.
-/// Les formes reconnues : horodatage entier, ISO 8601 avec ou sans fuseau,
-/// `Y-m-d H:i:s`, `Y-m-d`. Une forme inconnue est ignorée (exception avalée).
+/// `ArrayLoader`: `new \DateTime($time, UTC)` then `format(DATE_RFC3339)`.
+/// Recognized forms: integer timestamp, ISO 8601 with or without timezone,
+/// `Y-m-d H:i:s`, `Y-m-d`. An unknown form is ignored (exception swallowed).
 pub fn release_date(time: &Value) -> Option<String> {
     let text = match time {
         Value::String(s) => s.clone(),
@@ -109,13 +109,13 @@ pub fn release_date(time: &Value) -> Option<String> {
     parse_datetime(&text)
 }
 
-/// (année, mois, jour, heure, minute, seconde).
+/// (year, month, day, hour, minute, second).
 type Civil = (i64, u32, u32, u32, u32, u32);
 
 fn civil_from_unix(ts: i64) -> Civil {
     let days = ts.div_euclid(86_400);
     let secs = ts.rem_euclid(86_400);
-    // Algorithme de Howard Hinnant (days → civil).
+    // Howard Hinnant's algorithm (days -> civil).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -181,7 +181,7 @@ fn parse_datetime(text: &str) -> Option<String> {
         if h > 23 || mi > 59 || s > 60 {
             return None;
         }
-        // Fraction de seconde ignorée par le format de sortie.
+        // Fractional seconds are ignored by the output format.
         if b.get(pos) == Some(&b'.') {
             pos += 1;
             while b.get(pos).is_some_and(u8::is_ascii_digit) {
@@ -214,7 +214,7 @@ fn parse_datetime(text: &str) -> Option<String> {
     Some(format_rfc3339((year, month, day, h, mi, s), &offset))
 }
 
-/// `ArrayDumper::dump($package)` pour un paquet non racine.
+/// `ArrayDumper::dump($package)` for a non-root package.
 pub fn dump_package(p: &Package) -> Map<String, Value> {
     let raw = p.raw.as_object().cloned().unwrap_or_default();
     let mut data = Map::new();
@@ -225,8 +225,8 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         Value::String(p.version.clone()),
     );
     if let Some(td) = raw.get("target-dir").filter(|v| !v.is_null()) {
-        // `Package::getTargetDir()` : segments `.`/`..` et slashes de tête
-        // retirés.
+        // `Package::getTargetDir()`: `.`/`..` segments and leading slashes
+        // removed.
         let text = match td {
             Value::String(s) => s.clone(),
             other => other.to_string(),
@@ -253,7 +253,7 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
     if let Some(dist) = &p.dist {
         let mut d = Map::new();
         d.insert("type".into(), Value::String(dist.kind.clone()));
-        // `setDistUrl('')` range null.
+        // `setDistUrl('')` stores null.
         d.insert(
             "url".into(),
             if dist.url.is_empty() {
@@ -321,10 +321,10 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
     if p.is_default_branch {
         data.insert("default-branch".into(), Value::Bool(true));
     }
-    // dumpValues : bin, type, extra, installation-source, autoload,
+    // dumpValues: bin, type, extra, installation-source, autoload,
     // autoload-dev, notification-url, include-path, php-ext.
     if let Some(bin) = raw.get("bin").filter(|v| !v.is_null()) {
-        // Tableau PHP : les clés d'un objet sont conservées.
+        // PHP array: an object's keys are preserved.
         let ltrim = |v: Value| match v {
             Value::String(s) => Value::String(s.trim_start_matches('/').to_owned()),
             other => other,
@@ -342,7 +342,7 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
             data.insert("bin".into(), value);
         }
     }
-    // `getType()` : `$this->type ?: 'library'`.
+    // `getType()`: `$this->type ?: 'library'`.
     data.insert(
         "type".into(),
         Value::String(if p.package_type.is_empty() || p.package_type == "0" {
@@ -397,8 +397,8 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         data.insert("archive".into(), Value::Object(archive));
     }
     if let Some(scripts) = raw.get("scripts").filter(|v| is_array(v)) {
-        // `(array) $listeners` : un tableau garde ses clés, un scalaire est
-        // enveloppé, null devient vide.
+        // `(array) $listeners`: an array keeps its keys, a scalar is
+        // wrapped, null becomes empty.
         let cast = |listeners: &Value| match listeners {
             Value::Array(_) | Value::Object(_) => listeners.clone(),
             Value::Null => Value::Array(Vec::new()),
@@ -462,9 +462,9 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
                     other => other.to_string(),
                 })
                 .collect();
-            // `sort()` : la comparaison PHP n'est pas un ordre total sur des
-            // chaînes mixtes ; un tri par insertion (celui de zend_sort en
-            // dessous de 17 éléments) ne suppose rien et ne panique pas.
+            // `sort()`: the PHP comparison is not a total order on mixed
+            // strings; an insertion sort (zend_sort's below 17 elements)
+            // assumes nothing and does not panic.
             insertion_sort(&mut strings, |a, b| php_compare_strings(a, b));
             data.insert(
                 "keywords".into(),
@@ -491,9 +491,9 @@ pub fn dump_package(p: &Package) -> Map<String, Value> {
         }
         _ => {}
     }
-    // `transport-options` : celles du lock (`loadOptions`) ou posées par le
-    // dépôt (`configurePackageTransportOptions`) ; le dépôt a déjà retiré
-    // celles des métadonnées.
+    // `transport-options`: those of the lock (`loadOptions`) or set by the
+    // repository (`configurePackageTransportOptions`); the repository has
+    // already stripped those of the metadata.
     if let Some(t) = raw.get("transport-options") {
         if is_array(t) && !php_empty(Some(t)) {
             data.insert("transport-options".into(), t.clone());
@@ -557,7 +557,7 @@ pub struct LockInput<'a> {
     pub platform_overrides: &'a Map<String, Value>,
 }
 
-/// `Locker::setLockData` : les données du lock (avant écriture).
+/// `Locker::setLockData`: the lock data (before writing).
 pub fn lock_data(input: LockInput<'_>) -> Value {
     let aliases: Vec<Value> = input
         .aliases
@@ -608,7 +608,7 @@ pub fn lock_data(input: LockInput<'_>) -> Value {
         "minimum-stability".into(),
         Value::String(input.minimum_stability.to_owned()),
     );
-    // fixupJsonDataType : ksort + `{}` si vide.
+    // fixupJsonDataType: ksort + `{}` if empty.
     let mut flags = Map::new();
     for (k, v) in input.stability_flags {
         flags.insert(k.clone(), Value::Number((*v).into()));
@@ -641,10 +641,10 @@ pub fn lock_data(input: LockInput<'_>) -> Value {
     Value::Object(lock)
 }
 
-/// `ValidatingArrayLoader::validatePackage` (appelé sur chaque paquet
-/// retenu par le solveur) : refuse les noms invalides ou réservés, les
-/// URL/références commençant par `-` (injection d'arguments) et les `bin`
-/// avec `..`.
+/// `ValidatingArrayLoader::validatePackage` (called on every package kept
+/// by the solver): rejects invalid or reserved names, URLs/references
+/// starting with `-` (argument injection) and `bin` entries containing
+/// `..`.
 pub fn validate_package(p: &Package) -> Result<(), String> {
     static DASH: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
     static DOTDOT: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
@@ -711,7 +711,7 @@ pub fn validate_package(p: &Package) -> Result<(), String> {
     Ok(())
 }
 
-/// `ValidatingArrayLoader::hasPackageNamingError($name)` (hors liens).
+/// `ValidatingArrayLoader::hasPackageNamingError($name)` (excluding links).
 fn package_naming_error(name: &str) -> Option<String> {
     static NAME: OnceLock<pcre2::bytes::Regex> = OnceLock::new();
     if crate::platform::is_platform_package(name) {

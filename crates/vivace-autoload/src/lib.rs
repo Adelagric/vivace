@@ -1,4 +1,4 @@
-//! vivace-autoload — génération d'autoloader compatible Composer 2.10.3.
+//! vivace-autoload: Composer 2.10.3-compatible autoloader generation.
 
 pub mod classmap;
 pub mod generator;

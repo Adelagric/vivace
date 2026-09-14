@@ -1,10 +1,11 @@
-//! Oracle de bout en bout du scaffold Drupal : pour chaque cas, un mini-projet
-//! (paquets synthétiques en dépôts `path`, plugin vendoré ou depuis Packagist)
-//! est installé deux fois — par Composer avec le plugin actif (référence), et
-//! par Composer `--no-plugins` puis le port Rust (`scaffold::plan/apply` +
-//! `pre_autoload_dump`). Les arbres (hors vendor/composer) doivent être
-//! identiques, ainsi que `vendor/drupal/DrupalInstalled.php` et les entrées
-//! de classmap ajoutées à la racine.
+//! End-to-end oracle of the Drupal scaffold: for each case, a mini project
+//! (synthetic packages in `path` repositories, plugin vendored or from
+//! Packagist) is installed twice: by Composer with the plugin active
+//! (reference), and by Composer `--no-plugins` then the Rust port
+//! (`scaffold::plan/apply` + `pre_autoload_dump`). The trees (outside
+//! vendor/composer) must be identical, as well as
+//! `vendor/drupal/DrupalInstalled.php` and the classmap entries added to
+//! the root.
 
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -12,21 +13,21 @@ use std::path::Path;
 use std::process::Command;
 use vivace_core::scaffold::{self, ScaffoldPackage};
 
-/// Un paquet synthétique : (nom, extra, fichiers (chemin, contenu)).
+/// A synthetic package: (name, extra, files (path, contents)).
 type SyntheticPackage = (&'static str, Value, Vec<(&'static str, &'static str)>);
 
 struct Case {
     name: &'static str,
-    /// `extra` de la racine.
+    /// Root `extra`.
     root_extra: Value,
-    /// Paquets synthétiques : (nom, extra.drupal-scaffold, fichiers (chemin, contenu)).
+    /// Synthetic packages: (name, extra.drupal-scaffold, files (path, contents)).
     packages: Vec<SyntheticPackage>,
-    /// Fichiers présents dans le projet avant l'install (chemin, contenu).
+    /// Files present in the project before the install (path, contents).
     preexisting: Vec<(&'static str, &'static str)>,
-    /// `git init` + `.gitignore` ignorant vendor/ ; les chemins listés sont
-    /// committés avant l'install (fichiers « trackés »).
+    /// `git init` + `.gitignore` ignoring vendor/; the listed paths are
+    /// committed before the install ("tracked" files).
     git: Option<Vec<&'static str>>,
-    /// Version du plugin : None = source vendorée (11.4.6), Some = Packagist.
+    /// Plugin version: None = vendored source (11.4.6), Some = Packagist.
     plugin_version: Option<&'static str>,
 }
 
@@ -161,8 +162,8 @@ fn cases() -> Vec<Case> {
             plugin_version: None,
         },
         Case {
-            // Un metapackage n'a pas de chemin d'installation mais reste
-            // trouvé par findPackage : ses allowed-packages comptent.
+            // A metapackage has no install path but is still found by
+            // findPackage: its allowed-packages count.
             name: "allowed-through-metapackage",
             root_extra: json!({"drupal-scaffold": {"locations": {"web-root": "web/"}, "allowed-packages": ["acme/metapackage"]}}),
             packages: vec![
@@ -296,13 +297,13 @@ fn run(dir: &Path, cmd: &str, args: &[&str]) -> std::process::Output {
         .unwrap_or_else(|e| panic!("{cmd}: {e}"))
 }
 
-/// Écrit le projet d'un cas dans `dir` (avant tout install).
+/// Writes a case's project into `dir` (before any install).
 fn build_project(case: &Case, dir: &Path, plugin_src: &Path) {
     let mut repos = vec![];
     let mut require = serde_json::Map::new();
     match case.plugin_version {
         None => {
-            // Plugin vendoré, exposé en dépôt path avec une version explicite.
+            // Vendored plugin, exposed as a path repository with an explicit version.
             let plugin = dir.join("plugin");
             copy_dir(plugin_src, &plugin);
             let mut cj: Value = serde_json::from_str(
@@ -402,7 +403,7 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// Arbre (chemin relatif → contenu) hors vendor/composer et .git.
+/// Tree (relative path -> contents) outside vendor/composer and .git.
 fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
     fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
@@ -466,7 +467,7 @@ fn scaffold_matches_the_real_plugin() {
             String::from_utf8_lossy(&out.stderr)
         );
 
-        // Côté vivace : profil depuis la copie installée, plan + apply.
+        // vivace side: profile from the installed copy, plan + apply.
         let ours_real = ours.canonicalize().expect("real");
         let plugin_dir = ours_real.join("vendor").join(scaffold::PLUGIN);
         let fp = scaffold::fingerprint(&plugin_dir).expect("fingerprint");
@@ -497,7 +498,7 @@ fn scaffold_matches_the_real_plugin() {
             &packages,
         )
         .unwrap_or_else(|e| panic!("[{}] plan: {e}", case.name));
-        // preAutoloadDump (avant le scaffold chez Composer, l'ordre est sans effet ici).
+        // preAutoloadDump (before the scaffold in Composer; the order has no effect here).
         let root = vivace_core::state::RootPackage::detect(&root_manifest, &ours_real, true);
         if let Some(pre) = scaffold::pre_autoload_dump(
             profile,
@@ -511,7 +512,7 @@ fn scaffold_matches_the_real_plugin() {
                 &pre.drupal_installed,
             )
             .expect("write");
-            // Les entrées ajoutées à la classmap doivent être dans celle de la référence.
+            // The entries added to the classmap must be in the reference's classmap.
             let classmap =
                 std::fs::read_to_string(reference.join("vendor/composer/autoload_classmap.php"))
                     .expect("classmap");
@@ -555,8 +556,8 @@ fn scaffold_matches_the_real_plugin() {
             }
             compared += 1;
         }
-        // Second passage sur la référence : idempotence de Composer = la nôtre
-        // (fichiers inchangés non réécrits, autoload*.php réécrits).
+        // Second pass on the reference: Composer's idempotence = ours
+        // (unchanged files not rewritten, autoload*.php rewritten).
         if case.name == "rerun-unchanged" {
             let out = run(
                 &reference,

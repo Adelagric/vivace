@@ -1,11 +1,11 @@
-//! Oracle `VersionSelector` : pour chaque nom de paquet d'un instantané
-//! (plus les paquets de plateforme, présents ou non — un nom inconnu du
-//! dépôt est une erreur de transport en `file://`, donc hors corpus),
-//! ce que `composer require <name>` sans contrainte choisirait —
-//! `findBestCandidate` (stabilité préférée du projet, filtre de
-//! plateforme, avertissements) et `findRecommendedRequireVersion` — par le
-//! phar (tools/oracle-version-selector.php) et par le port, sur le même
-//! instantané et la même plateforme PHP.
+//! `VersionSelector` oracle: for each package name of a snapshot (plus the
+//! platform packages, present or not; a name unknown to the repository is a
+//! transport error over `file://`, hence outside the corpus), what
+//! `composer require <name>` without constraint would pick
+//! (`findBestCandidate` (project's preferred stability, platform filter,
+//! warnings) and `findRecommendedRequireVersion`) by the phar
+//! (tools/oracle-version-selector.php) and by the port, on the same
+//! snapshot and the same PHP platform.
 
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -68,9 +68,9 @@ fn setup(fx: &str) -> Setup {
             .success(),
         "{fx}: archive"
     );
-    // Comme harness/lib/registry.sh : les politiques de blocage déclarées
-    // comme sur Packagist (avis partiels dans les p2, résumé malware vide
-    // si l'instantané n'en a pas).
+    // As in harness/lib/registry.sh: the blocking policies declared as on
+    // Packagist (partial advisories in the p2 files, empty malware summary
+    // if the snapshot has none).
     if !reg.join("summary.json").is_file() {
         std::fs::write(
             reg.join("summary.json"),
@@ -103,8 +103,8 @@ fn setup(fx: &str) -> Setup {
         &std::fs::read_to_string(src.join("composer.json")).expect("composer.json"),
     )
     .expect("json");
-    // Les dépôts distants du manifeste (packages.drupal.org) ne sont pas
-    // joignables hors ligne : l'oracle et le port lisent le seul instantané.
+    // The manifest's remote repositories (packages.drupal.org) are not
+    // reachable offline: the oracle and the port read only the snapshot.
     if let Some(obj) = manifest.as_object_mut() {
         obj.remove("repositories");
     }
@@ -128,7 +128,7 @@ fn setup(fx: &str) -> Setup {
     }
 }
 
-/// Tous les noms de paquets de l'instantané (fichiers `p2/vendor/name.json`).
+/// All package names of the snapshot (`p2/vendor/name.json` files).
 fn snapshot_names(s: &Setup) -> Vec<String> {
     let p2 = s.project.parent().expect("tmp").join("registry/p2");
     let mut names = BTreeSet::new();
@@ -211,8 +211,8 @@ fn port(s: &Setup, names: &[String], filter: &PlatformRequirementFilter) -> Valu
             &platform,
             &mut warnings,
         );
-        // Toutes stabilités : `null` quand un fichier `~dev` manque à
-        // l'instantané (l'oracle fait de même).
+        // All stabilities: `null` when a `~dev` file is missing from the
+        // snapshot (the oracle does the same).
         let any_best = match session.find_packages_for_require(name, true) {
             Ok(any) => Some(
                 find_best_candidate(
@@ -248,10 +248,10 @@ fn port(s: &Setup, names: &[String], filter: &PlatformRequirementFilter) -> Valu
     Value::Object(out)
 }
 
-/// Variante de stabilité du projet : `minimum-stability` et
-/// `prefer-stable` réécrits dans la copie du manifeste ; seuls les noms
-/// dont l'instantané a aussi le fichier `~dev` sont joués (les autres sont
-/// une erreur de transport des deux côtés).
+/// Project stability variant: `minimum-stability` and `prefer-stable`
+/// rewritten in the manifest copy; only the names whose snapshot also has
+/// the `~dev` file are played (the others are a transport error on both
+/// sides).
 fn check_stability(fx: &str, minimum_stability: &str, prefer_stable: bool) -> usize {
     let s = setup(fx);
     let path = s.project.join("composer.json");
@@ -322,7 +322,7 @@ fn check(fx: &str, filter_args: &[&str], filter: &PlatformRequirementFilter) -> 
     let s = setup(fx);
     let mut names = snapshot_names(&s);
     assert!(names.len() > 50, "{fx}: {} noms", names.len());
-    // Un nom dans une autre casse : `findPackages(strtolower($name))`.
+    // A name in a different case: `findPackages(strtolower($name))`.
     let mixed_case = names[0].to_uppercase();
     names.push(mixed_case);
     names.extend(

@@ -1,6 +1,6 @@
-//! Différentiel de branch_alias_of contre ArrayLoader::getBranchAlias du phar :
-//! pour chaque config de paquet, Composer produit (ou non) un AliasPackage ;
-//! on compare (version, pretty_version) de l'alias.
+//! Differential of branch_alias_of against the phar's ArrayLoader::getBranchAlias:
+//! for each package config, Composer produces (or not) an AliasPackage;
+//! we compare the alias's (version, pretty_version).
 
 use serde_json::{json, Value};
 use std::io::Write as _;

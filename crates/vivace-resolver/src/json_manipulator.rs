@@ -1,26 +1,25 @@
-//! Port de `Composer\Json\JsonManipulator` (docs/reference/JsonManipulator.php)
-//! pour le périmètre atteint par `require` et `remove` : édition textuelle
-//! de composer.json par expressions régulières, pour ne toucher que la
-//! partie modifiée et conserver la mise en forme du fichier.
+//! Port of `Composer\Json\JsonManipulator` (docs/reference/JsonManipulator.php)
+//! for the scope reached by `require` and `remove`: textual editing of
+//! composer.json through regular expressions, so as to touch only the
+//! modified part and preserve the file's formatting.
 //!
-//! Les motifs sont ceux de Composer, compilés par pcre2 avec les mêmes
-//! drapeaux (`s`, `x`, `i`, jamais `u`), sur les octets. Les valeurs
-//! manipulées sont des `serde_json::Value` avec la convention de
-//! `vivace_core::phpjson` : un objet réduit à `STDCLASS_MARKER` est un
-//! `ArrayObject` (formaté `{…}` même vide), un objet vide est un tableau
-//! PHP vide (formaté `[]`).
+//! The patterns are Composer's, compiled by pcre2 with the same flags
+//! (`s`, `x`, `i`, never `u`), over bytes. Manipulated values are
+//! `serde_json::Value`s following the `vivace_core::phpjson` convention: an
+//! object reduced to `STDCLASS_MARKER` is an `ArrayObject` (formatted
+//! `{...}` even when empty), an empty object is an empty PHP array
+//! (formatted `[]`).
 //!
-//! Non porté : `repositories`, les listes (`addListItem`…), `addProperty`,
-//! la branche `policy.*` de `removeConfigSetting`.
+//! Not ported: `repositories`, lists (`addListItem`...), `addProperty`, the
+//! `policy.*` branch of `removeConfigSetting`.
 //!
-//! Écarts connus avec PHP, tous sur des manifestes que `json_decode`
-//! n'accepte pas ou n'accepte qu'à moitié : le seuil de
-//! `pcre.backtrack_limit` (pcre2 n'expose pas `match_limit` ; l'erreur de
-//! limite suit bien le chemin du `catch` de Composer, le seuil diffère) ;
-//! un flottant hors plage (`1e999`, `INF` côté PHP, refusé ici) ; un
-//! substitut UTF-16 isolé ou plus de 512 niveaux d'imbrication (PHP
-//! continue avec `null` et ajoute une clé racine en double, ici une
-//! erreur).
+//! Known deviations from PHP, all on manifests `json_decode` rejects or
+//! only half accepts: the `pcre.backtrack_limit` threshold (pcre2 does not
+//! expose `match_limit`; the limit error does follow Composer's `catch`
+//! path, the threshold differs); an out-of-range float (`1e999`, `INF` on
+//! the PHP side, rejected here); a lone UTF-16 surrogate or more than 512
+//! nesting levels (PHP carries on with `null` and adds a duplicate root
+//! key, here an error).
 
 use pcre2::bytes::{Captures, Regex, RegexBuilder};
 use serde::Deserialize as _;
@@ -30,14 +29,14 @@ use vivace_core::phpjson::{php_json_encode_with, STDCLASS_MARKER};
 use crate::platform::is_platform_package;
 use crate::version::preg_quote;
 
-/// `PCRE2_ERROR_MATCHLIMIT` (pcre2.h), l'équivalent de
-/// `PREG_BACKTRACK_LIMIT_ERROR` côté PHP.
+/// `PCRE2_ERROR_MATCHLIMIT` (pcre2.h), the equivalent of
+/// `PREG_BACKTRACK_LIMIT_ERROR` on the PHP side.
 const PCRE2_ERROR_MATCHLIMIT: i32 = -47;
 
 /// `JsonFile::INDENT_DEFAULT`.
 const INDENT_DEFAULT: &str = "    ";
 
-/// `JsonManipulator::DEFINES` : la grammaire JSON en sous-motifs nommés.
+/// `JsonManipulator::DEFINES`: the JSON grammar as named subpatterns.
 const DEFINES: &str = r#"(?(DEFINE)
        (?<number>    -? (?= [1-9]|0(?!\d) ) \d++ (?:\.\d++)? (?:[eE] [+-]?+ \d++)? )
        (?<boolean>   true | false | null )
@@ -53,25 +52,25 @@ pub enum ManipulatorError {
     /// `The json file must be an object ({})`.
     #[error("The json file must be an object ({{}})")]
     NotAnObject,
-    /// `JsonFile::parseJson` a échoué (ParsingException côté Composer).
+    /// `JsonFile::parseJson` failed (ParsingException on the Composer side).
     #[error("The input does not contain valid JSON\n{0}")]
     Parse(String),
-    /// Une expression régulière a échoué là où Composer laisserait
-    /// l'exception remonter.
+    /// A regular expression failed where Composer would let the exception
+    /// propagate.
     #[error("regex: {0}")]
     Regex(String),
-    /// Chemin que Composer termine par une exception (`LogicException`,
+    /// Path Composer ends with an exception (`LogicException`,
     /// `InvalidArgumentException`, `TypeError`).
     #[error("{0}")]
     Logic(String),
-    /// Méthode ou branche hors du périmètre porté.
+    /// Method or branch outside the ported scope.
     #[error("unsupported: {0}")]
     Unsupported(String),
 }
 
 type Result<T> = std::result::Result<T, ManipulatorError>;
 
-/// Drapeaux PCRE d'un motif (les lettres après le délimiteur en PHP).
+/// PCRE flags of a pattern (the letters after the delimiter in PHP).
 #[derive(Clone, Copy, Default)]
 struct Flags {
     s: bool,
@@ -127,15 +126,15 @@ fn compile(pattern: &str, flags: Flags) -> Result<Regex> {
         .map_err(|e| ManipulatorError::Regex(format!("{e} in `{pattern}`")))
 }
 
-/// `Preg::isMatch` : les captures, ou `None` si rien ne correspond.
+/// `Preg::isMatch`: the captures, or `None` if nothing matches.
 fn captures<'s>(re: &Regex, subject: &'s str) -> Result<Option<Captures<'s>>> {
     re.captures(subject.as_bytes())
         .map_err(|e| ManipulatorError::Regex(e.to_string()))
 }
 
-/// `Preg::isMatch` dans un `catch` de `PREG_BACKTRACK_LIMIT_ERROR` : la
-/// limite de correspondance de pcre2 (`PCRE2_ERROR_MATCHLIMIT`) suit ce
-/// chemin (`false`), toute autre erreur remonte.
+/// `Preg::isMatch` inside a `catch` of `PREG_BACKTRACK_LIMIT_ERROR`: the
+/// pcre2 match limit (`PCRE2_ERROR_MATCHLIMIT`) follows this path
+/// (`false`), any other error propagates.
 fn captures_or_limit<'s>(re: &Regex, subject: &'s str) -> Result<Option<Captures<'s>>> {
     match re.captures(subject.as_bytes()) {
         Ok(c) => Ok(c),
@@ -144,7 +143,7 @@ fn captures_or_limit<'s>(re: &Regex, subject: &'s str) -> Result<Option<Captures
     }
 }
 
-/// Groupe nommé : `None` s'il n'a pas participé (`PREG_UNMATCHED_AS_NULL`).
+/// Named group: `None` if it did not participate (`PREG_UNMATCHED_AS_NULL`).
 fn named<'s>(caps: &Captures<'s>, name: &str) -> Option<&'s str> {
     caps.name(name)
         .and_then(|m| std::str::from_utf8(m.as_bytes()).ok())
@@ -155,7 +154,7 @@ fn group<'s>(caps: &Captures<'s>, i: usize) -> Option<&'s str> {
         .and_then(|m| std::str::from_utf8(m.as_bytes()).ok())
 }
 
-/// `Preg::replaceCallback` sur toutes les occurrences.
+/// `Preg::replaceCallback` on all occurrences.
 fn replace_all(
     re: &Regex,
     subject: &str,
@@ -178,15 +177,15 @@ fn replace_all(
     Ok((out, count))
 }
 
-/// `Preg::replace` avec une chaîne de remplacement littérale (Composer
-/// passe ses remplacements par `addcslashes(…, '\\$')`, ce qui revient à
-/// les insérer tels quels).
+/// `Preg::replace` with a literal replacement string (Composer runs its
+/// replacements through `addcslashes(..., '\\$')`, which amounts to
+/// inserting them verbatim).
 fn replace_literal(re: &Regex, subject: &str, replacement: &str) -> Result<(String, usize)> {
     replace_all(re, subject, |_| Ok(replacement.to_owned()))
 }
 
-/// `JsonFile::encode` d'un scalaire ou d'une clé (`JSON_UNESCAPED_SLASHES |
-/// JSON_UNESCAPED_UNICODE` ; `JSON_PRETTY_PRINT` est sans effet ici).
+/// `JsonFile::encode` of a scalar or a key (`JSON_UNESCAPED_SLASHES |
+/// JSON_UNESCAPED_UNICODE`; `JSON_PRETTY_PRINT` has no effect here).
 fn encode(value: &Value) -> Result<String> {
     php_json_encode_with(value, vivace_core::phpjson::FLAGS_JSONFILE)
         .map_err(|e| ManipulatorError::Logic(format!("JSON encoding failed: {e}")))
@@ -196,13 +195,13 @@ fn encode_str(s: &str) -> Result<String> {
     encode(&Value::String(s.to_owned()))
 }
 
-/// Profondeur maximale de `json_decode` (son paramètre `$depth` par défaut).
+/// Maximum depth of `json_decode` (its default `$depth` parameter).
 const PHP_JSON_DEPTH: usize = 512;
 
-/// `json_decode` : serde avec deux écarts corrigés — la limite de
-/// récursion (128 chez serde, 512 chez PHP, d'où une passe préalable qui
-/// mesure l'imbrication hors chaînes) et le littéral `-0`, entier `0` pour
-/// PHP mais flottant `-0.0` pour serde (réécrit avant l'analyse).
+/// `json_decode`: serde with two deviations corrected: the recursion limit
+/// (128 in serde, 512 in PHP, hence a preliminary pass measuring nesting
+/// outside strings) and the `-0` literal, integer `0` for PHP but float
+/// `-0.0` for serde (rewritten before parsing).
 fn json_decode(s: &str) -> std::result::Result<Value, String> {
     let (normalized, depth) = scan_json(s);
     if depth > PHP_JSON_DEPTH {
@@ -215,8 +214,8 @@ fn json_decode(s: &str) -> std::result::Result<Value, String> {
     Ok(v)
 }
 
-/// Une passe sur le texte JSON, hors chaînes : `-0` nu → `0`, et la
-/// profondeur maximale d'imbrication.
+/// One pass over the JSON text, outside strings: bare `-0` -> `0`, and the
+/// maximum nesting depth.
 fn scan_json(s: &str) -> (String, usize) {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -258,16 +257,16 @@ fn scan_json(s: &str) -> (String, usize) {
     (out, max_depth)
 }
 
-/// `JsonFile::parseJson` (décodage associatif).
+/// `JsonFile::parseJson` (associative decoding).
 fn parse_json(contents: &str) -> Result<Value> {
     json_decode(contents).map_err(ManipulatorError::Parse)
 }
 
-/// `@json_decode($s)` puis test de vérité PHP : `false` si le JSON est
-/// invalide ou si la valeur décodée est fausse (`null`, `false`, `0`,
-/// `""`, `"0"`, tableau vide — un objet vide est un tableau vide en mode
-/// associatif, mais un `stdClass` vrai sinon). En mode objet, une clé
-/// commençant par un octet nul est un échec de décodage
+/// `@json_decode($s)` then PHP truthiness test: `false` if the JSON is
+/// invalid or if the decoded value is falsy (`null`, `false`, `0`, `""`,
+/// `"0"`, empty array; an empty object is an empty array in associative
+/// mode, but a truthy `stdClass` otherwise). In object mode, a key starting
+/// with a null byte is a decoding failure
 /// (`JSON_ERROR_INVALID_PROPERTY_NAME`).
 fn decodes_truthy(s: &str, assoc: bool) -> bool {
     match json_decode(s) {
@@ -303,20 +302,20 @@ fn php_truthy(v: &Value) -> bool {
     }
 }
 
-/// `isset($decoded[$key])` : présent et non `null`.
+/// `isset($decoded[$key])`: present and not `null`.
 fn isset<'v>(decoded: &'v Value, key: &str) -> Option<&'v Value> {
     php_index(decoded, key).filter(|v| !v.is_null())
 }
 
-/// `$value[$key]` sur un tableau PHP décodé : objet par clé, liste par
-/// indice canonique.
+/// `$value[$key]` on a decoded PHP array: object by key, list by canonical
+/// index.
 fn php_index<'v>(value: &'v Value, key: &str) -> Option<&'v Value> {
     match value {
         Value::Object(m) => m.get(key),
         Value::Array(a) => canonical_index(key).and_then(|i| a.get(i)),
-        // `isset("abc"[1])` : un décalage entier dans la chaîne (négatif
-        // depuis la fin) est défini ; la valeur elle-même tient lieu de
-        // caractère, ce qui suffit aux tests d'existence.
+        // `isset("abc"[1])`: an integer offset into the string (negative
+        // from the end) is set; the value itself stands in for the
+        // character, which is enough for existence tests.
         Value::String(s) => php_int_key(key)
             .filter(|&i| {
                 (0..s.len() as i64).contains(&(if i < 0 { i + s.len() as i64 } else { i }))
@@ -326,8 +325,8 @@ fn php_index<'v>(value: &'v Value, key: &str) -> Option<&'v Value> {
     }
 }
 
-/// Une clé que PHP convertit en entier, négatifs compris (`"-3"`, jamais
-/// `"-0"` ni `"03"`).
+/// A key PHP converts to an integer, negatives included (`"-3"`, never
+/// `"-0"` nor `"03"`).
 fn php_int_key(key: &str) -> Option<i64> {
     if let Some(i) = canonical_index(key) {
         return i64::try_from(i).ok();
@@ -341,7 +340,7 @@ fn php_int_key(key: &str) -> Option<i64> {
     None
 }
 
-/// Une clé que PHP convertit en entier (`"0"`, `"12"`, jamais `"012"`).
+/// A key PHP converts to an integer (`"0"`, `"12"`, never `"012"`).
 fn canonical_index(key: &str) -> Option<usize> {
     if key == "0" {
         return Some(0);
@@ -354,27 +353,27 @@ fn canonical_index(key: &str) -> Option<usize> {
     None
 }
 
-/// `array_is_list` d'un tableau décodé depuis un objet JSON : clés
-/// `"0"`, `"1"`, … dans l'ordre.
+/// `array_is_list` of an array decoded from a JSON object: keys `"0"`,
+/// `"1"`, ... in order.
 fn php_is_list(m: &Map<String, Value>) -> bool {
     m.keys()
         .enumerate()
         .all(|(i, k)| canonical_index(k) == Some(i))
 }
 
-/// `$subName` est vrai au sens PHP (`if ($subName && …)`).
+/// `$subName` is truthy in the PHP sense (`if ($subName && ...)`).
 fn truthy_str(s: &str) -> bool {
     !(s.is_empty() || s == "0")
 }
 
-/// `strnatcmp` (ext/standard/strnatcmp.c, sensible à la casse).
+/// `strnatcmp` (ext/standard/strnatcmp.c, case-sensitive).
 pub fn strnatcmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering::{Equal, Greater, Less};
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.is_empty() || b.is_empty() {
         return a.len().cmp(&b.len());
     }
-    // Une chaîne PHP est terminée par un octet nul : lire au-delà rend 0.
+    // A PHP string is null-terminated: reading past the end yields 0.
     let at = |s: &[u8], i: usize| s.get(i).copied().unwrap_or(0);
     let (mut ap, mut bp) = (0usize, 0usize);
     let (mut ca, mut cb) = (a[0], b[0]);
@@ -439,7 +438,7 @@ pub fn strnatcmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-/// Deux nombres alignés à gauche (fractions) : la première différence gagne.
+/// Two left-aligned numbers (fractions): the first difference wins.
 fn compare_left(a: &[u8], ap: &mut usize, b: &[u8], bp: &mut usize) -> std::cmp::Ordering {
     use std::cmp::Ordering::{Equal, Greater, Less};
     loop {
@@ -460,8 +459,8 @@ fn compare_left(a: &[u8], ap: &mut usize, b: &[u8], bp: &mut usize) -> std::cmp:
     }
 }
 
-/// Deux nombres alignés à droite : le plus long gagne, sinon la première
-/// différence (mémorisée dans `bias`).
+/// Two right-aligned numbers: the longer one wins, otherwise the first
+/// difference (remembered in `bias`).
 fn compare_right(a: &[u8], ap: &mut usize, b: &[u8], bp: &mut usize) -> std::cmp::Ordering {
     use std::cmp::Ordering::{Equal, Greater, Less};
     let mut bias = Equal;
@@ -483,14 +482,14 @@ fn compare_right(a: &[u8], ap: &mut usize, b: &[u8], bp: &mut usize) -> std::cmp
     }
 }
 
-/// Le préfixe de tri de `sortPackages` : plateformes d'abord (`php`,
-/// `hhvm`, `ext-*`, `lib-*`, les autres), puis les paquets.
+/// The sort prefix of `sortPackages`: platforms first (`php`, `hhvm`,
+/// `ext-*`, `lib-*`, the others), then packages.
 fn sort_prefix(requirement: &str) -> String {
     if !is_platform_package(requirement) {
         return format!("5-{requirement}");
     }
-    // Les cinq remplacements s'enchaînent sur la même chaîne ; une fois
-    // préfixée d'un chiffre, elle n'est plus touchée par `^\D`.
+    // The five replacements chain on the same string; once prefixed with a
+    // digit, it is no longer touched by `^\D`.
     let mut s = requirement.to_owned();
     for (prefix, digit) in [("php", "0"), ("hhvm", "1"), ("ext", "2"), ("lib", "3")] {
         if s.starts_with(prefix) {
@@ -503,9 +502,9 @@ fn sort_prefix(requirement: &str) -> String {
     s
 }
 
-/// `sortPackages` : `uksort` stable par `strnatcmp` des préfixes. Dès que
-/// le comparateur est appelé (deux entrées ou plus), une clé entière fait
-/// échouer `isPlatformPackage(string $name)` (`strict_types`).
+/// `sortPackages`: stable `uksort` by `strnatcmp` of the prefixes. As soon
+/// as the comparator is called (two or more entries), an integer key makes
+/// `isPlatformPackage(string $name)` fail (`strict_types`).
 fn sort_packages(packages: &mut Map<String, Value>) -> Result<()> {
     if packages.len() >= 2 && packages.keys().any(|k| php_int_key(k).is_some()) {
         return Err(ManipulatorError::Logic(
@@ -518,7 +517,7 @@ fn sort_packages(packages: &mut Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// Un objet réduit à la sentinelle `stdClass` (un `ArrayObject`).
+/// An object reduced to the `stdClass` sentinel (an `ArrayObject`).
 fn is_stdclass_marker(m: &Map<String, Value>) -> bool {
     m.len() == 1 && m.contains_key(STDCLASS_MARKER)
 }
@@ -530,8 +529,8 @@ pub struct JsonManipulator {
 }
 
 impl JsonManipulator {
-    /// Constructeur : `trim`, `{}` → `{\n}`, détection du saut de ligne et
-    /// de l'indentation.
+    /// Constructor: `trim`, `{}` -> `{\n}`, newline and indentation
+    /// detection.
     pub fn new(contents: &str) -> Result<Self> {
         let contents = contents.trim_matches([' ', '\t', '\n', '\r', '\0', '\x0B']);
         let contents = if contents.is_empty() { "{}" } else { contents };
@@ -556,13 +555,13 @@ impl JsonManipulator {
         })
     }
 
-    /// `getContents` : le texte suivi d'un saut de ligne.
+    /// `getContents`: the text followed by a newline.
     pub fn contents(&self) -> String {
         format!("{}{}", self.contents, self.newline)
     }
 
-    /// `addLink` : ajoute ou remplace `$package: $constraint` dans la
-    /// section `$type`, en conservant l'orthographe existante du nom.
+    /// `addLink`: adds or replaces `$package: $constraint` in the `$type`
+    /// section, preserving the existing spelling of the name.
     pub fn add_link(
         &mut self,
         link_type: &str,
@@ -592,7 +591,7 @@ impl JsonManipulator {
         let end = named(&caps, "end").unwrap_or("").to_owned();
         let mut links = named(&caps, "value").unwrap_or("").to_owned();
 
-        // Le nom peut être écrit `vendor\/name` dans le fichier.
+        // The name may be written `vendor\/name` in the file.
         let package_regex = preg_quote(package).replace('/', "\\\\?/");
         let regex = compile(
             &format!(r#"{DEFINES}"(?P<package>{package_regex})"(\s*:\s*)(?&string)"#),
@@ -646,8 +645,8 @@ impl JsonManipulator {
                     sort_packages(&mut m)?;
                     self.format(&Value::Object(m), 0, false)?
                 }
-                // Une liste est un tableau PHP à clés entières : `uksort`
-                // ne compare rien s'il y a au plus un élément.
+                // A list is a PHP array with integer keys: `uksort` compares
+                // nothing when there is at most one element.
                 Value::Array(a) => {
                     let mut m = list_to_map(a);
                     sort_packages(&mut m)?;
@@ -665,7 +664,7 @@ impl JsonManipulator {
         Ok(true)
     }
 
-    /// `removeConfigSetting` (hors `policy.*`).
+    /// `removeConfigSetting` (excluding `policy.*`).
     pub fn remove_config_setting(&mut self, name: &str) -> Result<bool> {
         if name.starts_with("policy.") && name.matches('.').count() >= 2 {
             return Err(ManipulatorError::Unsupported(format!(
@@ -675,8 +674,8 @@ impl JsonManipulator {
         self.remove_sub_node("config", name)
     }
 
-    /// `addSubNode` : ajoute ou remplace `$name` (ou `$name.$subName` pour
-    /// `config`/`extra`/`scripts`) dans l'objet `$mainNode`.
+    /// `addSubNode`: adds or replaces `$name` (or `$name.$subName` for
+    /// `config`/`extra`/`scripts`) in the `$mainNode` object.
     pub fn add_sub_node(
         &mut self,
         main_node: &str,
@@ -802,8 +801,8 @@ impl JsonManipulator {
         Ok(true)
     }
 
-    /// `removeSubNode` : retire `$name` (ou `$name.$subName`) de l'objet
-    /// `$mainNode`.
+    /// `removeSubNode`: removes `$name` (or `$name.$subName`) from the
+    /// `$mainNode` object.
     pub fn remove_sub_node(&mut self, main_node: &str, name: &str) -> Result<bool> {
         let decoded = parse_json(&self.contents)?;
         if !php_index(&decoded, main_node).is_some_and(php_truthy) {
@@ -919,8 +918,8 @@ impl JsonManipulator {
         Ok(true)
     }
 
-    /// `addMainKey` : remplace la clé racine si elle existe, sinon
-    /// l'ajoute en fin d'objet.
+    /// `addMainKey`: replaces the root key if it exists, otherwise appends
+    /// it at the end of the object.
     pub fn add_main_key(&mut self, key: &str, content: &Value) -> Result<bool> {
         let decoded = parse_json(&self.contents)?;
         let content = self.format(content, 0, false)?;
@@ -996,7 +995,7 @@ impl JsonManipulator {
             return Ok(false);
         }
 
-        // Dernière clé retirée : la virgule qui la précédait part avec elle.
+        // Last key removed: the comma preceding it goes with it.
         if captures(&compile(r",\s*$", NONE)?, &start)?.is_some()
             && captures(&compile(r"^\}$", NONE)?, &end)?.is_some()
         {
@@ -1014,7 +1013,7 @@ impl JsonManipulator {
         Ok(true)
     }
 
-    /// `removeMainKeyIfEmpty` : retire la clé si c'est un tableau vide.
+    /// `removeMainKeyIfEmpty`: removes the key if it is an empty array.
     pub fn remove_main_key_if_empty(&mut self, key: &str) -> Result<bool> {
         let decoded = parse_json(&self.contents)?;
         let Some(v) = php_index(&decoded, key) else {
@@ -1031,8 +1030,8 @@ impl JsonManipulator {
         Ok(true)
     }
 
-    /// `format` : mise en forme d'une valeur à la profondeur donnée, avec
-    /// l'indentation et le saut de ligne du fichier.
+    /// `format`: formats a value at the given depth, with the file's
+    /// indentation and newline.
     pub fn format(&self, data: &Value, depth: usize, was_object: bool) -> Result<String> {
         let indent = |n: usize| self.indent.repeat(n);
         let empty_object = |was_object: bool| {
@@ -1081,8 +1080,8 @@ impl JsonManipulator {
         }
     }
 
-    /// Le motif commun à `addSubNode`/`removeSubNode` : tout jusqu'à la
-    /// clé racine, puis son objet, puis le reste.
+    /// The pattern shared by `addSubNode`/`removeSubNode`: everything up to
+    /// the root key, then its object, then the rest.
     fn node_regex(&self, main_node: &str) -> Result<Regex> {
         compile(
             &format!(
@@ -1094,7 +1093,7 @@ impl JsonManipulator {
     }
 }
 
-/// `config`/`extra`/`scripts` acceptent `name.sub` pour viser une sous-clé.
+/// `config`/`extra`/`scripts` accept `name.sub` to target a sub-key.
 fn split_sub_name<'a>(main_node: &str, name: &'a str) -> (&'a str, Option<&'a str>) {
     if matches!(main_node, "config" | "extra" | "scripts") {
         if let Some((n, s)) = name.split_once('.') {
@@ -1104,7 +1103,7 @@ fn split_sub_name<'a>(main_node: &str, name: &'a str) -> (&'a str, Option<&'a st
     (name, None)
 }
 
-/// Une liste décodée vue comme tableau PHP à clés entières.
+/// A decoded list seen as a PHP array with integer keys.
 fn list_to_map(a: Vec<Value>) -> Map<String, Value> {
     a.into_iter()
         .enumerate()
@@ -1118,7 +1117,7 @@ fn unset_sub(cur: &Value, name: &str, sub: &str) -> Result<Value> {
     let mut m = match inner {
         Value::Object(m) => m,
         Value::Array(a) => list_to_map(a),
-        // `unset` sur `null` ou `false` ne fait rien (et `=== []` est faux).
+        // `unset` on `null` or `false` does nothing (and `=== []` is false).
         Value::Null => return Ok(Value::Null),
         Value::Bool(false) => return Ok(Value::Bool(false)),
         other => {
@@ -1134,7 +1133,7 @@ fn unset_sub(cur: &Value, name: &str, sub: &str) -> Result<Value> {
     Ok(Value::Object(m))
 }
 
-/// `JsonFile::detectIndenting` : la première ligne `^[ \t]+"`.
+/// `JsonFile::detectIndenting`: the first line matching `^[ \t]+"`.
 pub fn detect_indenting(json: &str) -> Result<String> {
     let re = compile(r#"^([ \t]+)""#, Flags { m: true, ..NONE })?;
     Ok(captures(&re, json)?

@@ -1,5 +1,5 @@
-//! Port de `Composer\DependencyResolver\Decisions` : la carte des décisions
-//! (paquet → ±niveau) et la file des décisions avec leur règle.
+//! Port of `Composer\DependencyResolver\Decisions`: the decision map
+//! (package -> +/-level) and the decision queue with its rules.
 
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
@@ -8,14 +8,14 @@ pub struct SolverBug(pub String);
 #[derive(Debug, Clone, Copy)]
 pub struct Decision {
     pub literal: i64,
-    /// Identifiant de la règle (`DECISION_REASON`).
+    /// Rule id (`DECISION_REASON`).
     pub reason: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct Decisions {
-    /// Indexée par identifiant de pool (1-based ; 0 inutilisé) : 0 =
-    /// indécis, > 0 = installé au niveau, < 0 = refusé au niveau.
+    /// Indexed by pool id (1-based; 0 unused): 0 = undecided, > 0 =
+    /// installed at that level, < 0 = rejected at that level.
     map: Vec<i64>,
     pub queue: Vec<Decision>,
 }
@@ -65,7 +65,7 @@ impl Decisions {
         self.entry(literal_or_id).abs()
     }
 
-    /// `decisionRule` : la règle de la première décision sur ce paquet.
+    /// `decisionRule`: the rule of the first decision on this package.
     pub fn decision_rule(&self, literal_or_id: i64) -> Result<usize, SolverBug> {
         let id = literal_or_id.abs();
         self.queue
@@ -95,7 +95,7 @@ impl Decisions {
         self.queue[self.queue.len() - 1].literal
     }
 
-    /// `resetToOffset($offset)` : garde `offset + 1` décisions.
+    /// `resetToOffset($offset)`: keeps `offset + 1` decisions.
     pub fn reset_to_offset(&mut self, offset: i64) {
         while (self.queue.len() as i64) > offset + 1 {
             let d = self.queue.pop().expect("non-empty");

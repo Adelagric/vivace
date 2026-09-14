@@ -1,10 +1,10 @@
-//! Version du paquet racine — port de `RootPackageLoader::load` +
+//! Root package version: port of `RootPackageLoader::load` +
 //! `VersionGuesser::guessGitVersion` (docs/reference/RootPackageLoader.php,
-//! VersionGuesser.php, Composer 2.10.3). Ordre : `version` du composer.json,
-//! sinon `COMPOSER_ROOT_VERSION`, sinon git (branche courante ; HEAD détaché
-//! → `dev-<sha>` puis tag exact ; branche de feature → branche parente la plus
-//! proche par `git rev-list`), sinon `1.0.0+no-version-set`.
-//! hg/fossil/svn ne sont pas portés (fallback au défaut, comme sans VCS).
+//! VersionGuesser.php, Composer 2.10.3). Order: `version` from composer.json,
+//! else `COMPOSER_ROOT_VERSION`, else git (current branch; detached HEAD ->
+//! `dev-<sha>` then exact tag; feature branch -> closest parent branch by
+//! `git rev-list`), else `1.0.0+no-version-set`.
+//! hg/fossil/svn are not ported (fallback to the default, as without a VCS).
 
 use crate::version::{normalize_pretty, UnsupportedVersion};
 use serde_json::Value;
@@ -14,7 +14,7 @@ use std::process::Command;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RootVersion {
     pub pretty_version: String,
-    /// Version normalisée (`version_normalized` de Composer).
+    /// Normalised version (Composer's `version_normalized`).
     pub version: String,
     pub reference: Option<String>,
 }
@@ -25,8 +25,8 @@ fn normalize_or_raw(v: &str) -> String {
     normalize_pretty(v).unwrap_or_else(|_| v.to_owned())
 }
 
-/// `VersionParser::normalizeBranch` (composer/semver) : `1.2` → `1.2.x.x-dev`
-/// numérique (x → 9999999), sinon `dev-<name>`.
+/// `VersionParser::normalizeBranch` (composer/semver): `1.2` -> numeric
+/// `1.2.x.x-dev` (x -> 9999999), else `dev-<name>`.
 pub fn normalize_branch(name: &str) -> String {
     let name = name.trim();
     let stripped = name
@@ -83,7 +83,7 @@ fn is_feature_branch(manifest: &Value, branch: &str) -> bool {
     if non_feature.iter().any(|n| n == branch) {
         return false;
     }
-    // `\d+\..+` : branche numérique de type 1.x / 2.2
+    // `\d+\..+`: numeric branch of the 1.x / 2.2 kind
     let mut it = branch.splitn(2, '.');
     if let (Some(head), Some(rest)) = (it.next(), it.next()) {
         if !head.is_empty() && head.bytes().all(|b| b.is_ascii_digit()) && !rest.is_empty() {
@@ -100,7 +100,7 @@ fn git(project: &Path, args: &[&str]) -> Option<String> {
         .env("GIT_DIR", project.join(".git"))
         .env("GIT_WORK_TREE", project)
         .env_remove("GIT_INDEX_FILE")
-        // GitUtil::cleanEnv : sortie en anglais, jamais d'invite interactive.
+        // GitUtil::cleanEnv: English output, never an interactive prompt.
         .env("LANGUAGE", "C")
         .env("LC_ALL", "C")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -133,7 +133,7 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
         if line.is_empty() {
             continue;
         }
-        // Ligne courante : `* <nom|(no branch)|(HEAD detached at X)> <sha> …`
+        // Current line: `* <name|(no branch)|(HEAD detached at X)> <sha> ...`
         if let Some(rest) = line.strip_prefix("* ") {
             let rest = rest.trim_start();
             let (name, tail) = if rest.starts_with('(') {
@@ -166,7 +166,7 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
             }
             commit = Some(sha.to_owned());
         }
-        // Candidats : `[* ] <nom|remotes/origin/nom> <sha>` (nom sans `/`), hors `*/HEAD`.
+        // Candidates: `[* ] <name|remotes/origin/name> <sha>` (name without `/`), excluding `*/HEAD`.
         let trimmed = line.trim_start_matches("* ").trim_start();
         let mut parts = trimmed.split_whitespace();
         let (Some(name), Some(sha)) = (parts.next(), parts.next()) else {
@@ -211,7 +211,7 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
         }
     }
     let version = version?;
-    // postprocess : `X.9999999…-dev` s'affiche `X.x-dev`.
+    // postprocess: `X.9999999...-dev` displays as `X.x-dev`.
     let pretty = if version.ends_with("-dev") && version.contains(".9999999") {
         collapse_nines(&version)
     } else {
@@ -232,8 +232,8 @@ fn collapse_nines(version: &str) -> String {
     out.replace('\u{0}', ".x")
 }
 
-/// `guessFeatureVersion` avec `git rev-list %candidate%..%branch%` : la
-/// branche parente non-feature dont le delta est le plus court gagne.
+/// `guessFeatureVersion` with `git rev-list %candidate%..%branch%`: the
+/// non-feature parent branch with the shortest delta wins.
 fn guess_feature_version(
     manifest: &Value,
     version: &str,
@@ -278,7 +278,7 @@ fn guess_feature_version(
         let Some(out) = git(project, &["rev-list", &format!("{candidate}..{branch}")]) else {
             continue;
         };
-        // À longueur égale, un candidat plus loin dans l'ordre remplace le précédent.
+        // At equal length, a candidate later in the order replaces the previous one.
         if out.len() <= best_len {
             best_len = out.len();
             result = (
@@ -293,8 +293,8 @@ fn guess_feature_version(
     result
 }
 
-/// strnatcasecmp minimal (mêmes règles que vivace-autoload::natsort, dupliqué
-/// pour éviter une dépendance croisée) — suffit pour trier des noms de branches.
+/// Minimal strnatcasecmp (same rules as vivace-autoload::natsort, duplicated
+/// to avoid a cross dependency); enough to sort branch names.
 fn strnatcasecmp(a: &str, b: &str) -> std::cmp::Ordering {
     let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
     let (ab, bb) = (a.as_bytes(), b.as_bytes());
@@ -325,7 +325,7 @@ fn strnatcasecmp(a: &str, b: &str) -> std::cmp::Ordering {
     (ab.len() - i).cmp(&(bb.len() - j))
 }
 
-/// Détermine la version racine comme RootPackageLoader.
+/// Determines the root version like RootPackageLoader.
 pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
     if let Some(v) = manifest.get("version").and_then(Value::as_str) {
         return RootVersion {
@@ -336,7 +336,7 @@ pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
     }
     if let Ok(env) = std::env::var("COMPOSER_ROOT_VERSION") {
         if !env.is_empty() {
-            // `1.2-dev` → `1.2.x-dev`
+            // `1.2-dev` -> `1.2.x-dev`
             let v = match env.strip_suffix("-dev") {
                 Some(num)
                     if !num.is_empty()
@@ -368,8 +368,8 @@ pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
 /// `VersionParser::DEFAULT_BRANCH_ALIAS`.
 pub const DEFAULT_BRANCH_ALIAS: &str = "9999999-dev";
 
-/// `VersionParser::parseNumericAliasPrefix` (composer/semver) : `1.2.x-dev` et
-/// `1.2-dev` → `1.2.`, sinon None. Insensible à la casse comme le motif PCRE.
+/// `VersionParser::parseNumericAliasPrefix` (composer/semver): `1.2.x-dev` and
+/// `1.2-dev` -> `1.2.`, else None. Case-insensitive like the PCRE pattern.
 pub fn parse_numeric_alias_prefix(branch: &str) -> Option<String> {
     let n = branch.len();
     if n < 4 || !branch.is_char_boundary(n - 4) || !branch[n - 4..].eq_ignore_ascii_case("-dev") {
@@ -386,8 +386,8 @@ pub fn parse_numeric_alias_prefix(branch: &str) -> Option<String> {
     numeric.then(|| format!("{rest}."))
 }
 
-/// Version jolie d'un alias normalisé, comme ArrayLoader :
-/// `preg_replace('{(\.9{7})+}', '.x', …)`.
+/// Pretty version of a normalised alias, like ArrayLoader:
+/// `preg_replace('{(\.9{7})+}', '.x', ...)`.
 fn pretty_alias(normalized: &str) -> String {
     const X: &str = ".9999999";
     let mut out = String::with_capacity(normalized.len());
@@ -404,13 +404,13 @@ fn pretty_alias(normalized: &str) -> String {
     out
 }
 
-/// `ArrayLoader::getBranchAlias` (Composer 2.10.3) : l'alias que Composer
-/// attache à un paquet (racine ou verrouillé) dont la version est une branche
-/// (`dev-*` ou `*-dev`). Priorité à `extra.branch-alias` (cible `-dev`,
-/// normalisée par normalizeBranch, source égale à la version sans casse,
-/// préfixe numérique compatible), sinon `9999999-dev` si `default-branch`
-/// est vrai et que la version n'a pas de préfixe numérique.
-/// Retourne (alias normalisé, alias joli) — le joli est celui d'installed.php.
+/// `ArrayLoader::getBranchAlias` (Composer 2.10.3): the alias Composer
+/// attaches to a package (root or locked) whose version is a branch (`dev-*`
+/// or `*-dev`). `extra.branch-alias` takes priority (`-dev` target,
+/// normalised by normalizeBranch, source equal to the version ignoring case,
+/// compatible numeric prefix), else `9999999-dev` if `default-branch` is
+/// true and the version has no numeric prefix.
+/// Returns (normalised alias, pretty alias); the pretty one is installed.php's.
 pub fn branch_alias_of(
     version: &str,
     extra: Option<&Value>,
@@ -465,8 +465,8 @@ pub fn branch_alias_of(
     None
 }
 
-/// Alias de branche de la racine : getBranchAlias sur le composer.json, la
-/// version étant la version jolie retenue par RootPackageLoader.
+/// Branch alias of the root: getBranchAlias on the composer.json, the version
+/// being the pretty version retained by RootPackageLoader.
 pub fn branch_alias(manifest: &Value, root: &RootVersion) -> Option<(String, String)> {
     let default_branch = manifest
         .get("default-branch")
@@ -505,7 +505,7 @@ mod tests {
         assert!(!is_feature_branch(&m, "2.2"));
         assert!(is_feature_branch(&m, "feature-x"));
         let m = json!({"non-feature-branches": ["release-.*"]});
-        assert!(is_feature_branch(&m, "release-1")); // la valeur est utilisée comme regex chez Composer : littéral ici
+        assert!(is_feature_branch(&m, "release-1")); // the value is used as a regex in Composer: literal here
     }
 
     #[test]
@@ -539,7 +539,7 @@ mod tests {
         assert_eq!(r.version, "dev-main");
         assert_eq!(r.reference.as_deref().map(str::len), Some(40));
 
-        // Branche de feature : la parente (main) est retenue.
+        // Feature branch: the parent (main) is retained.
         run(&["checkout", "-q", "-b", "feature-x"]);
         std::fs::write(p.join("b.txt"), "b").expect("write");
         run(&["add", "."]);
@@ -547,7 +547,7 @@ mod tests {
         let r = detect(&json!({}), p);
         assert_eq!(r.pretty_version, "dev-main");
 
-        // Branche numérique + alias.
+        // Numeric branch + alias.
         run(&["checkout", "-q", "-b", "2.2"]);
         let m = json!({"extra": {"branch-alias": {"dev-2.2": "2.2.x-dev"}}});
         let r = detect(&m, p);
@@ -559,7 +559,7 @@ mod tests {
             "l'alias est indexé par dev-2.2, pas par la version jolie x-dev"
         );
 
-        // Tag exact sur HEAD détaché.
+        // Exact tag on detached HEAD.
         run(&["tag", "v1.2.3"]);
         run(&["checkout", "-q", "--detach", "HEAD"]);
         let r = detect(&json!({}), p);

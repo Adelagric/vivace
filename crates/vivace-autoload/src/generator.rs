@@ -1,12 +1,12 @@
-//! Port de `AutoloadGenerator::dump` (docs/reference/AutoloadGenerator.php) :
-//! package map (racine + paquets installés), tri (PackageSorter), fusion des
-//! règles PSR-0/PSR-4/classmap/files/exclude, scan de classmap (avec `-o` :
-//! tous les répertoires PSR), puis génération de vendor/autoload.php et de
+//! Port of `AutoloadGenerator::dump` (docs/reference/AutoloadGenerator.php):
+//! package map (root + installed packages), sorting (PackageSorter), merging
+//! of the PSR-0/PSR-4/classmap/files/exclude rules, classmap scan (with `-o`:
+//! every PSR directory), then generation of vendor/autoload.php and
 //! vendor/composer/{autoload_*.php, platform_check.php, ClassLoader.php,
-//! LICENSE}. Parité tenue par harness/diff-vendor.sh --with-autoloader.
+//! LICENSE}. Parity is held by harness/diff-vendor.sh --with-autoloader.
 //!
-//! Les noms de classes circulent en octets bruts (voir classmap.rs) ; les
-//! fichiers qui les contiennent sont assemblés en `Vec<u8>`.
+//! Class names travel as raw bytes (see classmap.rs); the files containing
+//! them are assembled as `Vec<u8>`.
 
 use crate::classmap::{AutoloadType, Scanner};
 use crate::pathutil::{
@@ -57,12 +57,12 @@ pub struct DumpOptions {
     pub ignore_all_platform_reqs: bool,
     pub ignored_platform_reqs: Vec<String>,
     pub suffix: Option<String>,
-    /// Racine du store + racine du cache : active le cache de classmap par
-    /// entrée de store (None = scan complet à chaque fois).
+    /// Store root + cache root: enables the per-store-entry classmap cache
+    /// (None = full scan every time).
     pub classmap_cache: Option<ClassmapCacheConfig>,
-    /// Entrées ajoutées à la classmap de la racine par un plugin émulé avant
-    /// le dump (PRE_AUTOLOAD_DUMP de drupal/core-composer-scaffold :
-    /// `array_merge($autoload['classmap'], …)`), relatives au projet.
+    /// Entries added to the root classmap by an emulated plugin before the
+    /// dump (PRE_AUTOLOAD_DUMP of drupal/core-composer-scaffold:
+    /// `array_merge($autoload['classmap'], ...)`), relative to the project.
     pub extra_root_classmap: Vec<String>,
 }
 
@@ -78,11 +78,11 @@ pub struct DumpReport {
     pub warnings: Vec<String>,
 }
 
-/// Un paquet vu par le générateur.
+/// A package as seen by the generator.
 struct Pkg {
     name: String,
-    /// Chemin d'installation absolu normalisé ; None pour un metapackage ;
-    /// "" pour la racine.
+    /// Normalized absolute install path; None for a metapackage; "" for the
+    /// root.
     install_path: Option<String>,
     target_dir: Option<String>,
     autoload: Map<String, Value>,
@@ -98,8 +98,8 @@ fn obj(v: Option<&Value>) -> Map<String, Value> {
     v.and_then(Value::as_object).cloned().unwrap_or_default()
 }
 
-/// `array_merge_recursive($autoload, $autoloadDev)` restreint aux formes du
-/// schéma Composer : listes concaténées, maps fusionnées clé à clé.
+/// `array_merge_recursive($autoload, $autoloadDev)` restricted to the shapes
+/// of the Composer schema: lists concatenated, maps merged key by key.
 fn merge_autoload(a: &Map<String, Value>, b: &Map<String, Value>) -> Map<String, Value> {
     let mut out = a.clone();
     for (k, vb) in b {
@@ -143,7 +143,7 @@ fn merge_autoload(a: &Map<String, Value>, b: &Map<String, Value>) -> Map<String,
     out
 }
 
-/// Chemins d'autoload fusionnés (`parseAutoloads`).
+/// Merged autoload paths (`parseAutoloads`).
 #[derive(Default)]
 struct Autoloads {
     psr0: Vec<(String, Vec<String>)>,
@@ -177,8 +177,8 @@ pub fn dump(
     std::fs::create_dir_all(&target_dir).map_err(io(&target_dir))?;
     let target_path = format!("{vendor_path}/composer");
 
-    // Chemin d'installation absolu d'un paquet : sous vendor/ via le vendor
-    // canonicalisé (symlinks résolus comme Composer), sinon sous la racine.
+    // Absolute install path of a package: under vendor/ via the canonicalized
+    // vendor (symlinks resolved like Composer), otherwise under the root.
     let install_abs = |name: &str| -> Option<String> {
         let rel = layout.rel(name)?;
         Some(match rel.strip_prefix("vendor/") {
@@ -192,8 +192,8 @@ pub fn dump(
     let app_base_dir_code =
         find_shortest_path_code(&vendor_path, &base_path, false).replace("__DIR__", "$vendorDir");
 
-    // Package map : racine puis paquets installés (état = ce que l'installeur
-    // a posé : lock.wanted_packages(dev_mode)).
+    // Package map: root then installed packages (state = what the installer
+    // laid down: lock.wanted_packages(dev_mode)).
     let root = Pkg {
         name: root_manifest
             .get("name")
@@ -260,7 +260,7 @@ pub fn dump(
         });
     }
 
-    // Cache de classmap : chemin d'installation absolu → entrée de store.
+    // Classmap cache: absolute install path -> store entry.
     let store_entries: Vec<(String, PathBuf)> = match &opts.classmap_cache {
         Some(cfg) => {
             let store = vivace_core::store::Store::at(cfg.store_root.clone());
@@ -328,7 +328,7 @@ pub fn dump(
         )?;
     }
     if opts.optimize || opts.authoritative {
-        // krsort des namespaces, psr-4 puis psr-0 dans chaque groupe
+        // krsort of the namespaces, psr-4 then psr-0 within each group
         let mut by_ns: BTreeMap<String, Vec<(Vec<String>, AutoloadType)>> = BTreeMap::new();
         for (ns, paths) in &autoloads.psr4 {
             by_ns
@@ -399,8 +399,8 @@ pub fn dump(
         classmap_body.extend_from_slice(b",\n");
     }
 
-    // Suffixe : override, config.autoloader-suffix, autoload.php existant,
-    // content-hash du lock, sinon aléatoire.
+    // Suffix: override, config.autoloader-suffix, existing autoload.php,
+    // the lock's content-hash, otherwise random.
     let suffix = resolve_suffix(opts, root_manifest, &vendor_dir, lock);
 
     write(
@@ -655,12 +655,12 @@ fn resolve_suffix(
     format!("{:x}", hasher.finalize())
 }
 
-/// `parseAutoloads` : filtrage dev, tri, puis fusion par type.
+/// `parseAutoloads`: dev filtering, sorting, then merging by type.
 fn parse_autoloads(packages: &[Pkg], dev_mode: bool, base_path: &str) -> Autoloads {
     let root = &packages[0];
     let others: Vec<&Pkg> = packages[1..].iter().collect();
 
-    // !devMode : filterPackageMap (atteignables depuis les require de la racine).
+    // !devMode: filterPackageMap (reachable from the root's require).
     let filtered: Vec<&Pkg> = if dev_mode {
         others
     } else {
@@ -722,7 +722,7 @@ fn parse_autoloads(packages: &[Pkg], dev_mode: bool, base_path: &str) -> Autoloa
             .map(|(_, p)| p)
             .collect(),
     };
-    // krsort : ordre décroissant des clés (strcmp).
+    // krsort: descending key order (strcmp).
     out.psr0.sort_by(|a, b| b.0.cmp(&a.0));
     out.psr4.sort_by(|a, b| b.0.cmp(&a.0));
     out
@@ -736,7 +736,7 @@ fn effective_autoload(p: &Pkg, dev_mode: bool) -> Map<String, Value> {
     }
 }
 
-/// (clé/namespace, path déclaré ajusté, relativePath) pour un type d'autoload.
+/// (key/namespace, adjusted declared path, relativePath) for an autoload type.
 fn package_paths(p: &Pkg, ty: &str, dev_mode: bool) -> Vec<(String, String, String)> {
     let Some(install) = &p.install_path else {
         return Vec::new();
@@ -806,7 +806,7 @@ fn parse_type_map(packages: &[&Pkg], ty: &str, dev_mode: bool) -> Vec<(String, V
     map
 }
 
-/// files (id md5 → chemin), classmap et exclude (clé ignorée).
+/// files (md5 id -> path), classmap and exclude (key ignored).
 fn parse_type_list(
     packages: &[&Pkg],
     ty: &str,
@@ -838,7 +838,7 @@ fn parse_type_list(
     out
 }
 
-/// Fragment de regex pour une règle exclude-from-classmap.
+/// Regex fragment for an exclude-from-classmap rule.
 fn exclusion_piece(p: &Pkg, path: &str, base_path: &str) -> Option<String> {
     let trimmed = path.replace('\\', "/");
     let trimmed = trimmed.trim_matches('/');
@@ -847,7 +847,7 @@ fn exclusion_piece(p: &Pkg, path: &str, base_path: &str) -> Option<String> {
         quoted = quoted.replace("//", "/");
     }
     let pattern = quoted.replace("\\*\\*", ".+?").replace("\\*", "[^/]+?");
-    // Préfixe `(\.\.?/)+` → updir
+    // `(\.\.?/)+` prefix -> updir
     let mut rest = pattern.as_str();
     let mut updir = String::new();
     loop {
@@ -903,7 +903,7 @@ fn build_exclusion_regex(
         .map_err(|e| AutoloadError::Regex(e.to_string()))
 }
 
-/// `^(([^.+*?\[^\]$(){}=!<>|:\\#-]+|\\[.+*?\[^\]$(){}=!<>|:#-])*).*` → préfixe littéral.
+/// `^(([^.+*?\[^\]$(){}=!<>|:\\#-]+|\\[.+*?\[^\]$(){}=!<>|:#-])*).*`: literal prefix.
 fn literal_prefix(pattern: &str) -> String {
     let specials = ".+*?[^]$(){}=!<>|:\\#-";
     let bytes: Vec<char> = pattern.chars().collect();
@@ -925,7 +925,7 @@ fn literal_prefix(pattern: &str) -> String {
     out
 }
 
-/// `getPathCode` : expression PHP (`$vendorDir . '/x'`, `$baseDir . '/y'`, absolu).
+/// `getPathCode`: PHP expression (`$vendorDir . '/x'`, `$baseDir . '/y'`, absolute).
 fn get_path_code(base_path: &str, vendor_path: &str, path: &str) -> String {
     let abs = normalize_path(&absolute(base_path, path));
     let (mut prefix, rel) = if abs == vendor_path || abs.starts_with(&format!("{vendor_path}/")) {
@@ -947,8 +947,8 @@ fn get_path_code(base_path: &str, vendor_path: &str, path: &str) -> String {
     format!("{prefix}{}", php_str(&rel))
 }
 
-/// Valeur absolue d'un chemin d'autoload (ce que PHP obtient en évaluant le
-/// code de getPathCode), pour le fichier static.
+/// Absolute value of an autoload path (what PHP gets by evaluating the
+/// getPathCode code), for the static file.
 fn absolute_value(base_path: &str, vendor_path: &str, path: &str) -> String {
     let abs = normalize_path(&absolute(base_path, path));
     let value = if abs == vendor_path || abs.starts_with(&format!("{vendor_path}/")) {
@@ -1008,7 +1008,7 @@ fn build_static_file(
         )
     };
 
-    // Reconstruction de l'état de ClassLoader.
+    // Rebuilding the ClassLoader state.
     let mut files: Vec<(PhpKey, PhpVal)> = Vec::new();
     for (id, p) in &autoloads.files {
         files.push((PhpKey::str(id), PhpVal::str(&abs(p))));
@@ -1153,7 +1153,7 @@ fn platform_check(
             if opts.platform_check == PlatformCheckMode::Full {
                 if let Some(ext) = target.strip_prefix("ext-") {
                     let ext = ext.to_ascii_lowercase();
-                    // Un fournisseur (replace/provide ext-*) couvre l'extension.
+                    // A provider (replace/provide ext-*) covers the extension.
                     if providers.contains_key(&ext) {
                         continue;
                     }

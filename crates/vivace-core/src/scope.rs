@@ -1,29 +1,29 @@
-//! Détecteur hors-scope : décide, AVANT de toucher au disque, si vivace peut
-//! installer ce lock nativement ou s'il doit déléguer à `composer install`
-//! (fallback par défaut) / échouer explicitement (sans Composer disponible).
+//! Out-of-scope detector: decides, BEFORE touching the disk, whether vivace
+//! can install this lock natively or must delegate to `composer install`
+//! (default fallback) / fail explicitly (when Composer is not available).
 //!
-//! Principe (plan r1/F3-F5) : jamais un vendor/ silencieusement divergent.
-//! Un plugin inconnu ou modifiant le layout → hors scope. Les plugins prouvés
-//! bénins au boot (qualification des fixtures) sont installés comme des
-//! libraries ordinaires, avec un avertissement.
+//! Principle (plan r1/F3-F5): never a silently divergent vendor/. An unknown
+//! plugin, or one that changes the layout, is out of scope. Plugins proven
+//! harmless at boot (fixture qualification) are installed like ordinary
+//! libraries, with a warning.
 
 use crate::layout::Layout;
 use crate::lock::{DistKind, Lock, LockPackage};
 use serde_json::Value;
 use std::path::Path;
 
-/// Plugins émulés nativement par vivace (sortie identique, test de drift).
-/// composer/installers (voir `layout`) et drupal/core-composer-scaffold (voir
-/// `scaffold`) le sont sous conditions vérifiées avant toute écriture.
+/// Plugins emulated natively by vivace (identical output, drift test).
+/// composer/installers (see `layout`) and drupal/core-composer-scaffold (see
+/// `scaffold`) are, under conditions checked before any write.
 pub const EMULATED_PLUGINS: &[&str] = &[
     "symfony/runtime",
     "composer/installers",
     "drupal/core-composer-scaffold",
 ];
 
-/// Plugins dont l'inaction est prouvée sans effet sur le contenu de vendor/
-/// nécessaire au boot (fixtures qualifiées avec `--no-plugins`). Installés
-/// comme libraries, signalés par un avertissement.
+/// Plugins whose inaction is proven to have no effect on the vendor/ content
+/// needed at boot (fixtures qualified with `--no-plugins`). Installed as
+/// libraries, reported with a warning.
 pub const BENIGN_PLUGINS: &[&str] = &[
     "symfony/flex",
     "composer/package-versions-deprecated",
@@ -32,16 +32,16 @@ pub const BENIGN_PLUGINS: &[&str] = &[
     "phpstan/extension-installer",
     "rector/extension-installer",
     "pestphp/pest-plugin",
-    // N'écoute que POST_CREATE_PROJECT_CMD / POST_INSTALL_CMD pour afficher
-    // un message (MessagePlugin::getSubscribedEvents) : aucun effet disque.
+    // Only listens to POST_CREATE_PROJECT_CMD / POST_INSTALL_CMD to print a
+    // message (MessagePlugin::getSubscribedEvents): no disk effect.
     "drupal/core-project-message",
-    // N'écoute que POST_UPDATE_CMD / POST_CREATE_PROJECT_CMD, et n'agit que
-    // dans un contexte `require` (Plugin::getSubscribedEvents) : inerte à l'install.
+    // Only listens to POST_UPDATE_CMD / POST_CREATE_PROJECT_CMD, and only acts
+    // in a `require` context (Plugin::getSubscribedEvents): inert at install.
     "drupal/core-recipe-unpack",
 ];
 
-/// Plugins connus pour modifier le layout d'installation ou le contenu des
-/// paquets : toujours hors scope.
+/// Plugins known to change the install layout or the package contents:
+/// always out of scope.
 pub const LAYOUT_PLUGINS: &[&str] = &[
     "cweagans/composer-patches",
     "oomphinc/composer-installers-extender",
@@ -50,14 +50,14 @@ pub const LAYOUT_PLUGINS: &[&str] = &[
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ScopeIssue {
-    /// Plugin absent des listes connues — comportement imprévisible.
+    /// Plugin absent from the known lists: unpredictable behaviour.
     UnknownPlugin(String),
-    /// Plugin connu pour changer le layout (patches, installers-extender…).
+    /// Plugin known to change the layout (patches, installers-extender...).
     LayoutPlugin(String),
-    /// Disposition non reproductible (composer/installers : version non
-    /// portée, framework à logique personnalisée, cible refusée…).
+    /// Non-reproducible layout (composer/installers: version not ported,
+    /// framework with custom logic, refused target...).
     Layout(String),
-    /// Paquet sans dist zip exploitable (source-only, dist exotique).
+    /// Package without a usable zip dist (source-only, exotic dist).
     NoUsableDist(String),
 }
 
@@ -78,14 +78,14 @@ impl std::fmt::Display for ScopeIssue {
 
 #[derive(Debug, Default)]
 pub struct ScopeReport {
-    /// Bloquants : au moins un → fallback (ou erreur sans Composer).
+    /// Blocking: at least one -> fallback (or error without Composer).
     pub issues: Vec<ScopeIssue>,
-    /// Non bloquants : plugins bénins ignorés, à signaler sur stderr.
+    /// Non-blocking: harmless plugins ignored, to report on stderr.
     pub skipped_plugins: Vec<String>,
-    /// Disposition résolue (None si une issue de layout bloque).
+    /// Resolved layout (None if a layout issue blocks).
     pub layout: Option<Layout>,
-    /// drupal/core-composer-scaffold verrouillé et autorisé : l'installeur
-    /// vérifie l'empreinte de sa source et planifie le scaffold.
+    /// drupal/core-composer-scaffold locked and allowed: the installer checks
+    /// its source fingerprint and plans the scaffold.
     pub scaffold: bool,
 }
 
@@ -95,8 +95,8 @@ impl ScopeReport {
     }
 }
 
-/// `plugins_enabled` = pas de `--no-plugins` : avec le flag, Composer ignore
-/// tout plugin, composer/installers compris — tout va dans vendor/.
+/// `plugins_enabled` = no `--no-plugins`: with the flag, Composer ignores
+/// every plugin, composer/installers included; everything goes into vendor/.
 pub fn analyze(
     project_dir: &Path,
     lock: &Lock,
@@ -137,7 +137,7 @@ fn classify_package(p: &LockPackage, report: &mut ScopeReport) {
 
     if p.package_type() == "composer-plugin" {
         if EMULATED_PLUGINS.contains(&name.as_str()) {
-            // Émulé nativement : rien à signaler.
+            // Emulated natively: nothing to report.
         } else if BENIGN_PLUGINS.contains(&name.as_str()) {
             report.skipped_plugins.push(name.clone());
         } else if LAYOUT_PLUGINS.contains(&name.as_str()) {
@@ -215,8 +215,8 @@ mod tests {
             {"name": "a/meta", "version": "1.0.0", "type": "metapackage"},
             zip_pkg("composer/installers", "composer-plugin"),
         ]));
-        // installer-paths seul est inerte (comme chez Composer) ; le plugin
-        // sans allow-plugins, lui, bloque.
+        // installer-paths alone is inert (as in Composer); the plugin without
+        // allow-plugins, however, blocks.
         let manifest = json!({"extra": {"installer-paths": {"web/modules/{$name}": []}}});
         let r = analyze(&proj(), &lock, &manifest, true, true);
         assert_eq!(r.issues.len(), 2, "{:?}", r.issues);

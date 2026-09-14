@@ -1,11 +1,11 @@
-//! Oracle `JsonManipulator` : les scénarios d'édition que `require` et
-//! `remove` produisent (ajout, remplacement et retrait de liens avec ou
-//! sans tri, sous-clés de `config`, clés racines) sont rejoués par le phar
-//! (tools/oracle-json-manipulator.php) et par le port sur un corpus de
-//! manifestes réels — les composer.json des fixtures et, s'ils sont
-//! présents, ceux des paquets installés dans fixtures/work — plus des cas
-//! synthétiques de mise en forme. Retours, texte final et échec (exception
-//! côté PHP, `Err` côté Rust) doivent coïncider.
+//! `JsonManipulator` oracle: the edit scenarios `require` and `remove`
+//! produce (adding, replacing and removing links with or without sorting,
+//! `config` sub-keys, root keys) are replayed by the phar
+//! (tools/oracle-json-manipulator.php) and by the port on a corpus of real
+//! manifests (the fixtures' composer.json files and, when present, those of
+//! the packages installed in fixtures/work) plus synthetic formatting
+//! cases. Return values, final text and failure (exception on the PHP side,
+//! `Err` on the Rust side) must match.
 
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -35,7 +35,7 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Une opération du scénario, sous la forme que le script PHP attend.
+/// One scenario operation, in the form the PHP script expects.
 #[derive(Clone, Debug)]
 enum Op {
     AddLink(&'static str, String, &'static str, bool),
@@ -74,7 +74,7 @@ impl Op {
     }
 }
 
-/// Résultat d'un scénario, des deux côtés.
+/// Result of a scenario, on both sides.
 #[derive(Debug, PartialEq)]
 struct Outcome {
     results: Vec<bool>,
@@ -171,8 +171,8 @@ fn run_php(phar: &Path, files: &[(String, Vec<Vec<Op>>)]) -> Vec<Vec<Outcome>> {
         .collect()
 }
 
-/// Les scénarios joués sur chaque manifeste : ceux de `require`/`remove`,
-/// paramétrés par les clés que le fichier contient déjà.
+/// The scenarios played on each manifest: those of `require`/`remove`,
+/// parameterized by the keys the file already contains.
 fn scenarios(contents: &str) -> Vec<Vec<Op>> {
     let decoded: Value = serde_json::from_str(contents).unwrap_or(Value::Null);
     let first_key = |section: &str| -> Option<String> {
@@ -340,9 +340,9 @@ fn synthetic() -> Vec<(&'static str, String)> {
         ("leading-blank", "\n\n  {\n    \"require\": {\n        \"c/d\": \"^1\"\n    }\n}".into()),
         ("mixed-indent", "{\n  \"name\": \"a/b\",\n    \"require\": {\n            \"c/d\": \"^1\"\n    }\n}\n".into()),
         ("scripts-list", "{\n    \"scripts\": {\n        \"post-install-cmd\": [\"a\", \"b\"],\n        \"test\": \"phpunit\"\n    }\n}\n".into()),
-        // Cas relevés en revue : section en liste, clés entières, sous-clé
-        // sur une chaîne / un booléen / une liste, `-0`, U+2028, clé NUL,
-        // imbrication au-delà de 128 niveaux.
+        // Cases raised in review: section as a list, integer keys, sub-key
+        // on a string / a boolean / a list, `-0`, U+2028, NUL key, nesting
+        // beyond 128 levels.
         ("list-section", "{\n    \"require\": [{\"c/d\": \"^1\"}],\n    \"require-dev\": [\"x\", \"y\"]\n}\n".into()),
         ("int-keys", "{\n    \"require\": {\n        \"0\": \"^1\",\n        \"c/d\": \"^1\"\n    },\n    \"require-dev\": {\n        \"-3\": \"*\"\n    }\n}\n".into()),
         ("int-key-alone", "{\n    \"require\": {\n        \"0\": \"^1\"\n    }\n}\n".into()),
@@ -354,8 +354,8 @@ fn synthetic() -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Les composer.json des fixtures, puis ceux des paquets installés dans
-/// fixtures/work (dédoublonnés par contenu).
+/// The fixtures' composer.json files, then those of the packages installed
+/// in fixtures/work (deduplicated by content).
 fn corpus() -> Vec<(String, String)> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();

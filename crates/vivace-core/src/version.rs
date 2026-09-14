@@ -1,12 +1,12 @@
-//! Sous-ensemble du versioning Composer nécessaire au platform-check :
-//! versions numériques `X[.Y[.Z[.W]]]` avec suffixe de stabilité optionnel
-//! (`-dev`, `-alpha.N`, `-beta.N`, `-RC.N`, `-patch.N`), comparées comme
-//! `composer/semver` (normalisation 4 composantes, dev < alpha < beta < RC <
-//! stable < patch). Les branches (`dev-master`, `1.x-dev`) sont hors de ce
-//! sous-ensemble : `parse` renvoie une erreur et l'appelant traite le paquet
-//! comme hors-scope plutôt que de deviner.
+//! Subset of Composer versioning needed by the platform check: numeric
+//! versions `X[.Y[.Z[.W]]]` with an optional stability suffix (`-dev`,
+//! `-alpha.N`, `-beta.N`, `-RC.N`, `-patch.N`), compared like
+//! `composer/semver` (4-component normalisation, dev < alpha < beta < RC <
+//! stable < patch). Branches (`dev-master`, `1.x-dev`) are outside this
+//! subset: `parse` returns an error and the caller treats the package as
+//! out of scope rather than guessing.
 //!
-//! La parité est tenue par les tests différentiels contre
+//! Parity is held by the differential tests against
 //! `Composer\Semver\Semver::satisfies` (tests/oracle_semver.rs).
 
 use std::cmp::Ordering;
@@ -25,7 +25,7 @@ pub enum Stability {
 pub struct Version {
     pub parts: [u64; 4],
     pub stability: Stability,
-    /// Numéro du pré-release (`-beta2` → 2), 0 si absent.
+    /// Pre-release number (`-beta2` -> 2), 0 if absent.
     pub pre_number: u64,
 }
 
@@ -44,7 +44,7 @@ impl Version {
             return Err(UnsupportedVersion(input.to_owned()));
         }
 
-        // Sépare suffixe de stabilité : `1.2.3-beta2`, `1.2.3beta2`, `1.2.3-dev`.
+        // Split off the stability suffix: `1.2.3-beta2`, `1.2.3beta2`, `1.2.3-dev`.
         let (num, suffix) = split_stability(s);
         let (stability, pre_number) = parse_stability(suffix, input)?;
 
@@ -70,7 +70,7 @@ impl Version {
     }
 }
 
-/// Coupe `1.2.3-beta2` / `1.2.3beta2` / `1.2.3_RC1` en (numérique, suffixe).
+/// Splits `1.2.3-beta2` / `1.2.3beta2` / `1.2.3_RC1` into (numeric, suffix).
 fn split_stability(s: &str) -> (&str, &str) {
     match s.find(|c: char| !(c.is_ascii_digit() || c == '.')) {
         Some(i) => {
@@ -125,14 +125,14 @@ impl Ord for Version {
     }
 }
 
-/// Normalisation « pretty → normalized » de Composer (VersionParser::normalize),
-/// pour le sous-ensemble rencontré dans les locks : versions numériques
-/// (→ 4 composantes + suffixe canonique), branches `dev-*` (inchangées) et
-/// branches numériques `N.x-dev` (x → 9999999, complété à 4 composantes).
-/// Parité tenue par tests/oracle_normalize.rs.
+/// Composer's "pretty -> normalized" normalisation (VersionParser::normalize),
+/// for the subset met in locks: numeric versions (-> 4 components + canonical
+/// suffix), `dev-*` branches (unchanged) and numeric branches `N.x-dev`
+/// (x -> 9999999, padded to 4 components).
+/// Parity held by tests/oracle_normalize.rs.
 pub fn normalize_pretty(input: &str) -> Result<String, UnsupportedVersion> {
     let s = input.trim();
-    // master/trunk/default (avec ou sans `dev-`) → branche par défaut.
+    // master/trunk/default (with or without `dev-`) -> default branch.
     let lower = s.to_ascii_lowercase();
     let bare = lower.strip_prefix("dev-").unwrap_or(&lower);
     if matches!(bare, "master" | "trunk" | "default") {
@@ -149,7 +149,7 @@ pub fn normalize_pretty(input: &str) -> Result<String, UnsupportedVersion> {
         .or_else(|| s.strip_prefix('V'))
         .unwrap_or(s);
 
-    // Branche numérique `1.2.x-dev` / `1.x-dev`.
+    // Numeric branch `1.2.x-dev` / `1.x-dev`.
     if let Some(stem) = stripped
         .strip_suffix(".x-dev")
         .or_else(|| stripped.strip_suffix(".X-dev"))
@@ -197,7 +197,7 @@ pub fn normalize_pretty(input: &str) -> Result<String, UnsupportedVersion> {
         Stability::Rc => "RC",
         Stability::Patch => "patch",
     };
-    // Les suffixes sans numéro restent nus (`-alpha`), sinon numéro accolé.
+    // Suffixes without a number stay bare (`-alpha`), else the number is appended.
     let had_number = suffix.chars().any(|c| c.is_ascii_digit());
     if had_number {
         Ok(format!("{base}-{word}{pre_number}"))

@@ -1,11 +1,10 @@
-//! `vivace require` : port de `RequireCommand` (docs/reference/
-//! RequireCommand.php) et de la partie de `PackageDiscoveryTrait` qu'il
-//! atteint hors mode interactif — arguments `vendor/name[:contrainte]`,
-//! devinette de la contrainte par le `VersionSelector`, édition de
-//! composer.json par le `JsonManipulator`, mise à jour partielle, puis
-//! `updateRequirementsAfterResolution` (contrainte définitive d'après le
-//! lock, `Locker::updateHash`), restauration des fichiers si la résolution
-//! échoue.
+//! `vivace require`: port of `RequireCommand` (docs/reference/
+//! RequireCommand.php) and of the part of `PackageDiscoveryTrait` it
+//! reaches outside interactive mode: `vendor/name[:constraint]` arguments,
+//! constraint guessed by the `VersionSelector`, composer.json edited by
+//! the `JsonManipulator`, partial update, then
+//! `updateRequirementsAfterResolution` (final constraint taken from the
+//! lock, `Locker::updateHash`), files restored if the resolution fails.
 
 use anyhow::Context as _;
 use serde_json::{Map, Value};
@@ -22,7 +21,7 @@ use crate::{
     http_transport, install_after_update, project_dir, resolve_and_lock, RequireArgs, UpdateArgs,
 };
 
-/// Ce qu'une exécution manipule : chemins, sauvegardes, état de création.
+/// What a run manipulates: paths, backups, creation state.
 struct Files {
     file_label: String,
     json: PathBuf,
@@ -62,7 +61,7 @@ impl Files {
     }
 }
 
-/// `Factory::getLockFile` : `composer.json` → `composer.lock`.
+/// `Factory::getLockFile`: `composer.json` to `composer.lock`.
 fn lock_label(file: &str) -> String {
     match file.strip_suffix(".json") {
         Some(stem) => format!("{stem}.lock"),
@@ -70,7 +69,7 @@ fn lock_label(file: &str) -> String {
     }
 }
 
-/// `config.<key>` du projet puis de COMPOSER_HOME/config.json.
+/// `config.<key>` from the project, then from COMPOSER_HOME/config.json.
 pub fn config_value(manifest: &Value, key: &str) -> Option<Value> {
     if let Some(v) = manifest.get("config").and_then(|c| c.get(key)) {
         return Some(v.clone());
@@ -92,8 +91,8 @@ fn truthy(v: Option<Value>) -> bool {
     }
 }
 
-/// `updateFile` : `updateFileCleanly` (manipulateur), sinon réécriture
-/// complète du manifeste décodé.
+/// `updateFile`: `updateFileCleanly` (manipulator), otherwise a full
+/// rewrite of the decoded manifest.
 fn update_file(
     path: &Path,
     new: &[(String, String)],
@@ -129,8 +128,8 @@ fn update_file(
             .with_context(|| format!("cannot write {}", path.display()))?;
         return Ok(());
     }
-    // `$this->json->read()` puis `write` : tout est réencodé, sans les
-    // corrections de `stdClass` de JsonConfigSource.
+    // `$this->json->read()` then `write`: everything is re-encoded, without
+    // JsonConfigSource's `stdClass` fixups.
     let mut definition: Value = serde_json::from_str(&contents)
         .with_context(|| format!("{} does not contain valid JSON", path.display()))?;
     let indent = vivace_resolver::json_manipulator::detect_indenting(&contents)
@@ -182,8 +181,8 @@ fn platform_exception_details(
             .map(|&i| &session.arena[i])
             .find(|p| p.name == link.target);
         let Some(platform_pkg) = platform_pkg else {
-            // `isPlatformPackageDisabled` (clés de config.platform en
-            // minuscules).
+            // `isPlatformPackageDisabled` (config.platform keys in
+            // lowercase).
             let disabled = platform_overrides
                 .iter()
                 .any(|(k, v)| k.to_lowercase() == link.target && v == &Value::Bool(false));
@@ -205,9 +204,9 @@ fn platform_exception_details(
             .matches(&Constraint::new(Op::Eq, &platform_pkg.version))
         {
             let mut version = platform_pkg.pretty_version.clone();
-            // `isset($platformExtra['config.platform'])` : la description de
-            // la surcharge (« Package overridden via config.platform, actual:
-            // … ») suit la version.
+            // `isset($platformExtra['config.platform'])`: the override's
+            // description ("Package overridden via config.platform, actual:
+            // …") follows the version.
             if platform_pkg
                 .raw
                 .get("extra")
@@ -233,9 +232,9 @@ fn platform_exception_details(
     format!(":\n  - {}", details.join("\n  - "))
 }
 
-/// `findBestVersionAndNameForPackage` hors mode interactif : le nom
-/// canonique et la contrainte (`--fixed` : la version jolie), ou l'erreur
-/// que Composer lève.
+/// `findBestVersionAndNameForPackage` outside interactive mode: the
+/// canonical name and the constraint (`--fixed`: the pretty version), or
+/// the error Composer raises.
 fn find_best_version_and_name(
     session: &mut UpdateSession,
     name: &str,
@@ -282,8 +281,8 @@ fn find_best_version_and_name(
     if filter.is_ignored(name) {
         return Ok((name.to_owned(), "*".to_owned()));
     }
-    // `$repoSet->getProviders($name)` : l'API des fournisseurs de
-    // Packagist n'est pas portée ; aucun fournisseur.
+    // `$repoSet->getProviders($name)`: Packagist's providers API is not
+    // ported; no provider.
     let ignore_all = PlatformRequirementFilter::IgnoreAll;
     if !matches!(filter, PlatformRequirementFilter::IgnoreAll) {
         if let Some(candidate) = best(session, false, &ignore_all, false)? {
@@ -314,7 +313,7 @@ fn find_best_version_and_name(
             );
         }
     }
-    // `findSimilar` (recherche Packagist) : non portée.
+    // `findSimilar` (Packagist search): not ported.
     anyhow::bail!(
         "Could not find a matching version of package {name}. Check the package spelling, your version constraint and that the package is available in a stability which matches your minimum-stability ({effective_minimum_stability})."
     )
@@ -346,9 +345,9 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         std::fs::write(&json, "{\n}\n")
             .with_context(|| format!("{file_label} could not be created."))?;
     }
-    // Un composer.json vide : `BaseCommand::initialize` (`tryComposer`)
-    // échoue sur le JSON invalide avant même la branche `filesize === 0`
-    // de RequireCommand.
+    // An empty composer.json: `BaseCommand::initialize` (`tryComposer`)
+    // fails on the invalid JSON even before RequireCommand's
+    // `filesize === 0` branch.
     let files = Files {
         file_label: file_label.clone(),
         json: json.clone(),
@@ -356,7 +355,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         newly_created,
         composer_backup: std::fs::read_to_string(&json)
             .with_context(|| format!("{file_label} is not readable."))?,
-        // `if ($this->lockBackup)` : un lock vide ne compte pas.
+        // `if ($this->lockBackup)`: an empty lock does not count.
         lock_backup: std::fs::read_to_string(&lock)
             .ok()
             .filter(|t| !t.is_empty()),
@@ -381,8 +380,8 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         }
     }
 
-    // `requireComposer()` + le dépôt composite [plateforme, dépôts] : la
-    // session de résolution fournit les deux, sur le manifeste courant.
+    // `requireComposer()` + the composite repository [platform, repos]: the
+    // resolution session provides both, on the current manifest.
     let home = vivace_core::fetch::composer_home();
     let http = http_transport(&project, args.offline)?;
     let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
@@ -475,7 +474,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
             }
         }
     }
-    // `formatRequirements` : `name version` → tableau (le dernier gagne).
+    // `formatRequirements`: `name version` to an array (the last one wins).
     let mut formatted: Vec<(String, String)> = Vec::new();
     for (name, version) in requirements {
         match formatted.iter_mut().find(|(n, _)| *n == name) {
@@ -508,7 +507,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
             anyhow::bail!("{e}");
         }
     }
-    // `getInconsistentRequireKeys` : avertissement seulement (non interactif).
+    // `getInconsistentRequireKeys`: warning only (non-interactive).
     let by_key = |section: &str| -> Vec<String> {
         manifest
             .get(section)
@@ -570,9 +569,9 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     };
     let names: Vec<String> = requirements.iter().map(|(n, _)| n.clone()).collect();
     eprintln!("Running composer update {}{flags}", names.join(" "));
-    // `Locker::isLocked` : un lock lisible avec une clé `packages` non
-    // nulle ; un lock illisible est une ParsingException dans `doUpdate`,
-    // donc restauration et erreur.
+    // `Locker::isLocked`: a readable lock with a non-null `packages` key;
+    // an unreadable lock is a ParsingException in `doUpdate`, hence restore
+    // and error.
     let locked = match std::fs::read_to_string(&lock) {
         Ok(t) => match serde_json::from_str::<Value>(&t) {
             Ok(v) => v.get("packages").is_some_and(|p| !p.is_null()),
@@ -586,8 +585,8 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         },
         Err(_) => false,
     };
-    // Sans lock écrit (`config.lock: false`), Composer installe et devine
-    // depuis son lock virtuel ; vivace n'installe que depuis le fichier.
+    // Without a written lock (`config.lock: false`), Composer installs and
+    // guesses from its virtual lock; vivace only installs from the file.
     let lock_enabled = crate::config_lock_enabled(&files.composer_backup);
     if !lock_enabled && !args.no_install {
         anyhow::bail!("config.lock is false: `vivace require` can only install from a written composer.lock (use --no-install)");
@@ -626,8 +625,8 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     };
     let prefer_stable = args.prefer_stable || env_flag("COMPOSER_PREFER_STABLE");
     let prefer_lowest = args.prefer_lowest || env_flag("COMPOSER_PREFER_LOWEST");
-    // Une exception avant la fin de la résolution restaure les fichiers ;
-    // après (installation), elle remonte telle quelle.
+    // An exception before the end of the resolution restores the files;
+    // after it (install), it propagates as is.
     let resolved = match resolve_and_lock(&update_args, options, prefer_stable, prefer_lowest) {
         Ok(r) => r,
         Err(e) => {
@@ -648,7 +647,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         files.revert()?;
         return Ok(status);
     }
-    // Après la résolution, une installation qui échoue ne restaure rien
+    // After the resolution, a failing install restores nothing
     // (`dependencyResolutionCompleted`).
     if !args.no_install {
         let status = install_after_update(&update_args)?;
@@ -675,9 +674,9 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     Ok(0)
 }
 
-/// `updateRequirementsAfterResolution` : la contrainte définitive des
-/// paquets devinés, d'après la version verrouillée (ou installée sans
-/// lock), puis `Locker::updateHash` avec les drapeaux de stabilité.
+/// `updateRequirementsAfterResolution`: the final constraint of the
+/// guessed packages, from the locked version (or the installed one without
+/// a lock), then `Locker::updateHash` with the stability flags.
 #[allow(clippy::too_many_arguments)]
 fn update_requirements_after_resolution(
     project: &Path,
@@ -694,14 +693,14 @@ fn update_requirements_after_resolution(
     fixed: bool,
 ) -> anyhow::Result<i32> {
     use vivace_resolver::package::Origin;
-    // `$locker->isLocked()` : le lock que la résolution vient de produire
-    // (écrit, ou virtuel avec `config.lock: false`).
+    // `$locker->isLocked()`: the lock the resolution just produced
+    // (written, or virtual with `config.lock: false`).
     let lock: Option<Value> = resolved_lock
         .cloned()
         .filter(|v| v.get("packages").is_some_and(|p| !p.is_null()));
-    // `getLockedRepository(true)` ou le dépôt local : les entrées, dans
-    // l'ordre, chargées par l'ArrayLoader ; `findPackage($name, '*')` prend
-    // la première du nom.
+    // `getLockedRepository(true)` or the local repository: the entries, in
+    // order, loaded by the ArrayLoader; `findPackage($name, '*')` takes the
+    // first one with that name.
     let entries: Vec<Value> = match &lock {
         Some(l) => ["packages", "packages-dev"]
             .iter()
@@ -748,8 +747,8 @@ fn update_requirements_after_resolution(
         requirements.push((package_name.clone(), constraint));
     }
     update_file(json, &requirements, require_key, remove_key, sort_packages)?;
-    // `$locker->isLocked() && config.lock` : le lock fraîchement écrit
-    // reçoit le nouveau content-hash et les drapeaux.
+    // `$locker->isLocked() && config.lock`: the freshly written lock gets
+    // the new content-hash and the flags.
     let lock_now: Option<String> = std::fs::read_to_string(lock_path)
         .ok()
         .filter(|t| serde_json::from_str::<Value>(t).is_ok_and(|v| v.get("packages").is_some()));
@@ -771,9 +770,9 @@ fn update_requirements_after_resolution(
     Ok(0)
 }
 
-/// `Locker::updateHash` + `fixupJsonDataType` : le lock relu, son
-/// `content-hash` recalculé, les drapeaux ajoutés, réencodé avec
-/// l'indentation détectée.
+/// `Locker::updateHash` + `fixupJsonDataType`: the lock re-read, its
+/// `content-hash` recomputed, the flags added, re-encoded with the
+/// detected indentation.
 fn locker_update_hash(
     lock_text: &str,
     manifest_text: &str,
@@ -790,8 +789,8 @@ fn locker_update_hash(
         "content-hash".into(),
         Value::String(vivace_core::content_hash::content_hash(manifest_text)?),
     );
-    // `$lockData['stability-flags'][$packageName] = $flag` : sur un `{}`
-    // décodé (tableau vide) comme sur un objet existant.
+    // `$lockData['stability-flags'][$packageName] = $flag`: on a decoded
+    // `{}` (empty array) as on an existing object.
     if !flags.is_empty() {
         let mut current = match data.get("stability-flags") {
             Some(Value::Object(m)) => m.clone(),

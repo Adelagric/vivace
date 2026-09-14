@@ -1,22 +1,22 @@
-//! Réencodage JSON reproduisant `json_encode($data, 0)` de PHP appliqué à des
-//! données issues de `json_decode($json, true)` (pipeline de JsonFile::parseJson
-//! → JsonFile::encode, Composer 2.10.3, voir docs/reference/JsonFile.php).
+//! JSON re-encoding reproducing PHP's `json_encode($data, 0)` applied to data
+//! coming from `json_decode($json, true)` (the JsonFile::parseJson ->
+//! JsonFile::encode pipeline, Composer 2.10.3, see docs/reference/JsonFile.php).
 //!
-//! Sémantique à l'octet près :
-//! - sortie compacte (`{"k":v}`), ordre d'insertion préservé ;
-//! - `/` échappé en `\/`, non-ASCII en `\uXXXX` hexa minuscule (paires de
-//!   substituts au-delà du BMP), contrôles `\b \f \n \r \t` puis `\u00XX` ;
-//! - quirk assoc : un objet vide devient `[]`, un objet dont les clés sont
-//!   exactement "0".."n-1" dans l'ordre devient un tableau (PHP a perdu la
-//!   distinction objet/tableau au decode) ;
-//! - floats au plus court round-trip (serialize_precision=-1) : notation fixe
-//!   sans `.0` final pour les valeurs entières (`1.0` → `1`), exponentielle
-//!   `d[.ddd|.0]e±X` hors de (-4, 17] — voir `encode_double`.
+//! Byte-exact semantics:
+//! - compact output (`{"k":v}`), insertion order preserved;
+//! - `/` escaped as `\/`, non-ASCII as lowercase-hex `\uXXXX` (surrogate
+//!   pairs beyond the BMP), controls `\b \f \n \r \t` then `\u00XX`;
+//! - assoc quirk: an empty object becomes `[]`, an object whose keys are
+//!   exactly "0".."n-1" in order becomes an array (PHP lost the
+//!   object/array distinction at decode time);
+//! - shortest round-trip floats (serialize_precision=-1): fixed notation
+//!   without a trailing `.0` for integral values (`1.0` -> `1`), exponential
+//!   `d[.ddd|.0]e±X` outside (-4, 17]; see `encode_double`.
 
 use crate::error::{Error, Result};
 use serde_json::Value;
 
-/// Options miroir des flags de json_encode utilisés par Composer.
+/// Options mirroring the json_encode flags used by Composer.
 #[derive(Debug, Clone, Copy)]
 pub struct EncodeOptions {
     pub pretty: bool,
@@ -24,14 +24,14 @@ pub struct EncodeOptions {
     pub escape_unicode: bool,
 }
 
-/// Flags 0 (content-hash) : compact, slashes et unicode échappés.
+/// Flags 0 (content-hash): compact, slashes and unicode escaped.
 pub const FLAGS_ZERO: EncodeOptions = EncodeOptions {
     pretty: false,
     escape_slashes: true,
     escape_unicode: true,
 };
 
-/// Défaut JsonFile (fichiers écrits par Composer) :
+/// JsonFile default (files written by Composer):
 /// JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE.
 pub const FLAGS_JSONFILE: EncodeOptions = EncodeOptions {
     pretty: true,
@@ -43,11 +43,11 @@ pub fn php_json_encode(value: &Value) -> Result<String> {
     php_json_encode_with(value, FLAGS_ZERO)
 }
 
-/// Clé sentinelle : un objet réduit à cette clé s'encode `{}` (un
-/// `stdClass` vide côté PHP, que la sémantique tableau ne peut exprimer).
+/// Sentinel key: an object reduced to this key encodes as `{}` (an empty
+/// `stdClass` on the PHP side, which the array semantics cannot express).
 pub const STDCLASS_MARKER: &str = "\u{0}stdClass";
 
-/// Un objet vide qui s'encodera `{}`.
+/// An empty object that will encode as `{}`.
 pub fn empty_stdclass() -> Value {
     let mut m = serde_json::Map::new();
     m.insert(STDCLASS_MARKER.to_owned(), Value::Null);
@@ -77,8 +77,8 @@ fn encode_into(value: &Value, out: &mut String, opts: EncodeOptions, level: usiz
         Value::Array(items) => encode_list(items.iter(), out, opts, level)?,
         Value::Object(map) => {
             if map.len() == 1 && map.contains_key(STDCLASS_MARKER) {
-                // `new \stdClass` vide (Locker::fixupJsonDataType) : `{}` là
-                // où un tableau vide donnerait `[]`.
+                // Empty `new \stdClass` (Locker::fixupJsonDataType): `{}` where
+                // an empty array would give `[]`.
                 out.push_str("{}");
             } else if is_php_list(map) {
                 encode_list(map.values(), out, opts, level)?;
@@ -132,8 +132,8 @@ fn encode_list<'a>(
     Ok(())
 }
 
-/// Après `json_decode(..., true)`, PHP encode en tableau tout array-assoc dont
-/// les clés sont exactement 0..n-1 dans l'ordre (un objet vide inclus).
+/// After `json_decode(..., true)`, PHP encodes as an array any assoc array
+/// whose keys are exactly 0..n-1 in order (an empty object included).
 fn is_php_list(map: &serde_json::Map<String, Value>) -> bool {
     map.keys()
         .enumerate()
@@ -144,7 +144,7 @@ fn encode_number(n: &serde_json::Number, out: &mut String) -> Result<()> {
     if let Some(i) = n.as_i64() {
         out.push_str(&i.to_string());
     } else if let Some(u) = n.as_u64() {
-        // PHP_INT_MAX == i64::MAX : au-delà, json_decode produit un float.
+        // PHP_INT_MAX == i64::MAX: beyond it, json_decode produces a float.
         encode_double(u as f64, out)?;
     } else if let Some(f) = n.as_f64() {
         encode_double(f, out)?;
@@ -152,17 +152,17 @@ fn encode_number(n: &serde_json::Number, out: &mut String) -> Result<()> {
     Ok(())
 }
 
-/// Formatage double de `json_encode` avec serialize_precision=-1 : chiffres
-/// shortest-round-trip, notation fixe ssi le point décimal est dans (-4, 17]
-/// (bornes relevées empiriquement sur PHP 8.5, cf. tests différentiels),
-/// sinon exponentielle `d[.ddd|.0]e±X`. Pas de `.0` sur les entiers en fixe.
-/// Chiffres significatifs les plus courts qui round-trippent, et exposant
-/// décimal, comme `zend_gcvt` mode 0 (dtoa). `{:e}` de Rust donne la même
-/// chaîne sauf sur une égalité exacte entre deux candidats (la valeur est à
-/// mi-chemin, ex. 2124202659384827.25 → « …27.2 » ou « …27.3 ») : dtoa
-/// arrondit au chiffre pair, Rust vers le haut. Le formatage à précision
-/// fixe de Rust (exact, demi-pair) tranche comme dtoa ; on le garde s'il
-/// round-trippe encore (toujours vrai hors bord d'intervalle asymétrique).
+/// Double formatting of `json_encode` with serialize_precision=-1:
+/// shortest-round-trip digits, fixed notation iff the decimal point lies in
+/// (-4, 17] (bounds measured empirically on PHP 8.5, cf. differential tests),
+/// else exponential `d[.ddd|.0]e±X`. No `.0` on integral values in fixed.
+/// Shortest significant digits that round-trip, and decimal exponent, like
+/// `zend_gcvt` mode 0 (dtoa). Rust's `{:e}` gives the same string except on
+/// an exact tie between two candidates (the value sits halfway, e.g.
+/// 2124202659384827.25 -> "...27.2" or "...27.3"): dtoa rounds to the even
+/// digit, Rust rounds up. Rust's fixed-precision formatting (exact,
+/// half-to-even) decides like dtoa; we keep it if it still round-trips
+/// (always true away from an asymmetric interval edge).
 fn shortest_digits(a: f64) -> (String, String) {
     let sci = format!("{:e}", a);
     let (mantissa, exp) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
@@ -192,7 +192,7 @@ fn encode_double(f: f64, out: &mut String) -> Result<()> {
     }
     let (digits, exp) = shortest_digits(f.abs());
     let exp: i32 = exp.parse().map_err(|_| Error::NonFiniteFloat(f))?;
-    let dec_point = exp + 1; // valeur = 0.digits × 10^dec_point
+    let dec_point = exp + 1; // value = 0.digits x 10^dec_point
 
     if dec_point > -4 && dec_point <= 17 {
         let n = digits.len() as i32;
@@ -247,15 +247,15 @@ fn encode_string_with(s: &str, out: &mut String, opts: EncodeOptions) {
                 push_unicode_escape(c as u32, out);
             }
             c if c.is_ascii() => out.push(c),
-            // Sans JSON_UNESCAPED_LINE_TERMINATORS, json_encode échappe
-            // U+2028/U+2029 même avec JSON_UNESCAPED_UNICODE.
+            // Without JSON_UNESCAPED_LINE_TERMINATORS, json_encode escapes
+            // U+2028/U+2029 even with JSON_UNESCAPED_UNICODE.
             '\u{2028}' => out.push_str("\\u2028"),
             '\u{2029}' => out.push_str("\\u2029"),
             c if !opts.escape_unicode => out.push(c),
             c => {
                 let cp = c as u32;
                 if cp > 0xFFFF {
-                    // Paire de substituts UTF-16, comme json_encode.
+                    // UTF-16 surrogate pair, like json_encode.
                     let v = cp - 0x10000;
                     push_unicode_escape(0xD800 + (v >> 10), out);
                     push_unicode_escape(0xDC00 + (v & 0x3FF), out);
@@ -270,7 +270,7 @@ fn encode_string_with(s: &str, out: &mut String, opts: EncodeOptions) {
 
 fn push_unicode_escape(cp: u32, out: &mut String) {
     use std::fmt::Write as _;
-    // write! sur String est infaillible.
+    // write! on a String is infallible.
     let _ = write!(out, "\\u{cp:04x}");
 }
 
@@ -308,10 +308,10 @@ mod tests {
     fn sequential_numeric_keys_become_array() {
         let v: Value = serde_json::from_str(r#"{"0":"a","1":"b"}"#).unwrap();
         assert_eq!(enc(v), r#"["a","b"]"#);
-        // Ordre non séquentiel → reste un objet.
+        // Non-sequential order -> stays an object.
         let v: Value = serde_json::from_str(r#"{"1":"a","0":"b"}"#).unwrap();
         assert_eq!(enc(v), r#"{"1":"a","0":"b"}"#);
-        // Trou dans les indices → reste un objet.
+        // Gap in the indices -> stays an object.
         let v: Value = serde_json::from_str(r#"{"0":"a","2":"b"}"#).unwrap();
         assert_eq!(enc(v), r#"{"0":"a","2":"b"}"#);
     }
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(enc(json!(42)), "42");
         assert_eq!(enc(json!(-7)), "-7");
         assert_eq!(enc(json!(1.5)), "1.5");
-        // Frontières empiriques PHP (voir encode_double + tests oracle).
+        // Empirical PHP boundaries (see encode_double + oracle tests).
         assert_eq!(enc(json!(1.0)), "1");
         assert_eq!(enc(json!(1.0e-7)), "1.0e-7");
         assert_eq!(enc(json!(0.0001)), "0.0001");

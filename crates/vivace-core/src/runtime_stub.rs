@@ -1,11 +1,11 @@
-//! Émulation du plugin `symfony/runtime` (plan r2) : le plugin ne fait que
-//! générer `vendor/autoload_runtime.php` au dump d'autoload. Le template
-//! ci-dessous est la sortie observée du plugin réel (fixture symfony-demo,
-//! options par défaut) ; le test de drift (ignoré par défaut, lent) régénère
-//! la référence via un vrai `composer install` avec plugins.
+//! Emulation of the `symfony/runtime` plugin (plan r2): the plugin only
+//! generates `vendor/autoload_runtime.php` at autoload dump time. The template
+//! below is the observed output of the real plugin (symfony-demo fixture,
+//! default options); the drift test (ignored by default, slow) regenerates
+//! the reference through a real `composer install` with plugins.
 //!
-//! Si le composer.json racine personnalise `extra.runtime`, on est hors de
-//! l'émulation par défaut → le détecteur de scope route vers le fallback.
+//! If the root composer.json customises `extra.runtime`, we are outside the
+//! default emulation, so the scope detector routes to the fallback.
 
 use crate::error::{Error, Result};
 use serde_json::Value;
@@ -46,7 +46,7 @@ exit(
 );
 "#;
 
-/// `extra.runtime` non vide → options que l'on n'émule pas en v1.
+/// Non-empty `extra.runtime` means options we do not emulate in v1.
 pub fn has_custom_runtime_options(root_manifest: &Value) -> bool {
     root_manifest
         .get("extra")

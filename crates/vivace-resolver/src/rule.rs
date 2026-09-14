@@ -1,7 +1,6 @@
-//! Port de `Rule`, `GenericRule`, `Rule2Literals`, `MultiConflictRule` et
-//! `RuleSet` (docs/reference/resolver/). Les règles vivent dans le `RuleSet`
-//! et se désignent par leur `ruleById` ; les littéraux sont des
-//! identifiants de pool signés.
+//! Port of `Rule`, `GenericRule`, `Rule2Literals`, `MultiConflictRule` and
+//! `RuleSet` (docs/reference/resolver/). Rules live in the `RuleSet` and
+//! are referred to by their `ruleById`; literals are signed pool ids.
 
 use crate::constraint::Constraint;
 use crate::package::Link;
@@ -10,24 +9,24 @@ use std::collections::HashMap;
 /// `Rule::RULE_*`.
 #[derive(Debug, Clone)]
 pub enum Reason {
-    /// `RULE_ROOT_REQUIRE` : `['packageName' => …, 'constraint' => …]`.
+    /// `RULE_ROOT_REQUIRE`: `['packageName' => ..., 'constraint' => ...]`.
     RootRequire {
         package_name: String,
         constraint: Constraint,
     },
-    /// `RULE_FIXED` : `['package' => …]` (index d'arène).
+    /// `RULE_FIXED`: `['package' => ...]` (arena index).
     Fixed { package: usize },
-    /// `RULE_PACKAGE_CONFLICT` : le lien.
+    /// `RULE_PACKAGE_CONFLICT`: the link.
     PackageConflict(Link),
-    /// `RULE_PACKAGE_REQUIRES` : le lien.
+    /// `RULE_PACKAGE_REQUIRES`: the link.
     PackageRequires(Link),
-    /// `RULE_PACKAGE_SAME_NAME` : le nom remplacé.
+    /// `RULE_PACKAGE_SAME_NAME`: the replaced name.
     PackageSameName(String),
-    /// `RULE_LEARNED` : index dans `learnedPool`.
+    /// `RULE_LEARNED`: index into `learnedPool`.
     Learned(usize),
-    /// `RULE_PACKAGE_ALIAS` : l'alias (index d'arène).
+    /// `RULE_PACKAGE_ALIAS`: the alias (arena index).
     PackageAlias { alias: usize },
-    /// `RULE_PACKAGE_INVERSE_ALIAS` : le paquet aliasé (index d'arène).
+    /// `RULE_PACKAGE_INVERSE_ALIAS`: the aliased package (arena index).
     PackageInverseAlias { package: usize },
     /// `RULE_LOCKED_FILTER_LIST_REMOVED`.
     LockedFilterListRemoved { package: usize },
@@ -49,8 +48,8 @@ impl Reason {
     }
 }
 
-/// Classe PHP de la règle : détermine le hachage (donc la déduplication)
-/// et la forme des watches.
+/// PHP class of the rule: determines the hash (hence deduplication) and
+/// the shape of the watches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RuleKind {
     Generic,
@@ -69,18 +68,18 @@ pub enum RuleType {
 #[derive(Debug, Clone)]
 pub struct Rule {
     pub kind: RuleKind,
-    /// Triés croissants (`sort($literals)`), sauf Rule2Literals : [min, max]
-    /// — identique.
+    /// Sorted ascending (`sort($literals)`), except Rule2Literals: [min, max],
+    /// which is the same thing.
     pub literals: Vec<i64>,
     pub reason: Reason,
-    /// None = 255 : jamais ajoutée au RuleSet (règle apprise en doublon,
-    /// qui sert quand même de raison et de nœud de surveillance).
+    /// None = 255: never added to the RuleSet (duplicate learned rule, still
+    /// used as a reason and as a watch node).
     pub rule_type: Option<RuleType>,
     pub disabled: bool,
 }
 
 impl Rule {
-    /// `new GenericRule($literals, …)`.
+    /// `new GenericRule($literals, ...)`.
     pub fn generic(mut literals: Vec<i64>, reason: Reason) -> Rule {
         literals.sort_unstable();
         Rule {
@@ -92,7 +91,7 @@ impl Rule {
         }
     }
 
-    /// `new Rule2Literals($l1, $l2, …)`.
+    /// `new Rule2Literals($l1, $l2, ...)`.
     pub fn two_literals(l1: i64, l2: i64, reason: Reason) -> Rule {
         Rule {
             kind: RuleKind::TwoLiterals,
@@ -103,7 +102,7 @@ impl Rule {
         }
     }
 
-    /// `new MultiConflictRule($literals, …)` (au moins 3 littéraux).
+    /// `new MultiConflictRule($literals, ...)` (at least 3 literals).
     pub fn multi_conflict(mut literals: Vec<i64>, reason: Reason) -> Rule {
         literals.sort_unstable();
         Rule {
@@ -136,25 +135,25 @@ impl Rule {
     }
 }
 
-/// Clé de déduplication : le hachage PHP (xxh3 des littéraux pour
-/// GenericRule, `"l1,l2"` pour Rule2Literals, xxh3 préfixé `c:` pour
-/// MultiConflictRule) suivi d'`equals` — équivalent à (classe, littéraux),
-/// aux collisions 32 bits près entre classes.
+/// Deduplication key: the PHP hash (xxh3 of the literals for GenericRule,
+/// `"l1,l2"` for Rule2Literals, xxh3 prefixed with `c:` for
+/// MultiConflictRule) followed by `equals`; equivalent to (class,
+/// literals), up to 32-bit collisions across classes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RuleKey {
     kind: RuleKind,
     literals: Vec<i64>,
 }
 
-/// `Composer\DependencyResolver\RuleSet`. `rules` est le stockage de
-/// toutes les règles (y compris celles refusées par `add` en doublon, que
-/// le solveur continue d'utiliser) ; `rule_by_id` est `ruleById`.
+/// `Composer\DependencyResolver\RuleSet`. `rules` is the storage of all
+/// rules (including those rejected by `add` as duplicates, which the solver
+/// keeps using); `rule_by_id` is `ruleById`.
 #[derive(Debug, Default)]
 pub struct RuleSet {
     pub rules: Vec<Rule>,
-    /// `ruleById` : règles enregistrées, dans l'ordre d'ajout.
+    /// `ruleById`: registered rules, in insertion order.
     pub rule_by_id: Vec<usize>,
-    /// `rules[$type]` : règles par type, dans l'ordre d'ajout.
+    /// `rules[$type]`: rules by type, in insertion order.
     by_type: [Vec<usize>; 3],
     keys: HashMap<RuleKey, usize>,
 }
@@ -172,9 +171,9 @@ impl RuleSet {
         }
     }
 
-    /// `add` : la règle est stockée ; elle n'est enregistrée (type posé,
-    /// `ruleById`) que si aucune règle identique n'existe. Rend
-    /// (index de stockage, enregistrée ?).
+    /// `add`: the rule is stored; it is registered (type set, `ruleById`)
+    /// only if no identical rule exists. Returns (storage index,
+    /// registered?).
     pub fn add(&mut self, mut rule: Rule, rule_type: RuleType) -> (usize, bool) {
         let key = RuleKey {
             kind: rule.kind,
@@ -193,7 +192,7 @@ impl RuleSet {
         (id, true)
     }
 
-    /// `count()` : règles enregistrées.
+    /// `count()`: registered rules.
     pub fn len(&self) -> usize {
         self.rule_by_id.len()
     }
@@ -202,12 +201,12 @@ impl RuleSet {
         self.rule_by_id.is_empty()
     }
 
-    /// `getIteratorFor($type)` : identifiants d'un type, dans l'ordre.
+    /// `getIteratorFor($type)`: ids of one type, in order.
     pub fn ids_of_type(&self, rule_type: RuleType) -> &[usize] {
         &self.by_type[Self::slot(rule_type)]
     }
 
-    /// `getIterator()` : PACKAGE puis REQUEST puis LEARNED (types triés).
+    /// `getIterator()`: PACKAGE then REQUEST then LEARNED (sorted types).
     pub fn ids_in_iterator_order(&self) -> Vec<usize> {
         let mut out = Vec::with_capacity(self.rules.len());
         for slot in &self.by_type {

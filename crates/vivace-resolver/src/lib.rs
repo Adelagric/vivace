@@ -1,7 +1,7 @@
-//! vivace-resolver — port de la résolution de Composer 2.10.3 : versions et
-//! contraintes (composer/semver), métadonnées Packagist v2, construction du
-//! pool, puis le solveur. Chaque module est un port de la source vendorée
-//! dans docs/reference/resolver/, vérifié par un oracle contre le phar.
+//! vivace-resolver: port of Composer 2.10.3's dependency resolution: versions
+//! and constraints (composer/semver), Packagist v2 metadata, pool
+//! construction, then the solver. Each module is a port of the source vendored
+//! under docs/reference/resolver/, checked by an oracle against the phar.
 
 pub mod config_source;
 pub mod constraint;

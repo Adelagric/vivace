@@ -1,11 +1,11 @@
-//! Ports exacts de `Composer\Util\Filesystem` : `normalizePath`,
-//! `findShortestPath`, `findShortestPathCode` (Composer 2.10.3). Ils décident
-//! des chemins écrits dans installed.json/installed.php, les fichiers
-//! d'autoload et les proxies bin ; vérifiés par tests/oracle_installers.rs.
-//! Chemins Unix uniquement (pas de préfixe `C:`/`file://`).
+//! Exact ports of `Composer\Util\Filesystem`: `normalizePath`,
+//! `findShortestPath`, `findShortestPathCode` (Composer 2.10.3). They decide
+//! the paths written into installed.json/installed.php, the autoload files
+//! and the bin proxies; checked by tests/oracle_installers.rs.
+//! Unix paths only (no `C:`/`file://` prefix).
 
-/// `Filesystem::normalizePath` : slashes uniques, résolution de `.`/`..`,
-/// pas de slash final (hors racine).
+/// `Filesystem::normalizePath`: single slashes, `.`/`..` resolution, no
+/// trailing slash (except for the root).
 pub fn normalize_path(path: &str) -> String {
     let path = path.replace('\\', "/");
     let (absolute, rest) = if path.starts_with("//") && path.len() > 2 {
@@ -29,7 +29,7 @@ pub fn normalize_path(path: &str) -> String {
     format!("{absolute}{}", parts.join("/"))
 }
 
-/// PHP `dirname()` sur un chemin normalisé Unix.
+/// PHP `dirname()` on a normalised Unix path.
 fn php_dirname(p: &str) -> String {
     match p.rfind('/') {
         None => ".".to_owned(),
@@ -38,15 +38,15 @@ fn php_dirname(p: &str) -> String {
     }
 }
 
-/// PHP `basename()` sur un chemin normalisé Unix.
+/// PHP `basename()` on a normalised Unix path.
 fn php_basename(p: &str) -> &str {
     p.rsplit('/').next().unwrap_or(p)
 }
 
-/// Boucle de `findShortestPath(Code)` : remonte `to` jusqu'à un préfixe de
-/// `from` (comparaison en segments entiers), `/` ou `.`. Composer exige des
-/// chemins absolus (exception sinon) ; ici un chemin relatif s'arrête à `.`
-/// et l'appelant rend `to` tel quel, sans boucler.
+/// Loop of `findShortestPath(Code)`: walks `to` up until a prefix of `from`
+/// (whole-segment comparison), `/` or `.`. Composer requires absolute paths
+/// (exception otherwise); here a relative path stops at `.` and the caller
+/// returns `to` as is, without looping.
 fn common_path(from: &str, to: &str) -> String {
     let mut common = to.to_owned();
     while !format!("{from}/").starts_with(&format!("{common}/")) && common != "/" && common != "." {
@@ -56,7 +56,7 @@ fn common_path(from: &str, to: &str) -> String {
 }
 
 /// `Filesystem::findShortestPath($from, $to, $directories, $preferRelative = false)`.
-/// Les deux chemins doivent être absolus.
+/// Both paths must be absolute.
 pub fn find_shortest_path(from: &str, to: &str, directories: bool) -> String {
     let mut from = normalize_path(from);
     let to = normalize_path(to);
@@ -87,8 +87,8 @@ pub fn find_shortest_path(from: &str, to: &str, directories: bool) -> String {
     }
 }
 
-/// `Filesystem::findShortestPathCode($from, $to, $directories, $staticCode, $preferRelative = false)` :
-/// une expression PHP relative à `__DIR__`.
+/// `Filesystem::findShortestPathCode($from, $to, $directories, $staticCode, $preferRelative = false)`:
+/// a PHP expression relative to `__DIR__`.
 pub fn find_shortest_path_code(
     from: &str,
     to: &str,
@@ -126,7 +126,7 @@ pub fn find_shortest_path_code(
     }
 }
 
-/// `var_export()` d'une chaîne : quotes simples, `\` et `'` échappés.
+/// `var_export()` of a string: single quotes, `\` and `'` escaped.
 pub fn php_str(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');

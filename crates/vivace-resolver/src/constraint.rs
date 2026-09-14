@@ -1,9 +1,9 @@
-//! Port de `Composer\Semver\Constraint\*` et de `VersionParser::parseConstraints`
+//! Port of `Composer\Semver\Constraint\*` and `VersionParser::parseConstraints`
 //! (docs/reference/resolver/semver-Constraint.php, semver-MultiConstraint.php,
-//! semver-Bound.php, semver-VersionParser.php). Une contrainte est un arbre :
-//! feuille (opérateur, version normalisée), conjonction/disjonction, tout,
-//! rien. `matches` reproduit `Constraint::matchSpecific` (et donc
-//! `CompilingMatcher::match`, qui n'en est qu'une compilation).
+//! semver-Bound.php, semver-VersionParser.php). A constraint is a tree: leaf
+//! (operator, normalized version), conjunction/disjunction, match-all,
+//! match-none. `matches` reproduces `Constraint::matchSpecific` (and thus
+//! `CompilingMatcher::match`, which is merely a compiled form of it).
 
 use crate::phpver::{version_compare, version_compare_op};
 use crate::version::{
@@ -128,7 +128,7 @@ pub enum Constraint {
         op: Op,
         version: String,
     },
-    /// `MultiConstraint` (au moins deux membres).
+    /// `MultiConstraint` (at least two members).
     Multi {
         constraints: Vec<Constraint>,
         conjunctive: bool,
@@ -149,7 +149,7 @@ impl Constraint {
         matches!(self, Constraint::Single { .. })
     }
 
-    /// `Constraint::versionCompare` : branches `dev-*` à part.
+    /// `Constraint::versionCompare`: `dev-*` branches handled separately.
     fn version_compare_branches(a: &str, b: &str, op: Op, compare_branches: bool) -> bool {
         let a_branch = a.starts_with("dev-");
         let b_branch = b.starts_with("dev-");
@@ -165,9 +165,9 @@ impl Constraint {
         version_compare_op(a, b, op.as_str())
     }
 
-    /// `Constraint::matchSpecific($provider, $compareBranches)` : `self` est
-    /// la contrainte, `provider` la version proposée (ou une autre
-    /// contrainte simple).
+    /// `Constraint::matchSpecific($provider, $compareBranches)`: `self` is
+    /// the constraint, `provider` the candidate version (or another simple
+    /// constraint).
     pub fn match_specific(&self, provider: &Constraint, compare_branches: bool) -> bool {
         let (
             Constraint::Single { op, version },
@@ -249,8 +249,8 @@ impl Constraint {
         }
     }
 
-    /// `CompilingMatcher::match($constraint, OP_EQ, $version)` — la forme
-    /// utilisée partout par Composer pour tester une version.
+    /// `CompilingMatcher::match($constraint, OP_EQ, $version)`, the form
+    /// Composer uses everywhere to test a version.
     pub fn matches_version(&self, version: &str) -> bool {
         self.matches(&Constraint::new(Op::Eq, version))
     }
@@ -281,7 +281,7 @@ impl Constraint {
         }
     }
 
-    /// `MultiConstraint::optimizeConstraints` : fusion de `>=a <b || >=b <c`.
+    /// `MultiConstraint::optimizeConstraints`: merges `>=a <b || >=b <c`.
     fn optimize_constraints(
         constraints: &[Constraint],
         conjunctive: bool,
@@ -405,7 +405,7 @@ impl Constraint {
 }
 
 impl fmt::Display for Constraint {
-    /// `__toString` : `>= 1.0.0.0`, `[>= 1.0.0.0 < 2.0.0.0-dev]`, `*`, `[]`.
+    /// `__toString`: `>= 1.0.0.0`, `[>= 1.0.0.0 < 2.0.0.0-dev]`, `*`, `[]`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Constraint::Single { op, version } => write!(f, "{} {}", op.as_str(), version),
@@ -426,16 +426,16 @@ impl fmt::Display for Constraint {
     }
 }
 
-/// Une contrainte parsée avec sa chaîne jolie d'origine (`getPrettyString`).
+/// A parsed constraint with its original pretty string (`getPrettyString`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedConstraint {
     pub constraint: Constraint,
     pub pretty: String,
 }
 
-/// `VersionParser::parseConstraints`, mémoïsé par texte (l'équivalent du
-/// `$linkCache` d'`ArrayLoader::loadPackages`, à l'échelle du processus :
-/// même entrée → même résultat, le parseur est pur).
+/// `VersionParser::parseConstraints`, memoized by text (the equivalent of
+/// the `$linkCache` of `ArrayLoader::loadPackages`, at process scope: same
+/// input -> same result, the parser is pure).
 pub fn parse_constraints(input: &str) -> Result<ParsedConstraint, VersionError> {
     thread_local! {
         static CACHE: std::cell::RefCell<std::collections::HashMap<String, ParsedConstraint>> =
@@ -491,8 +491,8 @@ fn parse_constraints_uncached(input: &str) -> Result<ParsedConstraint, VersionEr
     })
 }
 
-/// `preg_split` sans limite ni flags : morceaux entre les correspondances
-/// (chaînes vides conservées).
+/// `preg_split` without limit or flags: pieces between matches (empty
+/// strings preserved).
 fn preg_split(re: &Regex, subject: &str) -> Vec<String> {
     let bytes = subject.as_bytes();
     let mut out = Vec::new();
@@ -541,8 +541,8 @@ fn empty(s: &str) -> bool {
     s.is_empty() || s == "0"
 }
 
-/// `VersionParser::parseConstraint` (une contrainte élémentaire → 1 ou 2
-/// bornes).
+/// `VersionParser::parseConstraint` (one elementary constraint -> 1 or 2
+/// bounds).
 fn parse_constraint(input: &str) -> Result<Vec<Constraint>, VersionError> {
     static AS: OnceLock<Regex> = OnceLock::new();
     static STAB: OnceLock<Regex> = OnceLock::new();
@@ -716,7 +716,7 @@ fn parse_constraint(input: &str) -> Result<Vec<Constraint>, VersionError> {
         true,
     );
     if let Some(m) = groups_of(hyphen, &constraint) {
-        // Groupes : 1 = from, 2..9 = composants de from, 10 = to, 11..18 = composants de to.
+        // Groups: 1 = from, 2..9 = components of from, 10 = to, 11..18 = components of to.
         let at = |i: usize| m.get(i).map(String::as_str).unwrap_or("");
         let mut low_suffix = String::new();
         if empty(at(6)) && empty(at(8)) && empty(at(9)) {
@@ -724,7 +724,7 @@ fn parse_constraint(input: &str) -> Result<Vec<Constraint>, VersionError> {
         }
         let low = normalize(at(1), None)?;
         let lower = Constraint::new(Op::Ge, format!("{low}{low_suffix}"));
-        // `$empty` : "0" n'est pas vide, "" l'est.
+        // `$empty`: "0" is not empty, "" is.
         let php_empty = |s: &str| s.is_empty();
         let upper = if (!php_empty(at(12)) && !php_empty(at(13)))
             || !empty(at(15))

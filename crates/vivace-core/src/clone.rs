@@ -1,10 +1,10 @@
-//! Clone d'un arbre du store vers vendor/ — le chemin chaud de l'install.
-//! macOS/APFS : `clonefile(2)` du répertoire entier (un syscall, copy-on-write,
-//! mesuré 8× plus rapide que l'extraction en M0). Ailleurs, ou si clonefile
-//! échoue (autre FS, volume différent) : marche récursive en hardlinks (modèle
-//! pnpm), et copie réelle en dernier recours. Toujours vers une destination
-//! ABSENTE (l'appelant supprime l'ancienne version avant), donc pas d'états
-//! mélangés.
+//! Clone of a store tree into vendor/, the hot path of the install.
+//! macOS/APFS: `clonefile(2)` of the whole directory (one syscall, copy-on-write,
+//! measured 8x faster than extraction in M0). Elsewhere, or if clonefile
+//! fails (other FS, different volume): recursive walk with hardlinks (pnpm
+//! model), and a real copy as a last resort. Always towards an ABSENT
+//! destination (the caller removes the previous version first), so no mixed
+//! states.
 
 use crate::error::{Error, Result};
 use std::path::Path;
@@ -20,13 +20,13 @@ pub fn clone_tree(src: &Path, dst: &Path) -> Result<()> {
         let c_src = std::ffi::CString::new(src.as_os_str().as_bytes());
         let c_dst = std::ffi::CString::new(dst.as_os_str().as_bytes());
         if let (Ok(c_src), Ok(c_dst)) = (c_src, c_dst) {
-            // SAFETY-libre : appel FFI à clonefile via libc, deux chaînes C
-            // valides, pas de mémoire partagée.
+            // SAFETY: FFI call to clonefile through libc, two valid C strings,
+            // no shared memory.
             let rc = unsafe { libc::clonefile(c_src.as_ptr(), c_dst.as_ptr(), 0) };
             if rc == 0 {
                 return Ok(());
             }
-            // Échec (FS non-APFS, volumes différents…) → stratégies suivantes.
+            // Failure (non-APFS FS, different volumes...): fall through to the next strategies.
         }
     }
 
@@ -47,7 +47,7 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<()> {
             #[cfg(unix)]
             std::os::unix::fs::symlink(&target, &to).map_err(Error::io(&to))?;
         } else {
-            // Hardlink d'abord (gratuit) ; copie si le FS refuse (autre volume).
+            // Hardlink first (free); copy if the FS refuses (other volume).
             if std::fs::hard_link(&from, &to).is_err() {
                 std::fs::copy(&from, &to).map_err(Error::io(&to))?;
             }
@@ -93,8 +93,8 @@ mod tests {
                 .file_type()
                 .is_symlink());
         }
-        // La modification du clone ne touche pas la source (CoW ou hardlink :
-        // on remplace le fichier, on ne l'édite pas en place).
+        // Modifying the clone does not touch the source (CoW or hardlink:
+        // we replace the file, we do not edit it in place).
         std::fs::write(dst.join("a.txt"), b"changed").expect("write");
         #[cfg(target_os = "macos")]
         assert_eq!(std::fs::read(src.join("a.txt")).expect("read"), b"hello");

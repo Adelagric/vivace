@@ -1,6 +1,6 @@
-//! Platform-check de bout en bout sur les fixtures : Composer a installé ces
-//! locks sur cette machine (M0), donc notre check doit les déclarer
-//! installables ici aussi — divergence = bug de notre côté, par construction.
+//! End-to-end platform check on the fixtures: Composer installed these locks
+//! on this machine (M0), so our check must declare them installable here
+//! too; a divergence is a bug on our side, by construction.
 
 use std::path::{Path, PathBuf};
 
@@ -26,7 +26,7 @@ fn detection_is_cached_and_sane() {
         p.extensions.contains_key("json"),
         "ext json toujours présente"
     );
-    // Deuxième appel : servi par le cache (même résultat).
+    // Second call: served by the cache (same result).
     let p2 = vivace_core::platform::Platform::detect()
         .expect("détection")
         .expect("php");

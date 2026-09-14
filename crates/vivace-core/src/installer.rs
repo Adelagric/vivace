@@ -1,8 +1,8 @@
-//! La transaction d'installation : diff (lock ↔ état installé), fetch parallèle
-//! vers le store, clone store→vendor, proxies bin, fichiers d'état, stub
-//! runtime. Idempotente (relancée après interruption, elle converge) : l'état
-//! de référence est `installed.json` + la présence des répertoires, et chaque
-//! paquet est posé par clone dans un vendor/<name> préalablement supprimé.
+//! The install transaction: diff (lock vs installed state), parallel fetch
+//! into the store, store-to-vendor clone, bin proxies, state files, runtime
+//! stub. Idempotent (rerun after an interruption, it converges): the reference
+//! state is `installed.json` + the presence of the directories, and each
+//! package is laid out by cloning into a previously removed vendor/<name>.
 
 use crate::error::{Error, Result};
 use crate::fetch::{Fetcher, Provenance};
@@ -18,10 +18,10 @@ use std::sync::Arc;
 pub struct InstallOptions {
     pub with_dev: bool,
     pub offline: bool,
-    /// Parallélisme des téléchargements/extractions.
+    /// Download/extraction parallelism.
     pub jobs: usize,
-    /// drupal/core-composer-scaffold verrouillé et autorisé (scope) : vérifier
-    /// sa source et planifier le scaffold avant toute écriture.
+    /// drupal/core-composer-scaffold locked and allowed (scope): check its
+    /// source and plan the scaffold before any write.
     pub scaffold: bool,
 }
 
@@ -36,13 +36,13 @@ impl Default for InstallOptions {
     }
 }
 
-/// Ce que la CLI applique après la transaction et l'autoloader quand le
-/// scaffold Drupal est émulé.
+/// What the CLI applies after the transaction and the autoloader when the
+/// Drupal scaffold is emulated.
 #[derive(Debug, Clone)]
 pub struct ScaffoldOutcome {
     pub profile: crate::scaffold::Profile,
     pub plan: crate::scaffold::Plan,
-    /// Racine canonique du projet (`getcwd()` physique du plugin).
+    /// Canonical project root (the plugin's physical `getcwd()`).
     pub root: PathBuf,
 }
 
@@ -54,13 +54,13 @@ pub struct InstallReport {
     pub from_cache: usize,
     pub from_network: usize,
     pub store_hits: usize,
-    /// Paquets inchangés extraits dans le store (vendor préexistant).
+    /// Unchanged packages extracted into the store (pre-existing vendor).
     pub store_warmed: usize,
-    /// Plan du scaffold Drupal, à appliquer après l'autoloader.
+    /// Drupal scaffold plan, to apply after the autoloader.
     pub scaffold: Option<ScaffoldOutcome>,
 }
 
-/// Identité installée d'un paquet : version + référence de dist.
+/// Installed identity of a package: version + dist reference.
 fn identity(p: &LockPackage) -> (String, String) {
     (
         p.version().to_owned(),
@@ -95,8 +95,8 @@ pub async fn install(
     fetcher: Arc<Fetcher>,
     opts: &InstallOptions,
 ) -> Result<InstallReport> {
-    // Racine absolue (celle du layout) : les chemins relatifs des proxies et
-    // des fichiers d'état ne doivent pas dépendre d'un --working-dir relatif.
+    // Absolute root (the layout's): the relative paths of the proxies and of
+    // the state files must not depend on a relative --working-dir.
     let project_dir = layout.root();
     let vendor = project_dir.join("vendor");
     std::fs::create_dir_all(&vendor).map_err(Error::io(&vendor))?;
@@ -106,10 +106,10 @@ pub async fn install(
     let wanted_names: std::collections::BTreeSet<&str> = wanted.iter().map(|p| p.name()).collect();
     let previous = installed_identities(&vendor);
 
-    // À poser : identité changée, ou répertoire absent. Les paquets inchangés
-    // dont l'entrée de store manque (vendor/ posé par Composer avant vivace)
-    // sont extraits dans le store sans être re-clonés : le cache de classmap
-    // s'applique dès le run suivant.
+    // To lay out: changed identity, or missing directory. Unchanged packages
+    // whose store entry is missing (vendor/ laid out by Composer before vivace)
+    // are extracted into the store without being re-cloned: the classmap
+    // cache applies from the next run on.
     let mut to_install: Vec<&LockPackage> = Vec::new();
     let mut to_warm: Vec<&LockPackage> = Vec::new();
     for p in &wanted {
@@ -128,9 +128,9 @@ pub async fn install(
         }
     }
 
-    // Fetch + extraction vers le store, en parallèle borné. Les paquets à
-    // « chauffer » n'utilisent que le cache local (jamais le réseau) et leur
-    // échec est silencieux : c'est une optimisation, pas une obligation.
+    // Fetch + extraction into the store, with bounded parallelism. Packages to
+    // "warm" only use the local cache (never the network) and their failure
+    // is silent: it is an optimisation, not an obligation.
     let sem = Arc::new(tokio::sync::Semaphore::new(opts.jobs.max(1)));
     let mut tasks = tokio::task::JoinSet::new();
     let warm_names: std::collections::BTreeSet<&str> = to_warm.iter().map(|p| p.name()).collect();
@@ -165,7 +165,7 @@ pub async fn install(
                 .await;
             let (bytes, provenance) = match fetched {
                 Ok(v) => v,
-                // Chauffage : zip absent du cache → on n'insiste pas.
+                // Warming: zip missing from the cache, do not insist.
                 Err(_) if warm_only => return Ok::<Option<Provenance>, Error>(None),
                 Err(e) => return Err(e),
             };
@@ -196,9 +196,9 @@ pub async fn install(
     }
     report.store_warmed = to_warm.len();
 
-    // Scaffold Drupal : source du plugin vérifiée (lock ET copie installée),
-    // plan calculé sur l'état actuel du disque — avant toute suppression,
-    // pour qu'un refus laisse vendor/ intact et la main à Composer.
+    // Drupal scaffold: plugin source checked (lock AND installed copy), plan
+    // computed on the current on-disk state, before any removal, so that a
+    // refusal leaves vendor/ intact and hands over to Composer.
     if opts.scaffold {
         report.scaffold = Some(plan_scaffold(
             lock,
@@ -211,8 +211,8 @@ pub async fn install(
         )?);
     }
 
-    // Suppressions : présents avant, plus voulus — au chemin qu'a validé le
-    // layout (ancien install-path = chemin recalculé, comme LibraryInstaller).
+    // Removals: present before, no longer wanted, at the path validated by the
+    // layout (old install-path = recomputed path, like LibraryInstaller).
     for name in previous.keys() {
         if !wanted_names.contains(name.as_str()) {
             report.removed += 1;
@@ -225,13 +225,13 @@ pub async fn install(
         }
     }
 
-    // Pose : suppression de l'ancienne version puis clone depuis le store.
+    // Layout: remove the old version, then clone from the store.
     for p in &to_install {
         let (Some(pkg_root), Some(dest)) = (layout.package_root(p.name()), layout.abs(p.name()))
         else {
             continue;
         };
-        // On repart toujours d'une racine de paquet vide (target-dir compris).
+        // Always start again from an empty package root (target-dir included).
         if pkg_root.exists() {
             std::fs::remove_dir_all(&pkg_root).map_err(Error::io(&pkg_root))?;
         }
@@ -240,8 +240,8 @@ pub async fn install(
         report.installed += 1;
     }
 
-    // Proxies bin : reconstruits pour tous les paquets voulus, puis purge des
-    // proxies orphelins (paquets retirés).
+    // Bin proxies: rebuilt for every wanted package, then purge of the
+    // orphaned proxies (removed packages).
     for p in &wanted {
         let bins = p.bins();
         if let (false, Some(dir)) = (bins.is_empty(), layout.abs(p.name())) {
@@ -250,7 +250,7 @@ pub async fn install(
     }
     prune_orphan_bin_proxies(&vendor, &wanted)?;
 
-    // Fichiers d'état + stub runtime.
+    // State files + runtime stub.
     let root = RootPackage::detect(root_manifest, project_dir, opts.with_dev);
     crate::state::write_state_files(
         &vendor.join("composer"),
@@ -267,8 +267,8 @@ pub async fn install(
     Ok(report)
 }
 
-/// Répertoire contenant la source d'un paquet voulu : l'entrée de store si
-/// elle existe, sinon son chemin d'installation actuel.
+/// Directory holding the source of a wanted package: the store entry if it
+/// exists, else its current install path.
 fn source_dir(store: &Store, layout: &Layout, p: &LockPackage) -> Option<PathBuf> {
     if store.contains(p.name(), p.version(), p.dist_reference()) {
         Some(store.entry_path(p.name(), p.version(), p.dist_reference()))
@@ -306,9 +306,8 @@ fn plan_scaffold(
             &fp[..12]
         ))
     })?;
-    // Version installée différente : Composer exécuterait l'ancien Handler
-    // avec le nouveau Plugin — reproductible seulement si les sources sont
-    // identiques.
+    // Different installed version: Composer would run the old Handler with
+    // the new Plugin, reproducible only if the sources are identical.
     if let Some((prev_version, _)) = previous.get(PLUGIN) {
         if prev_version != plugin.version() {
             let installed = layout.abs(PLUGIN).filter(|d| d.is_dir());
@@ -325,9 +324,9 @@ fn plan_scaffold(
         }
     }
     let root = std::fs::canonicalize(layout.root()).map_err(Error::io(layout.root()))?;
-    // Les metapackages restent visibles (findPackage les trouve et récurse
-    // dans leurs allowed-packages) ; leur chemin d'installation est vide chez
-    // Composer, d'où une source `/…` introuvable s'ils déclaraient un mapping.
+    // Metapackages stay visible (findPackage finds them and recurses into
+    // their allowed-packages); their install path is empty in Composer, hence
+    // an unreachable `/...` source if they declared a mapping.
     let packages: Vec<scaffold::ScaffoldPackage> = wanted
         .iter()
         .filter_map(|p| {
@@ -363,9 +362,9 @@ fn plan_scaffold(
     })
 }
 
-/// `LibraryInstaller::uninstall` : le répertoire parent du paquet retiré
-/// (vendor/<ns>, web/app/plugins…) est supprimé s'il est vide — jamais la
-/// racine du projet.
+/// `LibraryInstaller::uninstall`: the parent directory of the removed package
+/// (vendor/<ns>, web/app/plugins...) is removed if empty, never the project
+/// root.
 fn prune_empty_parent(project_dir: &Path, removed: &Path) {
     let Some(parent) = removed.parent() else {
         return;
@@ -404,7 +403,7 @@ fn prune_orphan_bin_proxies(vendor: &Path, wanted: &[&LockPackage]) -> Result<()
     Ok(())
 }
 
-/// Chemin utilitaire : vendor/composer du projet.
+/// Utility path: the project's vendor/composer.
 pub fn vendor_composer_dir(project_dir: &Path) -> PathBuf {
     project_dir.join("vendor/composer")
 }
