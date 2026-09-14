@@ -1,10 +1,25 @@
 # Changelog
 
-All notable changes to vivace. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+All notable changes to vivacity (named vivace up to 0.5.0). The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
-## [Unreleased]
+## [0.6.0] — 2026-09-14
+
+### Changed
+- **Renamed to vivacity.** Another Rust reimplementation of Composer,
+  `svandragt/vivace`, predates this project by four days under the same
+  name with the same byte-identical promise; sharing the name helps no one.
+  Everything follows: the binary is `vivacity`, the crates are `vivacity`,
+  `vivacity-core`, `vivacity-resolver` and `vivacity-autoload`, the library
+  entry point is `vivacity::run`, the environment variables are
+  `VIVACITY_*` (`VIVACE_*` is no longer read), the cache lives under
+  `~/.cache/vivacity` / `~/Library/Caches/vivacity` (a `vivace` cache is
+  simply left behind), the action is `Adelagric/vivacity`, the repository
+  redirects from its old name. The `vivace*` crates are yanked on
+  crates.io; nothing else changes in behaviour.
+- All module docs, comments, error messages and `--help` texts are in
+  English.
 
 ### Removed
 - **`drupal/core-composer-scaffold` emulation.** It was a port of the

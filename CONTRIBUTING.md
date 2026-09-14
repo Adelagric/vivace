@@ -1,7 +1,7 @@
-# Contributing to vivace
+# Contributing to vivacity
 
-The most valuable contribution is a `composer.lock` that vivace gets wrong.
-The second most valuable is a `composer.lock` that vivace refuses (falls back
+The most valuable contribution is a `composer.lock` that vivacity gets wrong.
+The second most valuable is a `composer.lock` that vivacity refuses (falls back
 to Composer) where you think it shouldn't have to.
 
 ## Report a lock that breaks (5 minutes)
@@ -9,12 +9,12 @@ to Composer) where you think it shouldn't have to.
 1. On a project of yours, in two copies of the same checkout:
    ```bash
    composer install --no-plugins --no-scripts   # copy A
-   vivace install                               # copy B
+   vivacity install                               # copy B
    diff -r A/vendor B/vendor
    ```
-2. If there is any difference, or if vivace printed
-   `this lock is outside what vivace handles natively`, open an issue with
-   the **lock parity** template: `composer.json`, `composer.lock`, vivace's
+2. If there is any difference, or if vivacity printed
+   `this lock is outside what vivacity handles natively`, open an issue with
+   the **lock parity** template: `composer.json`, `composer.lock`, vivacity's
    output, OS. Private packages: redact URLs/tokens, keep the structure.
 
 That is enough: the differential harness (`harness/diff-vendor.sh`) turns a
@@ -30,7 +30,7 @@ lock into a permanent regression test. Your bug becomes everyone's test.
   path handling, no clonefile/hardlink assumptions.
 - **Auth** — `gitlab-token`/`gitlab-oauth`; custom CAs (`SSL_CERT_FILE`) with rustls.
 - **The resolver** — `composer update`/`require`. `pubgrub` exists in Rust;
-  `vivace_core::constraint` is already validated against `composer/semver`
+  `vivacity_core::constraint` is already validated against `composer/semver`
   (see `tests/oracle_semver.rs`). The judge is a byte-identical `composer.lock`.
 
 ## Ground rules that keep the project honest

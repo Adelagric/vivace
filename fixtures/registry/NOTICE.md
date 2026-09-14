@@ -8,11 +8,11 @@ live Packagist at that moment, and a `SNAPSHOT` file with the date, the
 Composer version and the virtual package names (404 on Packagist, stubbed as
 "no versions" because a missing file is fatal over `file://`).
 
-`harness/update.sh` unpacks an archive, points both Composer and vivace at it
+`harness/update.sh` unpacks an archive, points both Composer and vivacity at it
 through the global config (`COMPOSER_HOME/config.json`, so `composer.json`
 stays byte-identical and its content-hash counts), and compares the locks.
 The metadata is public Packagist data (package manifests published by their
-authors); it is test data, not part of vivace. `wordpress` has no snapshot:
+authors); it is test data, not part of vivacity. `wordpress` has no snapshot:
 wpackagist speaks the Composer v1 provider protocol, out of scope for the
 resolver.
 
@@ -21,4 +21,4 @@ small cases written for the solver oracle (`tests/oracle_pool.rs`) —
 backtracking, an unsolvable set (no reference lock, `unsolvable` in
 `SNAPSHOT`), root aliases on dev branches, virtual packages with several
 providers. They are resolved by `tools/oracle-pool.php --solve` and by
-vivace on the same snapshot; the decision sequences must be identical.
+vivacity on the same snapshot; the decision sequences must be identical.

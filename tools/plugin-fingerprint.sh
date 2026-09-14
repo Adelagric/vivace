@@ -3,7 +3,7 @@
 # concaténation « <chemin relatif>\n<contenu> » de chaque *.php hors tests/,
 # dans l'ordre trié des chemins. Deux dists à source identique (même code,
 # metadata différentes) ont la même empreinte : c'est le critère qui décide
-# si vivace émule cette version du plugin.
+# si vivacity émule cette version du plugin.
 set -euo pipefail
 dir="${1:?usage: plugin-fingerprint.sh <package dir>}"
 cd "$dir"

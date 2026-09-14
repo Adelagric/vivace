@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Harness à étapes : une commande qui édite composer.json puis met à jour le
-# lock (`remove`, bientôt `require`) jouée par Composer et par vivace depuis
+# lock (`remove`, bientôt `require`) jouée par Composer et par vivacity depuis
 # la même copie d'une fixture, sur le même instantané Packagist figé. Les
 # deux composer.json, les deux composer.lock et les codes retour doivent
 # coïncider.
@@ -11,8 +11,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/registry.sh
 . "$ROOT/harness/lib/registry.sh"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/steps"
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/steps"
 FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies)
 # "fixture|arguments" : la commande et ses arguments. Les mots finaux en
 # `@…` préparent la copie avant l'étape (et ne sont pas passés) :
@@ -168,7 +168,7 @@ STEPS=(
   "drupal|require drupal/core-project-message"
   "drupal|require composer/installers"
 )
-[ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
+[ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
@@ -247,7 +247,7 @@ for fx in "${FIXTURES[@]}"; do
       composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction --quiet >"$WORK/$fx-$n.composer.log" 2>&1) || ref_code=$?
     viv_code=0
     (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      "$VIVACE" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivace.log" 2>&1) || viv_code=$?
+      "$VIVACITY" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivacity.log" 2>&1) || viv_code=$?
     # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
     # packages.json et l'environnement aussi.
     for f in "${stubs[@]+"${stubs[@]}"}"; do rm -f "$f"; [ -f "$f.orig" ] && mv "$f.orig" "$f"; done
@@ -255,8 +255,8 @@ for fx in "${FIXTURES[@]}"; do
     for e in "${envs[@]+"${envs[@]}"}"; do unset "$e"; done
     label="$fx ${sargs[*]}"; [ ${#preps[@]} -gt 0 ] && label="$label (${preps[*]})"
     if [ "$ref_code" != "$viv_code" ]; then
-      echo "FAIL $label : code retour composer=$ref_code vivace=$viv_code"
-      tail -3 "$WORK/$fx-$n.composer.log" "$WORK/$fx-$n.vivace.log"; status=1; continue
+      echo "FAIL $label : code retour composer=$ref_code vivacity=$viv_code"
+      tail -3 "$WORK/$fx-$n.composer.log" "$WORK/$fx-$n.vivacity.log"; status=1; continue
     fi
     ok=1
     for f in composer.json composer.lock; do

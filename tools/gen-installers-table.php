@@ -4,12 +4,12 @@
 //   [{"key": "wordpress", "class": "WordPressInstaller", "custom": false,
 //     "locations": {"plugin": "wp-content/plugins/{$name}/", ...}}, ...]
 // `custom` is true when the installer overrides inflectPackageVars,
-// getLocations or getInstallPath — its paths depend on code vivace does not
+// getLocations or getInstallPath — its paths depend on code vivacity does not
 // port, so such packages must fall back to Composer.
 // Usage: php tools/gen-installers-table.php <composer.phar> [<installers src dir>] [<tag>]
 // (default src dir: docs/reference/installers/src/Composer/Installers, tag v2.3.0)
 // Output: {"tag": ..., "frameworks": [...]} — written to
-// crates/vivace-core/assets/installers/<tag>.json, one file per ported tag.
+// crates/vivacity-core/assets/installers/<tag>.json, one file per ported tag.
 declare(strict_types=1);
 
 $phar = $argv[1] ?? null;

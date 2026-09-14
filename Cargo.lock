@@ -1892,22 +1892,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vivace"
-version = "0.5.0"
+name = "vivacity"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
  "serde_json",
  "tempfile",
  "tokio",
- "vivace-autoload",
- "vivace-core",
- "vivace-resolver",
+ "vivacity-autoload",
+ "vivacity-core",
+ "vivacity-resolver",
 ]
 
 [[package]]
-name = "vivace-autoload"
-version = "0.5.0"
+name = "vivacity-autoload"
+version = "0.6.0"
 dependencies = [
  "base64 0.23.1",
  "md-5",
@@ -1916,13 +1916,13 @@ dependencies = [
  "sha1",
  "tempfile",
  "thiserror",
- "vivace-core",
+ "vivacity-core",
  "walkdir",
 ]
 
 [[package]]
-name = "vivace-core"
-version = "0.5.0"
+name = "vivacity-core"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1941,15 +1941,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "vivace-resolver"
-version = "0.5.0"
+name = "vivacity-resolver"
+version = "0.6.0"
 dependencies = [
  "pcre2",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
- "vivace-core",
+ "vivacity-core",
 ]
 
 [[package]]

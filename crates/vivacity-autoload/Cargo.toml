@@ -1,0 +1,23 @@
+[package]
+name = "vivacity-autoload"
+description = "Byte-identical port of Composer's autoloader generation (classmap, PSR-0/4, files) for vivacity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["composer", "php", "autoload"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+vivacity-core = { path = "../vivacity-core", version = "0.6.0" }
+serde_json.workspace = true
+thiserror.workspace = true
+md-5.workspace = true
+pcre2.workspace = true
+walkdir.workspace = true
+base64.workspace = true
+sha1.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

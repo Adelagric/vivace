@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Plugins that vivace does not emulate must hand over to Composer BEFORE
+# Plugins that vivacity does not emulate must hand over to Composer BEFORE
 # touching the disk, naming the plugin. Case: the Drupal recommended-project,
 # whose lock carries drupal/core-composer-scaffold (not emulated: its source
-# is GPL-2.0-or-later, see NOTICE.md). `vivace install --no-fallback` must
+# is GPL-2.0-or-later, see NOTICE.md). `vivacity install --no-fallback` must
 # refuse with exit code 3 and leave the tree untouched; the fallback path
 # itself is proven by `harness/diff-vendor.sh drupal` (whole project
 # identical to Composer's).
@@ -11,9 +11,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/transitions"
-[ -x "$VIVACE" ] || { echo "binary missing: cargo build --release"; exit 1; }
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/transitions"
+[ -x "$VIVACITY" ] || { echo "binary missing: cargo build --release"; exit 1; }
 src="$ROOT/fixtures/work/drupal"
 dir="$WORK/drupal-scaffold"
 rm -rf "$dir"; mkdir -p "$dir"
@@ -21,7 +21,7 @@ rm -rf "$dir"; mkdir -p "$dir"
 cd "$dir"
 before=$( (find . -type d | sort; find . -type f -exec shasum -a 256 {} +) | sort | shasum -a 256)
 code=0
-"$VIVACE" install --no-fallback --offline >"$WORK/scaffold.log" 2>&1 || code=$?
+"$VIVACITY" install --no-fallback --offline >"$WORK/scaffold.log" 2>&1 || code=$?
 if [ "$code" != 3 ]; then
   echo "FAIL drupal: expected exit 3 (out of scope, no fallback), got $code:"; tail -5 "$WORK/scaffold.log"; exit 1
 fi

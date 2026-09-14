@@ -5,7 +5,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-WORK="${VIVACE_FIXTURES_DIR:-$DIR/work}"
+WORK="${VIVACITY_FIXTURES_DIR:-$DIR/work}"
 mkdir -p "$WORK"
 
 emit_runtime_stub() { # options par défaut du template de symfony/runtime
@@ -59,7 +59,7 @@ create() { # name create-project-package boot-command...
     (cd "$WORK" && composer create-project --no-interaction --no-scripts --no-plugins --no-install --quiet "$pkg" "$name")
   fi
   # composer/installers autorisé : le plugin fait partie du contrat (émulé par
-  # vivace), la qualification tourne avec lui.
+  # vivacity), la qualification tourne avec lui.
   local plugin_flag="--no-plugins"
   if jq -e '.config["allow-plugins"]["composer/installers"] == true' "$WORK/$name/composer.json" >/dev/null 2>&1; then
     plugin_flag=""
@@ -67,7 +67,7 @@ create() { # name create-project-package boot-command...
   echo "== qualify $name (install $plugin_flag --no-scripts sur checkout nu)"
   rm -rf "$WORK/$name/vendor"
   (cd "$WORK/$name" && composer install --no-interaction $plugin_flag --no-scripts --quiet)
-  # Contrat v1 de vivace : émulation native du plugin symfony/runtime (stub déterministe).
+  # Contrat v1 de vivacity : émulation native du plugin symfony/runtime (stub déterministe).
   if jq -e '[.packages[].name] | index("symfony/runtime")' "$WORK/$name/composer.lock" >/dev/null \
      && [ ! -f "$WORK/$name/vendor/autoload_runtime.php" ]; then
     emit_runtime_stub "$WORK/$name/vendor/autoload_runtime.php"
@@ -84,7 +84,7 @@ create sylius   sylius/sylius-standard   php -d memory_limit=1G bin/console --ve
 create rector   rectorphp/rector-src     php vendor/bin/phpstan --version
 # WordPress via composer/installers (wpackagist + roots/soil) : le boot doit
 # trouver une classe d'un plugin installé HORS vendor/ (web/app/plugins/soil).
-create wordpress vivace/wordpress-fixture php -r 'require "vendor/autoload.php"; exit(class_exists("Roots\\Soil\\Options") ? 0 : 1);'
+create wordpress vivacity/wordpress-fixture php -r 'require "vendor/autoload.php"; exit(class_exists("Roots\\Soil\\Options") ? 0 : 1);'
 # Drupal recommended-project : composer/installers + core-composer-scaffold
 # (fichiers scaffoldés dans web/, autoload de référence, DrupalInstalled.php).
 create drupal   drupal/recommended-project php vendor/bin/dr --version

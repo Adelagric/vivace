@@ -1,6 +1,6 @@
 name: drift
 
-# vivace promises byte-identical output against Composer 2.10.3 (the vendored
+# vivacity promises byte-identical output against Composer 2.10.3 (the vendored
 # reference). This job asks the question "is that still true against the
 # Composer people actually install?" — latest stable and the snapshot —
 # without touching ci.yml, which stays pinned and deterministic.

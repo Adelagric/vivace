@@ -9,9 +9,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/removal"
-[ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/removal"
+[ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 
 # fixture → paquets retirés (feuilles, pour que le lock reste cohérent)
 removed_for() {
@@ -42,8 +42,8 @@ for fx in wordpress laravel drupal; do
   for d in "$ref" "$viv"; do
     (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var --exclude=./web --exclude=./wp-content --exclude=./recipes --exclude=./.editorconfig --exclude=./.gitattributes -cf - .) | (cd "$d" && tar -xf -)
     (cd "$d" && git init -q -b main && git add -A >/dev/null && \
-      GIT_AUTHOR_NAME=vivace GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
-      GIT_COMMITTER_NAME=vivace GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
+      GIT_AUTHOR_NAME=vivacity GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
+      GIT_COMMITTER_NAME=vivacity GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
       git commit -q -m fixture)
   done
   if jq -e '.config["allow-plugins"]["composer/installers"] == true' "$src/composer.json" >/dev/null 2>&1; then
@@ -53,7 +53,7 @@ for fx in wordpress laravel drupal; do
   fi
   # Premier install de chaque côté.
   (cd "$ref" && composer install --no-interaction $plugin_flag --no-scripts --quiet)
-  (cd "$viv" && "$VIVACE" install --offline 2>"$WORK/$fx.1.log") || { echo "FAIL $fx : premier install"; tail -5 "$WORK/$fx.1.log"; status=1; continue; }
+  (cd "$viv" && "$VIVACITY" install --offline 2>"$WORK/$fx.1.log") || { echo "FAIL $fx : premier install"; tail -5 "$WORK/$fx.1.log"; status=1; continue; }
   # Le lock perd des paquets, puis second install (Composer avertit que le
   # lock n'est plus à jour : c'est attendu des deux côtés).
   # shellcheck disable=SC2046
@@ -61,7 +61,7 @@ for fx in wordpress laravel drupal; do
   cp "$ref/composer.lock" "$viv/composer.lock"
   cp "$ref/composer.json" "$viv/composer.json"
   (cd "$ref" && composer install --no-interaction $plugin_flag --no-scripts --quiet 2>/dev/null)
-  (cd "$viv" && "$VIVACE" install --offline 2>"$WORK/$fx.2.log") || { echo "FAIL $fx : second install"; tail -5 "$WORK/$fx.2.log"; status=1; continue; }
+  (cd "$viv" && "$VIVACITY" install --offline 2>"$WORK/$fx.2.log") || { echo "FAIL $fx : second install"; tail -5 "$WORK/$fx.2.log"; status=1; continue; }
   lines=$(diff -r --exclude=.git "$ref" "$viv" 2>&1 \
     | grep -v 'autoload_runtime.php' \
     | grep -v 'No such file or directory' \

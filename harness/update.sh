@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Harness du résolveur : `composer update --no-install` et `vivace update
+# Harness du résolveur : `composer update --no-install` et `vivacity update
 # --no-install` sur le même instantané Packagist figé (fixtures/registry),
 # composer.json intact — le lock produit doit être identique à l'octet, et
 # identique au lock de référence capturé avec l'instantané (déterminisme de
@@ -15,8 +15,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/registry.sh
 . "$ROOT/harness/lib/registry.sh"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/update"
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/update"
 FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal)
 # Cas de mise à jour partielle : "fixture|arguments de composer update".
 PARTIAL=(
@@ -28,7 +28,7 @@ PARTIAL=(
   "sylius|sylius/sylius -W"
   "rector|phpstan/*"
 )
-[ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
+[ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
@@ -57,8 +57,8 @@ for fx in "${FIXTURES[@]}"; do
     diff "$WORK/ref-$fx/composer.lock" "$reg/composer.lock.expected" | head -10 || true; status=1; continue
   fi
   if ! (cd "$WORK/viv-$fx" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-        "$VIVACE" update --no-install 2>"$WORK/$fx.vivace.log"); then
-    echo "FAIL $fx : vivace update a échoué :"; tail -5 "$WORK/$fx.vivace.log"; status=1; continue
+        "$VIVACITY" update --no-install 2>"$WORK/$fx.vivacity.log"); then
+    echo "FAIL $fx : vivacity update a échoué :"; tail -5 "$WORK/$fx.vivacity.log"; status=1; continue
   fi
   if diff -q "$WORK/ref-$fx/composer.lock" "$WORK/viv-$fx/composer.lock" >/dev/null; then
     echo "OK   $fx : composer.lock identique ($(jq '.packages | length' "$WORK/viv-$fx/composer.lock") paquets)"
@@ -81,8 +81,8 @@ for fx in "${FIXTURES[@]}"; do
       echo "FAIL $fx update ${pargs[*]} : composer a échoué :"; tail -5 "$WORK/$fx.partial.composer.log"; status=1; continue
     fi
     if ! (cd "$WORK/viv-$fx-partial" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-          "$VIVACE" update "${pargs[@]}" --no-install 2>"$WORK/$fx.partial.vivace.log"); then
-      echo "FAIL $fx update ${pargs[*]} : vivace a échoué :"; tail -5 "$WORK/$fx.partial.vivace.log"; status=1; continue
+          "$VIVACITY" update "${pargs[@]}" --no-install 2>"$WORK/$fx.partial.vivacity.log"); then
+      echo "FAIL $fx update ${pargs[*]} : vivacity a échoué :"; tail -5 "$WORK/$fx.partial.vivacity.log"; status=1; continue
     fi
     if diff -q "$WORK/ref-$fx-partial/composer.lock" "$WORK/viv-$fx-partial/composer.lock" >/dev/null; then
       echo "OK   $fx update ${pargs[*]} : composer.lock identique"

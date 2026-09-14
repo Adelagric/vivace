@@ -4,7 +4,7 @@ Frozen application skeletons used by the differential harness. They are
 copied verbatim (vendor/, node_modules/, var/ and .env excluded) from the
 upstream `create-project` templates, together with the `composer.lock` that
 was resolved on 2026-09-09/10; freezing them keeps the harness deterministic
-and independent of upstream churn. They are test data, not part of vivace.
+and independent of upstream churn. They are test data, not part of vivacity.
 
 | fixture | upstream | license |
 |---|---|---|
@@ -39,7 +39,7 @@ leaves it (composer.json, the lock resolved on 2026-09-11, LICENSE.txt), plus
 instructions suggest. It locks five plugins: composer/installers and
 symfony/runtime (emulated), drupal/core-project-message and
 drupal/core-recipe-unpack (inert at install time), and
-drupal/core-composer-scaffold, which vivace does not emulate (GPL source):
+drupal/core-composer-scaffold, which vivacity does not emulate (GPL source):
 the fixture proves the Composer fallback path and `harness/transitions.sh`
 the refusal before any write. Boot check: `vendor/bin/dr --version`.
 

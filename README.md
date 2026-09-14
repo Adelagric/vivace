@@ -1,17 +1,18 @@
-# vivace
+# vivacity
 
-[![ci](https://github.com/Adelagric/vivace/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vivace/actions/workflows/ci.yml)
+[![ci](https://github.com/Adelagric/vivacity/actions/workflows/ci.yml/badge.svg)](https://github.com/Adelagric/vivacity/actions/workflows/ci.yml)
 
 `composer install` and `composer update`, reimplemented in Rust. Given the
 same `composer.json` and `composer.lock`, it writes the same `vendor/` and
 the same lock file as Composer 2.10.3, byte for byte. No PHP is run.
+(Named `vivace` up to 0.5.0; see the changelog for why it moved.)
 
 ```
-composer install       →  vivace install
-composer update        →  vivace update        (also `update vendor/name [-w|-W]`)
-composer require       →  vivace require
-composer remove        →  vivace remove
-composer dump-autoload →  vivace dump-autoload
+composer install       →  vivacity install
+composer update        →  vivacity update        (also `update vendor/name [-w|-W]`)
+composer require       →  vivacity require
+composer remove        →  vivacity remove
+composer dump-autoload →  vivacity dump-autoload
 ```
 
 Flags: `--no-dev`, `-o`, `-a`, `--no-autoloader`, `--no-install`,
@@ -23,28 +24,28 @@ and `config.lock` are read from `composer.json` the way Composer reads them.
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Adelagric/vivace/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Adelagric/vivacity/main/install.sh | sh
 ```
 
 Linux x86_64/arm64, macOS arm64/x86_64; the script checks the sha256.
-Also `cargo install vivace` (crates.io), `cargo binstall vivace`, or
-`cargo install --path crates/vivace`.
+Also `cargo install vivacity` (crates.io), `cargo binstall vivacity`, or
+`cargo install --path crates/vivacity`.
 
 GitHub Actions:
 
 ```yaml
-- uses: Adelagric/vivace@v0.5.0
-- run: vivace install
+- uses: Adelagric/vivacity@v0.6.0
+- run: vivacity install
 ```
 
 ## How it is checked
 
-`harness/diff-vendor.sh` runs `composer install` and `vivace install` on six
+`harness/diff-vendor.sh` runs `composer install` and `vivacity install` on six
 projects (Laravel, the Symfony demo, Sylius, rector-src, a WordPress site
 using `composer/installers`, a Drupal `recommended-project`) and `diff -r`s
 the results — the whole project tree for the last two, since their files
 land outside `vendor/`. `harness/update.sh` does the same for
-`composer update --no-install` and `vivace update --no-install` against
+`composer update --no-install` and `vivacity update --no-install` against
 frozen Packagist snapshots, comparing the lock files. Both must report no
 difference; CI runs them on Linux and macOS on every push.
 
@@ -63,7 +64,7 @@ What is not covered is listed in [HANDOVER.md](HANDOVER.md).
 ## Speed
 
 Warm `install` is bound by writing tens of thousands of small files and
-rescanning class maps, not by PHP. vivace extracts each package once into a
+rescanning class maps, not by PHP. vivacity extracts each package once into a
 content-addressed store, clones it into `vendor/` (`clonefile` on APFS,
 hardlinks elsewhere), and caches the class map per store entry. Measured
 numbers and the scripts that produce them are in [bench/](bench/); the
@@ -73,7 +74,7 @@ about a third of Composer's time. Cold network installs are not faster.
 
 ## The resolver
 
-`vivace update` uses Composer's own algorithm, ported function by function:
+`vivacity update` uses Composer's own algorithm, ported function by function:
 `PoolBuilder`, `PoolOptimizer`, `RuleSetGenerator`, the CDCL `Solver`,
 `DefaultPolicy`, `LockTransaction`, `Locker`. Any other algorithm would pick
 different versions on ambiguous inputs and produce a lock nobody can compare
@@ -96,7 +97,7 @@ carry them and the parity checks run with the policies on. Custom policy
 lists with sources and a repository `filter.api-url` are not supported
 (refused when reached).
 
-`vivace require` and `vivace remove` edit `composer.json` the way Composer
+`vivacity require` and `vivacity remove` edit `composer.json` the way Composer
 does — a port of `JsonManipulator`, which rewrites only the affected keys
 and keeps the file's layout — pick the same `^x.y` constraint (a port of
 `VersionSelector`), then run the same partial update, and `require`
@@ -104,7 +105,7 @@ rewrites the constraint and the lock's `content-hash` from the resolved
 version the way `RequireCommand` does. `harness/steps.sh` plays the same
 commands through both tools on the frozen snapshots and compares
 `composer.json`, `composer.lock` and the exit code. Not ported: the
-interactive prompts (vivace behaves like `--no-interaction`) and the
+interactive prompts (vivacity behaves like `--no-interaction`) and the
 Packagist search behind "Did you mean …".
 
 ## Plugins and scripts
@@ -120,7 +121,7 @@ uses it goes through the Composer fallback below.
 
 Anything else — other plugins, `composer/installers` cases with custom
 naming, source-only packages, a plugin upgrade in progress — is detected
-before `vendor/` is touched, and vivace execs the real `composer install`
+before `vendor/` is touched, and vivacity execs the real `composer install`
 instead (`--no-fallback` to make it fail). Post-install scripts such as
 Laravel's `package:discover` are yours to run.
 
@@ -129,16 +130,16 @@ hg/svn/fossil.
 
 ## Embedding
 
-The `vivace` crate is a library with a thin binary on top: another program
-can run any vivace command in-process and get the binary's exit code.
+The `vivacity` crate is a library with a thin binary on top: another program
+can run any vivacity command in-process and get the binary's exit code.
 
 ```rust
-// Cargo.toml: vivace = "0.5"
-let code = vivace::run(["vivace", "install", "--working-dir", "/srv/app"]);
+// Cargo.toml: vivacity = "0.5"
+let code = vivacity::run(["vivacity", "install", "--working-dir", "/srv/app"]);
 ```
 
-The lower layers are separate crates (`vivace-core`: manifests, lock,
-store, installers; `vivace-resolver`: the resolver port; `vivace-autoload`:
+The lower layers are separate crates (`vivacity-core`: manifests, lock,
+store, installers; `vivacity-resolver`: the resolver port; `vivacity-autoload`:
 the autoloader generator).
 
 ## Development

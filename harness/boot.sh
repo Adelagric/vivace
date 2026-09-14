@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Chaque fixture, installée par vivace seul (install complet, autoload
+# Chaque fixture, installée par vivacity seul (install complet, autoload
 # compris), doit démarrer. Aucun appel à Composer ici.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/boot"
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/boot"
 boot_cmd() { # bash 3.2 (macOS) : pas de tableaux associatifs
   case "$1" in
     laravel) echo "php artisan --version" ;;
@@ -21,8 +21,8 @@ for fx in laravel symfony sylius rector wordpress drupal; do
   src="$ROOT/fixtures/work/$fx"; dst="$WORK/$fx"
   rm -rf "$dst"; mkdir -p "$dst"
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var --exclude=./web --exclude=./wp-content --exclude=./recipes --exclude=./.editorconfig --exclude=./.gitattributes -cf - .) | (cd "$dst" && tar -xf -)
-  if ! (cd "$dst" && "$VIVACE" install --offline 2>"$WORK/$fx.vivace.log"); then
-    echo "FAIL $fx : vivace install a échoué :"; tail -20 "$WORK/$fx.vivace.log"; status=1; continue
+  if ! (cd "$dst" && "$VIVACITY" install --offline 2>"$WORK/$fx.vivacity.log"); then
+    echo "FAIL $fx : vivacity install a échoué :"; tail -20 "$WORK/$fx.vivacity.log"; status=1; continue
   fi
   if out=$(cd "$dst" && $(boot_cmd "$fx") 2>&1); then
     echo "OK   $fx : $(echo "$out" | head -1)"

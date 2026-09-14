@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/vivace", "crates/vivace-core", "crates/vivace-autoload", "crates/vivace-resolver"]
+members = ["crates/vivacity", "crates/vivacity-core", "crates/vivacity-autoload", "crates/vivacity-resolver"]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Adelagric/vivace"
+repository = "https://github.com/Adelagric/vivacity"
 
 [workspace.dependencies]
 anyhow = "=1.0.104"

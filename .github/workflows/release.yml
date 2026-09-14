@@ -28,25 +28,25 @@ jobs:
         run: |
           tag="${{ github.ref_name }}"; v="${tag#v}"
           grep -q "^version = \"$v\"" Cargo.toml || { echo "::error::Cargo.toml version is not $v"; exit 1; }
-          grep -q "Adelagric/vivace@$tag" README.md || { echo "::error::README.md does not pin uses: Adelagric/vivace@$tag"; exit 1; }
+          grep -q "Adelagric/vivacity@$tag" README.md || { echo "::error::README.md does not pin uses: Adelagric/vivacity@$tag"; exit 1; }
           grep -q "$tag" action.yml || { echo "::error::action.yml examples do not mention $tag"; exit 1; }
           grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$v] entry"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked --target ${{ matrix.target }} -p vivace
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p vivacity
       - name: Package
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/vivace dist/
+          cp target/${{ matrix.target }}/release/vivacity dist/
           cp README.md LICENSE-MIT LICENSE-APACHE dist/
-          tar -C dist -czf vivace-${{ github.ref_name }}-${{ matrix.target }}.tar.gz .
-          shasum -a 256 vivace-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > vivace-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+          tar -C dist -czf vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz .
+          shasum -a 256 vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: vivace-${{ matrix.target }}
-          path: vivace-*.tar.gz*
+          name: vivacity-${{ matrix.target }}
+          path: vivacity-*.tar.gz*
 
   publish:
     needs: build

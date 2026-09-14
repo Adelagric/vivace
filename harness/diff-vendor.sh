@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Harness différentiel M2/M4 : pour chaque fixture, compare le vendor/ produit
 # par `composer install --no-plugins --no-scripts [--no-autoloader]` et celui
-# produit par `vivace install [--no-autoloader]` sur des copies nues.
+# produit par `vivacity install [--no-autoloader]` sur des copies nues.
 #
 # Écarts tolérés (documentés) :
-#   - vendor/autoload_runtime.php : généré par vivace (émulation symfony/runtime),
+#   - vendor/autoload_runtime.php : généré par vivacity (émulation symfony/runtime),
 #     absent d'un install Composer sans plugins — c'est la feature r2 ;
 #   - "No such file or directory" : `diff -r` ne sait pas suivre un symlink
 #     pendant (identique des deux côtés, vérifié via readlink) ;
@@ -12,19 +12,19 @@
 #     Composer l'écrit dans l'ordre d'achèvement des extractions asynchrones —
 #     trois `composer install` successifs donnent trois ordres (vérifié le
 #     2026-09-11 sur la fixture drupal) ; `composer dump-autoload` le réécrit
-#     dans l'ordre d'installed.json, que vivace produit. Comparé trié.
+#     dans l'ordre d'installed.json, que vivacity produit. Comparé trié.
 #
 # Usage : harness/diff-vendor.sh [--with-autoloader] [fixture...]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VIVACE="$ROOT/target/release/vivace"
-WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}"
+VIVACITY="$ROOT/target/release/vivacity"
+WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}"
 AUTOLOAD_FLAG="--no-autoloader"
 if [ "${1:-}" = "--with-autoloader" ]; then AUTOLOAD_FLAG=""; shift; fi
 FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector wordpress drupal)
 
-[ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
+[ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
@@ -40,11 +40,11 @@ for fx in "${FIXTURES[@]}"; do
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var --exclude=./web --exclude=./wp-content --exclude=./recipes --exclude=./.editorconfig --exclude=./.gitattributes -cf - .) | (cd "$ref" && tar -xf -)
   (cd "$src" && tar --exclude=./vendor --exclude=./node_modules --exclude=./var --exclude=./web --exclude=./wp-content --exclude=./recipes --exclude=./.editorconfig --exclude=./.gitattributes -cf - .) | (cd "$viv" && tar -xf -)
   # Dépôt git identique des deux côtés (même arbre, même auteur/date → même SHA) :
-  # Composer devine la version racine depuis git, vivace doit faire pareil.
+  # Composer devine la version racine depuis git, vivacity doit faire pareil.
   for d in "$ref" "$viv"; do
     (cd "$d" && git init -q -b main && git add -A >/dev/null && \
-      GIT_AUTHOR_NAME=vivace GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
-      GIT_COMMITTER_NAME=vivace GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
+      GIT_AUTHOR_NAME=vivacity GIT_AUTHOR_EMAIL=v@v GIT_AUTHOR_DATE="2026-09-10T00:00:00Z" \
+      GIT_COMMITTER_NAME=vivacity GIT_COMMITTER_EMAIL=v@v GIT_COMMITTER_DATE="2026-09-10T00:00:00Z" \
       git commit -q -m fixture)
   done
   # Fixture à plugin de layout émulé (composer/installers autorisé) : la
@@ -56,8 +56,8 @@ for fx in "${FIXTURES[@]}"; do
     plugin_flag="--no-plugins"; scope_ref="$ref/vendor"; scope_viv="$viv/vendor"; what="vendor/"
   fi
   (cd "$ref" && composer install --no-interaction $plugin_flag --no-scripts $AUTOLOAD_FLAG --quiet)
-  if ! (cd "$viv" && "$VIVACE" install $AUTOLOAD_FLAG --offline 2>"$WORK/$fx.vivace.log"); then
-    echo "FAIL $fx : vivace install a échoué :"; tail -20 "$WORK/$fx.vivace.log"; status=1; continue
+  if ! (cd "$viv" && "$VIVACITY" install $AUTOLOAD_FLAG --offline 2>"$WORK/$fx.vivacity.log"); then
+    echo "FAIL $fx : vivacity install a échoué :"; tail -20 "$WORK/$fx.vivacity.log"; status=1; continue
   fi
   ip_ref="$ref/vendor/composer/include_paths.php"; ip_viv="$viv/vendor/composer/include_paths.php"
   if [ -f "$ip_ref" ] && [ -f "$ip_viv" ] && ! diff -q <(sort "$ip_ref") <(sort "$ip_viv") >/dev/null; then

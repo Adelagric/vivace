@@ -1,0 +1,27 @@
+[package]
+name = "vivacity"
+description = "Fast, Composer-compatible installer for PHP projects: install, update, require, remove, dump-autoload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["composer", "php", "installer", "cli"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+vivacity-core = { path = "../vivacity-core", version = "0.6.0" }
+vivacity-resolver = { path = "../vivacity-resolver", version = "0.6.0" }
+vivacity-autoload = { path = "../vivacity-autoload", version = "0.6.0" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/vivacity-v{ version }-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "vivacity"

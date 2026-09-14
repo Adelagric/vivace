@@ -371,3 +371,20 @@ inconnu : `install` bascule sur `composer install` avant toute écriture,
 fixture drupal reste dans le harness et passe par le fallback ; la source
 vendorée `docs/reference/drupal-scaffold/` est supprimée avec le port. Les
 versions 0.3.0 à 0.5.0 sont yankées sur crates.io.
+
+## 2026-09-14 — Renommage en vivacity (v0.6)
+
+Fait : `svandragt/vivace` (créé le 2026-09-06, quatre jours avant ce dépôt)
+est une réimplémentation de Composer en Rust avec la même promesse d'un
+`vendor/` identique à l'octet, binaire `viv`, v0.11.0 et ~330 commits au
+2026-09-14 ; deux `composer-rs` existent aussi. Même nom, même pitch, même
+semaine : la coexistence n'exposait à rien juridiquement (pas de marque,
+noms libres) mais brouillait toute recherche, toute mention et l'antériorité
+est à lui. Décision : renommer en **vivacity** (libre sur crates.io pour les
+quatre crates, aucun projet Rust de ce nom sur GitHub), tout d'un bloc —
+binaire, crates, entrée `vivacity::run`, variables `VIVACITY_*`, dossiers de
+cache, action, dépôt (redirection GitHub conservée). Les plans historiques
+sous `docs/plans/` et les entrées datées de ce fichier gardent l'ancien
+nom. Alternative écartée : garder le nom et compter sur la différence
+d'approche (oracles différentiels, port du solveur) — invisible depuis un
+nom de crate.

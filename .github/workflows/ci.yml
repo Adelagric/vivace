@@ -74,7 +74,7 @@ jobs:
       - name: Transitions left to Composer (plugin upgrade)
         run: harness/transitions.sh
 
-      - name: Boot on vivace vendor
+      - name: Boot on vivacity vendor
         run: harness/boot.sh
 
       - name: Reference twins still match the pinned Composer

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instantané figé des métadonnées Packagist d'une fixture, pour que
-# `composer update` et `vivace update` résolvent exactement les mêmes
+# `composer update` et `vivacity update` résolvent exactement les mêmes
 # données (Packagist bouge d'une minute à l'autre).
 #
 # Méthode : un `composer update --no-install` avec un cache Composer vierge ;
