@@ -114,6 +114,20 @@ Laravel's `package:discover` are yours to run.
 Not supported: Windows, `gitlab-token` auth, root version detection from
 hg/svn/fossil.
 
+## Embedding
+
+The `vivace` crate is a library with a thin binary on top: another program
+can run any vivace command in-process and get the binary's exit code.
+
+```rust
+// Cargo.toml: vivace = { git = "https://github.com/Adelagric/vivace", tag = "v0.5.0" }
+let code = vivace::run(["vivace", "install", "--working-dir", "/srv/app"]);
+```
+
+The lower layers are separate crates (`vivace-core`: manifests, lock,
+store, installers; `vivace-resolver`: the resolver port; `vivace-autoload`:
+the autoloader generator).
+
 ## Development
 
 ```bash

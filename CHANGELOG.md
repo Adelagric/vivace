@@ -45,6 +45,9 @@ byte-identical-output promise are the public API.
   `COMPOSER_IGNORE_PLATFORM_REQ`, as `BaseCommand` does.
 
 ### Changed
+- The `vivace` crate is now a library with a thin binary: `vivace::run(args)`
+  runs any command in-process and returns the exit code, so another
+  program can embed the commands instead of shelling out.
 - `update` exits with code 2 when the requirements cannot be resolved,
   Composer's `ERROR_DEPENDENCY_RESOLUTION_FAILED`, instead of 1.
 - `update` keeps a metadata cache in Composer's own `cache-repo-dir`, in

@@ -1909,6 +1909,7 @@ dependencies = [
  "anyhow",
  "clap",
  "serde_json",
+ "tempfile",
  "tokio",
  "vivace-autoload",
  "vivace-core",
