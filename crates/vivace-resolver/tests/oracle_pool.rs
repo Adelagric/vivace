@@ -216,13 +216,37 @@ fn oracle_with(s: &Setup, solve: bool, update: &[&str], mode: &str) -> Value {
     serde_json::from_slice(&out.stdout).expect("oracle json")
 }
 
+/// Le paquet de plateforme `composer` porte la version de Composer
+/// lui-même : le port émule 2.10.3, l'oracle est le phar sous test. Sous un
+/// autre Composer (job de dérive), cette différence est attendue et n'est
+/// pas une dérive du port : elle est neutralisée, et signalée.
+fn same_modulo_composer_version(e: &Value, g: &Value) -> bool {
+    if e == g {
+        return true;
+    }
+    if e["name"] == "composer" && g["name"] == "composer" && e["repo"] == "platform" {
+        let mut g2 = g.clone();
+        for k in ["version", "pretty", "stability"] {
+            g2[k] = e[k].clone();
+        }
+        if g2 == *e {
+            eprintln!(
+                "note: platform package composer {} (oracle) vs {} (port, the emulated Composer) — ignored",
+                e["pretty"], g["pretty"]
+            );
+            return true;
+        }
+    }
+    false
+}
+
 fn compare(fx: &str, expected: &Value, got: &[Value]) -> usize {
     let exp = expected["packages"].as_array().expect("packages");
     let mut divergences = 0;
     let n = exp.len().max(got.len());
     for i in 0..n {
         match (exp.get(i), got.get(i)) {
-            (Some(e), Some(g)) if e == g => {}
+            (Some(e), Some(g)) if same_modulo_composer_version(e, g) => {}
             (e, g) => {
                 divergences += 1;
                 if divergences <= 5 {
