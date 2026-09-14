@@ -27,6 +27,24 @@ binaire `composer` du PATH vers `$TMPDIR/vivace-oracle-composer.phar` et
 appellent ses classes via `php -r`. Sans php/composer ils ÉCHOUENT avec un
 message explicite (jamais de skip silencieux).
 
+## Publication sur crates.io (à partir de 0.5.0)
+
+Les quatre crates s'empaquettent (`cargo package --workspace --no-verify`,
+vérifié : 38 à 138 KiB compressés chacun). Procédure, dans l'ordre des
+dépendances, gérée par cargo :
+
+```bash
+cargo login                       # une fois, jeton du compte crates.io du mainteneur
+# bumper la version : [workspace.package].version ET les trois dépendances
+# `path = "../vivace-*", version = "…"` (crates/vivace*/Cargo.toml)
+cargo publish --workspace         # core → autoload → resolver → vivace
+```
+
+Le nom `vivace` est libre sur crates.io au 2026-09-14. Un job de publication
+dans release.yml demanderait un secret `CARGO_REGISTRY_TOKEN` (décision du
+mainteneur). Une fois publiés, `cargo install vivace` et l'embarquement
+(`vivace = "0.5"` → `vivace::run(args)`) ne passent plus par git.
+
 ## Jalons
 
 | jalon | état | preuve |

@@ -1,15 +1,18 @@
 [package]
 name = "vivace"
-description = "Fast, Composer-compatible installer for PHP projects"
+description = "Fast, Composer-compatible installer for PHP projects: install, update, require, remove, dump-autoload"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["composer", "php", "installer", "cli"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
-vivace-core = { path = "../vivace-core" }
-vivace-resolver = { path = "../vivace-resolver" }
-vivace-autoload = { path = "../vivace-autoload" }
+vivace-core = { path = "../vivace-core", version = "0.4.0" }
+vivace-resolver = { path = "../vivace-resolver", version = "0.4.0" }
+vivace-autoload = { path = "../vivace-autoload", version = "0.4.0" }
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true

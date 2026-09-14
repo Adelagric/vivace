@@ -1,10 +1,13 @@
 [package]
 name = "vivace-core"
-description = "Manifests, platform checks, fetching and installation for vivace"
+description = "Manifests, content hash, platform checks, dist fetching, content-addressed store and installation for vivace"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["composer", "php", "installer"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 anyhow.workspace = true
