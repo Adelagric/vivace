@@ -406,66 +406,6 @@ fn project_dir(working_dir: Option<&std::path::Path>) -> anyhow::Result<PathBuf>
     })
 }
 
-/// `Plugin::preAutoloadDump` of the Drupal scaffold: writes
-/// vendor/drupal/DrupalInstalled.php and returns the classmap entries to
-/// add to the root. Nothing without an emulated scaffold.
-fn scaffold_pre_dump(
-    project: &std::path::Path,
-    profile: Option<vivace_core::scaffold::Profile>,
-    lock: &vivace_core::lock::Lock,
-    manifest: &serde_json::Value,
-    dev_mode: bool,
-) -> anyhow::Result<Vec<String>> {
-    let Some(profile) = profile else {
-        return Ok(Vec::new());
-    };
-    let root = vivace_core::state::RootPackage::detect(manifest, project, dev_mode);
-    let packages = vivace_core::scaffold::hash_packages(lock, dev_mode);
-    let Some(pre) = vivace_core::scaffold::pre_autoload_dump(
-        profile,
-        "vendor",
-        &packages,
-        &vivace_core::scaffold::root_hash_package(&root),
-    ) else {
-        return Ok(Vec::new());
-    };
-    let dir = project.join("vendor/drupal");
-    std::fs::create_dir_all(&dir).with_context(|| format!("cannot create {}", dir.display()))?;
-    std::fs::write(dir.join("DrupalInstalled.php"), &pre.drupal_installed)
-        .context("cannot write vendor/drupal/DrupalInstalled.php")?;
-    Ok(pre.root_classmap)
-}
-
-/// Drupal scaffold profile for `dump-autoload`: plugin locked, allowed,
-/// and installed copy with a known fingerprint.
-fn scaffold_profile_installed(
-    layout: &vivace_core::layout::Layout,
-    lock: &vivace_core::lock::Lock,
-    manifest: &serde_json::Value,
-    dev_mode: bool,
-    plugins_enabled: bool,
-) -> anyhow::Result<Option<vivace_core::scaffold::Profile>> {
-    use vivace_core::scaffold::PLUGIN;
-    if !plugins_enabled || !lock.wanted_packages(dev_mode).any(|p| p.name() == PLUGIN) {
-        return Ok(None);
-    }
-    match vivace_core::layout::plugin_allowed(manifest, PLUGIN) {
-        vivace_core::layout::PluginVerdict::Allowed => {}
-        vivace_core::layout::PluginVerdict::Blocked => return Ok(None),
-        vivace_core::layout::PluginVerdict::Unlisted => anyhow::bail!(
-            "{PLUGIN} is a plugin not covered by config.allow-plugins (Composer would refuse to run it)"
-        ),
-    }
-    let Some(dir) = layout.abs(PLUGIN).filter(|d| d.is_dir()) else {
-        return Ok(None);
-    };
-    let fp = vivace_core::scaffold::fingerprint(&dir)?;
-    match vivace_core::scaffold::profile_for(&fp) {
-        Some(p) => Ok(Some(p)),
-        None => anyhow::bail!("{PLUGIN}: the installed plugin source is not emulated (fingerprint {}…); run `composer dump-autoload`", &fp[..12]),
-    }
-}
-
 fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     if args.no_install {
         eprintln!("Invalid option \"--no-install\". Use \"composer update --no-install\" instead if you are trying to update the composer.lock file.");
@@ -551,7 +491,6 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             )],
             skipped_plugins: vec![],
             layout: None,
-            scaffold: false,
         };
         return fallback_or_fail(args, &project, &scope);
     }
@@ -616,7 +555,6 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let opts = vivace_core::installer::InstallOptions {
         with_dev,
         offline: args.offline,
-        scaffold: scope.scaffold,
         ..Default::default()
     };
     let runtime = tokio::runtime::Runtime::new().context("cannot start the async runtime")?;
@@ -630,32 +568,19 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
                 issues: vec![vivace_core::scope::ScopeIssue::Layout(msg)],
                 skipped_plugins: vec![],
                 layout: None,
-                scaffold: false,
             };
             return fallback_or_fail(args, &project, &scope);
         }
         Err(e) => return Err(e.into()),
     };
-    if report.scaffold.is_some() {
-        eprintln!("Note: drupal/core-composer-scaffold emulated natively (scaffold files, autoload references)");
-    }
-
     trace("install transaction", t0);
     let mut autoload_note = String::new();
     if !args.no_autoloader {
-        let extra = scaffold_pre_dump(
-            &project,
-            report.scaffold.as_ref().map(|s| s.profile),
-            &lock,
-            &manifest,
-            with_dev,
-        )?;
         let report = dump_autoload(
             &project,
             &lock,
             &manifest,
             layout,
-            extra,
             with_dev,
             args.optimize_autoloader || args.classmap_authoritative,
             args.classmap_authoritative,
@@ -665,14 +590,6 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         autoload_note = format!(", autoloader with {} classes", report.classes);
         trace("autoload dump", t0);
     }
-    // POST_INSTALL_CMD: the scaffold writes after the autoloader, like the plugin.
-    if let Some(sc) = &report.scaffold {
-        sc.plan
-            .apply()
-            .context("cannot apply the Drupal scaffold")?;
-        trace("scaffold", t0);
-    }
-
     let warmed = if report.store_warmed > 0 {
         format!(", store warmed for {} packages", report.store_warmed)
     } else {
@@ -697,7 +614,6 @@ fn dump_autoload(
     lock: &vivace_core::lock::Lock,
     manifest: &serde_json::Value,
     layout: &vivace_core::layout::Layout,
-    extra_root_classmap: Vec<String>,
     dev_mode: bool,
     optimize: bool,
     authoritative: bool,
@@ -735,7 +651,6 @@ fn dump_autoload(
                 cache_root: vivace_core::platform::cache_dir(),
             })
         },
-        extra_root_classmap,
     };
     let report = vivace_autoload::dump(project, lock, manifest, layout, &opts)?;
     for w in &report.warnings {
@@ -777,18 +692,26 @@ fn run_dump(args: &DumpArgs) -> anyhow::Result<i32> {
             return Ok(3);
         }
     };
-    // preAutoloadDump reads the local repository (installed.json, dev
-    // included if vendor/ was laid out with it): the installed state, not
-    // this dump's mode.
-    let profile =
-        scaffold_profile_installed(&layout, &lock, &manifest, installed_dev, !args.no_plugins)?;
-    let extra = scaffold_pre_dump(&project, profile, &lock, &manifest, installed_dev)?;
+    // Composer runs the PRE_AUTOLOAD_DUMP listeners of every installed plugin
+    // (drupal/core-composer-scaffold adds classmap entries and writes
+    // vendor/drupal/DrupalInstalled.php): a plugin vivace neither emulates
+    // nor knows to be inert makes the dump non-reproducible.
+    if !args.no_plugins {
+        let issues = vivace_core::scope::plugin_issues(&lock, installed_dev);
+        if !issues.is_empty() {
+            eprintln!("vivace: this lock is outside what vivace handles natively:");
+            for i in &issues {
+                eprintln!("  - {i}");
+            }
+            eprintln!("Run `composer dump-autoload` instead.");
+            return Ok(3);
+        }
+    }
     let report = dump_autoload(
         &project,
         &lock,
         &manifest,
         &layout,
-        extra,
         dev_mode,
         args.optimize || args.classmap_authoritative,
         args.classmap_authoritative,

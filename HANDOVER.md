@@ -57,22 +57,20 @@ mainteneur). Une fois publiés, `cargo install vivace` et l'embarquement
 | M5 perf classmap | terminé (détection parallèle + cache par entrée de store) ; benchmarks publiables à consolider en M6 | bench/M5-perf.md ; harness 0 diff cache froid/chaud |
 | M6 sortie publique | terminé : v0.1.0/v0.1.1 publiées, annonce r/PHP | .github/workflows/release.yml |
 | v0.2 composer/installers natif, drift, action | publié (v0.2.0, 2026-09-11) | tests/oracle_installers.rs (665 cas), fixture wordpress (projet entier 0 diff), harness/removal.sh, drift.yml, action.yml + action-test.yml |
-| v0.3 drupal/core-composer-scaffold natif | publié (v0.3.0, 2026-09-11) | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
+| v0.3 drupal/core-composer-scaffold natif | publié (v0.3.0, 2026-09-11), **retiré en 0.6.0** (port d'un code GPL-2.0-or-later, voir Licences) ; la fixture drupal passe désormais par le fallback `composer install` | fixture drupal (projet entier 0 diff via le fallback, boot `vendor/bin/dr`), harness/transitions.sh (scaffold présent → refus sans toucher au disque) |
 
 | v0.4 résolveur (option A : port du solveur) | publié (v0.4.0, 2026-09-12) : `vivace update` écrit le lock de Composer à l'octet (pool, séquence de décisions du solveur, opérations, lock) ; cache de métadonnées au format de Composer ; mises à jour partielles | docs/plans/v0.4-resolver.md, tests/oracle_pool.rs, harness/update.sh |
-| v0.5 require/remove/politiques | prêt à publier (0.5.0 dans Cargo.toml et CHANGELOG, 2026-09-14 ; tag et crates.io à la main du mainteneur) : partielles, `JsonManipulator` (12 102 + 725 scénarios vs phar), `remove`, `VersionSelector` (902 noms), `require`, politiques de blocage (54 cas) ; `harness/steps.sh` 128 cas | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
+| v0.5 require/remove/politiques | publié (v0.5.0, 2026-09-14, 4 crates sur crates.io) : partielles, `JsonManipulator` (12 102 + 725 scénarios vs phar), `remove`, `VersionSelector` (902 noms), `require`, politiques de blocage (54 cas) ; `harness/steps.sh` 128 cas | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
 
 ## Licences (2026-09-14)
 
 NOTICE.md liste les origines des ports et leurs licences ; les textes MIT de
 Composer, composer/semver, class-map-generator, metadata-minifier et
-composer/installers sont à côté des sources vendorées. **Point ouvert** :
-`docs/reference/drupal-scaffold/` est GPL-2.0-or-later et
-`crates/vivace-core/src/scaffold.rs` en est un port (œuvre dérivée) — en
-conflit avec la distribution MIT/Apache-2.0 des crates et des binaires. Options
-posées au mainteneur : retirer l'émulation (fallback `composer install`),
-l'isoler dans un crate GPL hors des binaires, passer tout vivace en GPL, ou
-réécrire en salle blanche. À trancher avant toute communication publique.
+composer/installers sont à côté des sources vendorées. L'émulation de
+`drupal/core-composer-scaffold` (port d'un code GPL-2.0-or-later, œuvre
+dérivée incompatible avec la distribution MIT/Apache-2.0) a été retirée en
+0.6.0 avec sa source vendorée ; les versions 0.3.0 à 0.5.0 qui la
+contenaient sont yankées sur crates.io. Rien n'est porté d'un logiciel GPL.
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
@@ -114,19 +112,10 @@ réécrire en salle blanche. À trancher avant toute communication publique.
   (test unitaire, pas de fixture). Non porté : `realpath()` de BinaryInstaller
   sur un vendor/ symlinké avec un `bin` hors vendor/ (Composer écrirait un
   chemin absolu) ; `installer-name` contenant `{` refusé plutôt qu'imité.
-- **drupal/core-composer-scaffold** : émulé pour 116 des 120 versions
-  (10.3.0 → 12.0.0-alpha1 ; 11.3.0–11.3.3 refusées : hash non trié). Exercé
-  par diff : la fixture drupal (file-mapping de drupal/core, locations
-  `web/`, autoload de référence, DrupalInstalled.php, .gitignore sur un dépôt
-  ignorant vendor/) ; par oracle : surcharges, append/prepend/default,
-  overwrite false, allowed-packages récursifs, locations personnalisées,
-  fichiers trackés, gitignore forcé, profils 11.3.16 et 11.2.14. Non
-  couvert : `symlink: true` (refusé), git absent du PATH (traité comme
-  « ni ignoré ni tracké »), un `.gitignore` global (`core.excludesFile`)
-  différent entre deux machines, `[web-root]` symlinké (accepté si la
-  location déclarée se résout), perms des fichiers scaffoldés (contenu et
-  présence comparés, pas les modes). Les hooks `pre/post-drupal-scaffold-cmd`
-  du composer.json racine ne sont pas exécutés (comme tout script).
+- **drupal/core-composer-scaffold** : plus émulé depuis 0.6.0 (licence).
+  Plugin inconnu → fallback `composer install` avant toute écriture ;
+  `dump-autoload` refuse (code 3) tant que le plugin est verrouillé et
+  autorisé, puisque Composer exécuterait son `pre-autoload-dump`.
 - **Extraction** : strip du dossier racine seulement s'il est unique
   (règle ArchiveDownloader) ; un zip avec un `.DS_Store` de premier niveau
   et rien d'autre à côté du dossier est traité comme mono-dossier, comme Composer.

@@ -20,9 +20,6 @@ pub struct InstallOptions {
     pub offline: bool,
     /// Download/extraction parallelism.
     pub jobs: usize,
-    /// drupal/core-composer-scaffold locked and allowed (scope): check its
-    /// source and plan the scaffold before any write.
-    pub scaffold: bool,
 }
 
 impl Default for InstallOptions {
@@ -31,19 +28,8 @@ impl Default for InstallOptions {
             with_dev: true,
             offline: false,
             jobs: 16,
-            scaffold: false,
         }
     }
-}
-
-/// What the CLI applies after the transaction and the autoloader when the
-/// Drupal scaffold is emulated.
-#[derive(Debug, Clone)]
-pub struct ScaffoldOutcome {
-    pub profile: crate::scaffold::Profile,
-    pub plan: crate::scaffold::Plan,
-    /// Canonical project root (the plugin's physical `getcwd()`).
-    pub root: PathBuf,
 }
 
 #[derive(Debug, Default)]
@@ -56,8 +42,6 @@ pub struct InstallReport {
     pub store_hits: usize,
     /// Unchanged packages extracted into the store (pre-existing vendor).
     pub store_warmed: usize,
-    /// Drupal scaffold plan, to apply after the autoloader.
-    pub scaffold: Option<ScaffoldOutcome>,
 }
 
 /// Installed identity of a package: version + dist reference.
@@ -196,21 +180,6 @@ pub async fn install(
     }
     report.store_warmed = to_warm.len();
 
-    // Drupal scaffold: plugin source checked (lock AND installed copy), plan
-    // computed on the current on-disk state, before any removal, so that a
-    // refusal leaves vendor/ intact and hands over to Composer.
-    if opts.scaffold {
-        report.scaffold = Some(plan_scaffold(
-            lock,
-            root_manifest,
-            layout,
-            &store,
-            &wanted,
-            &previous,
-            opts.with_dev,
-        )?);
-    }
-
     // Removals: present before, no longer wanted, at the path validated by the
     // layout (old install-path = recomputed path, like LibraryInstaller).
     for name in previous.keys() {
@@ -265,101 +234,6 @@ pub async fn install(
     }
 
     Ok(report)
-}
-
-/// Directory holding the source of a wanted package: the store entry if it
-/// exists, else its current install path.
-fn source_dir(store: &Store, layout: &Layout, p: &LockPackage) -> Option<PathBuf> {
-    if store.contains(p.name(), p.version(), p.dist_reference()) {
-        Some(store.entry_path(p.name(), p.version(), p.dist_reference()))
-    } else {
-        layout.abs(p.name()).filter(|d| d.is_dir())
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn plan_scaffold(
-    lock: &Lock,
-    root_manifest: &Value,
-    layout: &Layout,
-    store: &Store,
-    wanted: &[&LockPackage],
-    previous: &BTreeMap<String, (String, String)>,
-    with_dev: bool,
-) -> Result<ScaffoldOutcome> {
-    use crate::scaffold::{self, PLUGIN};
-    let unsupported = |m: String| Error::Unsupported(m);
-    let plugin = wanted
-        .iter()
-        .find(|p| p.name() == PLUGIN)
-        .ok_or_else(|| unsupported(format!("{PLUGIN}: not in the lock")))?;
-    let plugin_dir = source_dir(store, layout, plugin).ok_or_else(|| {
-        unsupported(format!(
-            "{PLUGIN}: source not available (offline and absent from the store)"
-        ))
-    })?;
-    let fp = scaffold::fingerprint(&plugin_dir).map_err(Error::io(&plugin_dir))?;
-    let profile = scaffold::profile_for(&fp).ok_or_else(|| {
-        unsupported(format!(
-            "{PLUGIN} {}: this plugin source is not emulated (fingerprint {}…)",
-            plugin.version(),
-            &fp[..12]
-        ))
-    })?;
-    // Different installed version: Composer would run the old Handler with
-    // the new Plugin, reproducible only if the sources are identical.
-    if let Some((prev_version, _)) = previous.get(PLUGIN) {
-        if prev_version != plugin.version() {
-            let installed = layout.abs(PLUGIN).filter(|d| d.is_dir());
-            let same = match installed {
-                Some(dir) => scaffold::fingerprint(&dir).map_err(Error::io(&dir))? == fp,
-                None => true,
-            };
-            if !same {
-                return Err(unsupported(format!(
-                    "{PLUGIN} is being upgraded from {prev_version} to {} with a different source: let Composer handle this transition",
-                    plugin.version()
-                )));
-            }
-        }
-    }
-    let root = std::fs::canonicalize(layout.root()).map_err(Error::io(layout.root()))?;
-    // Metapackages stay visible (findPackage finds them and recurses into
-    // their allowed-packages); their install path is empty in Composer, hence
-    // an unreachable `/...` source if they declared a mapping.
-    let packages: Vec<scaffold::ScaffoldPackage> = wanted
-        .iter()
-        .filter_map(|p| {
-            let dir = if p.is_metapackage() {
-                PathBuf::from("/")
-            } else {
-                source_dir(store, layout, p)?
-            };
-            Some(scaffold::ScaffoldPackage {
-                name: p.name().to_owned(),
-                dir,
-                extra: p.raw.get("extra").cloned(),
-            })
-        })
-        .collect();
-    let root_name = root_manifest
-        .get("name")
-        .and_then(Value::as_str)
-        .unwrap_or("__root__");
-    let plan = scaffold::plan(
-        profile,
-        &root,
-        root_name,
-        root_manifest.get("extra"),
-        &packages,
-    )
-    .map_err(unsupported)?;
-    let _ = (lock, with_dev);
-    Ok(ScaffoldOutcome {
-        profile,
-        plan,
-        root,
-    })
 }
 
 /// `LibraryInstaller::uninstall`: the parent directory of the removed package

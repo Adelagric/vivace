@@ -4,6 +4,20 @@ All notable changes to vivace. The format follows [Keep a Changelog](https://kee
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Removed
+- **`drupal/core-composer-scaffold` emulation.** It was a port of the
+  plugin's source, which is GPL-2.0-or-later — a derivative work that
+  cannot be distributed under MIT/Apache-2.0 with the rest of the crates
+  and binaries (see NOTICE.md). The plugin is now handled like any other
+  unknown plugin: `install` delegates to `composer install` before
+  touching `vendor/`, and `dump-autoload` exits with code 3 while the
+  plugin is locked and allowed, because Composer would run its
+  `pre-autoload-dump` listener. The vendored source under
+  `docs/reference/drupal-scaffold/` is removed with it. Releases 0.3.0 to
+  0.5.0 are yanked on crates.io for the same reason.
+
 ## [0.5.0] — 2026-09-14
 
 ### Added

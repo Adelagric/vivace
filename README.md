@@ -109,12 +109,14 @@ Packagist search behind "Did you mean …".
 
 ## Plugins and scripts
 
-Scripts are never run. Three plugins are emulated and checked against the
-real ones: `symfony/runtime`, `composer/installers` (versions 2.0.0–2.3.0,
-frameworks that only use the plugin's path table — WordPress and Drupal
-included) and `drupal/core-composer-scaffold`. A short list of plugins that
-do nothing at install time (`symfony/flex`, `php-http/discovery`,
-`phpstan/extension-installer`, …) is installed as plain libraries.
+Scripts are never run. Two plugins are emulated and checked against the
+real ones: `symfony/runtime` and `composer/installers` (versions
+2.0.0–2.3.0, frameworks that only use the plugin's path table — WordPress
+and Drupal included). A short list of plugins that do nothing at install
+time (`symfony/flex`, `php-http/discovery`, `phpstan/extension-installer`,
+…) is installed as plain libraries. `drupal/core-composer-scaffold` is not
+emulated (its source is GPL-2.0-or-later, see NOTICE.md): a project that
+uses it goes through the Composer fallback below.
 
 Anything else — other plugins, `composer/installers` cases with custom
 naming, source-only packages, a plugin upgrade in progress — is detected

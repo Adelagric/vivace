@@ -16,10 +16,8 @@ tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "fs", "p
 reqwest = { version = "=0.12.28", default-features = false, features = ["http2", "gzip", "stream", "rustls-tls", "charset"] }
 zip = "=2.4.2"
 sha1 = "=0.10.7"
-sha2 = "=0.10.9"
 md-5 = "=0.10.6"
 thiserror = "=2.0.20"
-xxhash-rust = { version = "=0.8.18", features = ["xxh3"] }
 clap = { version = "=4.6.6", features = ["derive"] }
 pcre2 = "=0.2.11"
 walkdir = "=2.5.0"

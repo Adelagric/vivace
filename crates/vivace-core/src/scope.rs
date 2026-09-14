@@ -13,13 +13,10 @@ use serde_json::Value;
 use std::path::Path;
 
 /// Plugins emulated natively by vivace (identical output, drift test).
-/// composer/installers (see `layout`) and drupal/core-composer-scaffold (see
-/// `scaffold`) are, under conditions checked before any write.
-pub const EMULATED_PLUGINS: &[&str] = &[
-    "symfony/runtime",
-    "composer/installers",
-    "drupal/core-composer-scaffold",
-];
+/// composer/installers (see `layout`) is, under conditions checked before
+/// any write. drupal/core-composer-scaffold is deliberately absent: its
+/// source is GPL-2.0-or-later and cannot be ported here (NOTICE.md).
+pub const EMULATED_PLUGINS: &[&str] = &["symfony/runtime", "composer/installers"];
 
 /// Plugins whose inaction is proven to have no effect on the vendor/ content
 /// needed at boot (fixtures qualified with `--no-plugins`). Installed as
@@ -84,9 +81,6 @@ pub struct ScopeReport {
     pub skipped_plugins: Vec<String>,
     /// Resolved layout (None if a layout issue blocks).
     pub layout: Option<Layout>,
-    /// drupal/core-composer-scaffold locked and allowed: the installer checks
-    /// its source fingerprint and plans the scaffold.
-    pub scaffold: bool,
 }
 
 impl ScopeReport {
@@ -109,20 +103,6 @@ pub fn analyze(
     for p in lock.wanted_packages(with_dev) {
         classify_package(p, &mut report);
     }
-    if plugins_enabled
-        && lock
-            .wanted_packages(with_dev)
-            .any(|p| p.name() == crate::scaffold::PLUGIN)
-    {
-        match crate::layout::plugin_allowed(root_manifest, crate::scaffold::PLUGIN) {
-            crate::layout::PluginVerdict::Allowed => report.scaffold = true,
-            crate::layout::PluginVerdict::Blocked => {}
-            crate::layout::PluginVerdict::Unlisted => report.issues.push(ScopeIssue::Layout(format!(
-                "{} is a plugin not covered by config.allow-plugins (Composer would refuse to run it)",
-                crate::scaffold::PLUGIN
-            ))),
-        }
-    }
     match Layout::resolve(project_dir, lock, root_manifest, with_dev, plugins_enabled) {
         Ok(layout) => report.layout = Some(layout),
         Err(issues) => report
@@ -132,23 +112,39 @@ pub fn analyze(
     report
 }
 
-fn classify_package(p: &LockPackage, report: &mut ScopeReport) {
-    let name = p.name().to_owned();
-
-    if p.package_type() == "composer-plugin" {
-        if EMULATED_PLUGINS.contains(&name.as_str()) {
-            // Emulated natively: nothing to report.
-        } else if BENIGN_PLUGINS.contains(&name.as_str()) {
-            report.skipped_plugins.push(name.clone());
-        } else if LAYOUT_PLUGINS.contains(&name.as_str()) {
-            report.issues.push(ScopeIssue::LayoutPlugin(name.clone()));
-        } else {
-            report.issues.push(ScopeIssue::UnknownPlugin(name.clone()));
-        }
+/// Blocking plugin issues alone (unknown or layout-changing plugins in the
+/// lock), for commands that do not install but would still let Composer run
+/// plugin listeners — `dump-autoload` and its PRE_AUTOLOAD_DUMP.
+pub fn plugin_issues(lock: &Lock, with_dev: bool) -> Vec<ScopeIssue> {
+    let mut report = ScopeReport::default();
+    for p in lock.wanted_packages(with_dev) {
+        classify_plugin(p, &mut report);
     }
+    report.issues
+}
 
+fn classify_package(p: &LockPackage, report: &mut ScopeReport) {
+    classify_plugin(p, report);
     if !p.is_metapackage() && p.dist_kind() != DistKind::Zip {
-        report.issues.push(ScopeIssue::NoUsableDist(name));
+        report
+            .issues
+            .push(ScopeIssue::NoUsableDist(p.name().to_owned()));
+    }
+}
+
+fn classify_plugin(p: &LockPackage, report: &mut ScopeReport) {
+    if p.package_type() != "composer-plugin" {
+        return;
+    }
+    let name = p.name().to_owned();
+    if EMULATED_PLUGINS.contains(&name.as_str()) {
+        // Emulated natively: nothing to report.
+    } else if BENIGN_PLUGINS.contains(&name.as_str()) {
+        report.skipped_plugins.push(name);
+    } else if LAYOUT_PLUGINS.contains(&name.as_str()) {
+        report.issues.push(ScopeIssue::LayoutPlugin(name));
+    } else {
+        report.issues.push(ScopeIssue::UnknownPlugin(name));
     }
 }
 

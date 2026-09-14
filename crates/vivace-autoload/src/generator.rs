@@ -60,10 +60,6 @@ pub struct DumpOptions {
     /// Store root + cache root: enables the per-store-entry classmap cache
     /// (None = full scan every time).
     pub classmap_cache: Option<ClassmapCacheConfig>,
-    /// Entries added to the root classmap by an emulated plugin before the
-    /// dump (PRE_AUTOLOAD_DUMP of drupal/core-composer-scaffold:
-    /// `array_merge($autoload['classmap'], ...)`), relative to the project.
-    pub extra_root_classmap: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -205,23 +201,7 @@ pub fn dump(
             .get("target-dir")
             .and_then(Value::as_str)
             .map(str::to_owned),
-        autoload: {
-            let mut a = obj(root_manifest.get("autoload"));
-            if !opts.extra_root_classmap.is_empty() {
-                let mut classmap = match a.remove("classmap") {
-                    Some(Value::Array(v)) => v,
-                    Some(Value::Object(m)) => m.into_iter().map(|(_, v)| v).collect(),
-                    _ => Vec::new(),
-                };
-                classmap.extend(
-                    opts.extra_root_classmap
-                        .iter()
-                        .map(|s| Value::String(s.clone())),
-                );
-                a.insert("classmap".to_owned(), Value::Array(classmap));
-            }
-            a
-        },
+        autoload: obj(root_manifest.get("autoload")),
         autoload_dev: obj(root_manifest.get("autoload-dev")),
         requires: obj(root_manifest.get("require")),
         replaces: obj(root_manifest.get("replace")).keys().cloned().collect(),

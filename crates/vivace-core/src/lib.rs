@@ -16,7 +16,6 @@ pub mod phpjson;
 pub mod platform;
 pub mod root_version;
 pub mod runtime_stub;
-pub mod scaffold;
 pub mod scope;
 pub mod state;
 pub mod store;

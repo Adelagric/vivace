@@ -36,12 +36,12 @@ and `platform-check: false`. Its boot check is `vendor/bin/phpstan --version`.
 `drupal` is the `drupal/recommended-project` template as `create-project`
 leaves it (composer.json, the lock resolved on 2026-09-11, LICENSE.txt), plus
 `web/example.gitignore` copied to `.gitignore` the way the template's own
-instructions suggest — so the harness exercises the scaffold plugin's
-`.gitignore` management on a git repository that ignores `vendor/`. It
-locks five plugins: composer/installers and drupal/core-composer-scaffold
-(emulated), symfony/runtime (emulated), drupal/core-project-message and
-drupal/core-recipe-unpack (inert at install time). Boot check:
-`vendor/bin/dr --version`.
+instructions suggest. It locks five plugins: composer/installers and
+symfony/runtime (emulated), drupal/core-project-message and
+drupal/core-recipe-unpack (inert at install time), and
+drupal/core-composer-scaffold, which vivace does not emulate (GPL source):
+the fixture proves the Composer fallback path and `harness/transitions.sh`
+the refusal before any write. Boot check: `vendor/bin/dr --version`.
 
 `solver-*` are four small manifests written for the resolver oracle, with
 no lock and no vendor: `solver-backtrack` (phpunit `^10 || ^11 || ^12`

@@ -352,3 +352,22 @@ Composer lui-même reproduit le lock de référence sur l'instantané (vrai sur
 les cinq fixtures), puis compare le lock de vivace. Découverte : Composer
 tolère un 404 de métadonnées en HTTP mais pas un fichier absent en
 `file://`. wpackagist (protocole v1) hors périmètre.
+
+## 2026-09-14 — Retrait de l'émulation drupal/core-composer-scaffold (licence)
+
+Fait : `scaffold.rs` était un port déclaré, fonction par fonction, de
+`drupal/core-composer-scaffold`, et `assets/scaffold/*.tpl` des copies de ses
+gabarits. Le plugin est GPL-2.0-or-later ; un port est une œuvre dérivée, que
+l'on ne peut pas distribuer sous MIT/Apache-2.0 avec le reste des crates et
+des binaires. Options considérées : (a) isoler le port dans un crate GPL
+optionnel hors des binaires publiés — mais les binaires sont l'usage
+principal et un crate GPL dans le workspace reste un piège pour qui dépend
+de `vivacity-core` ; (b) passer tout le projet en GPL — écarte l'intégration
+dans des outils MIT (ePHPm) ; (c) réécriture en salle blanche à partir de la
+seule spécification observable — coûteuse à prouver, pour 4 fixtures ;
+(d) retirer l'émulation. Décision : (d). Le plugin redevient un plugin
+inconnu : `install` bascule sur `composer install` avant toute écriture,
+`dump-autoload` refuse (Composer exécuterait son `pre-autoload-dump`). La
+fixture drupal reste dans le harness et passe par le fallback ; la source
+vendorée `docs/reference/drupal-scaffold/` est supprimée avec le port. Les
+versions 0.3.0 à 0.5.0 sont yankées sur crates.io.
