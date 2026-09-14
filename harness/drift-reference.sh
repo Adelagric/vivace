@@ -27,6 +27,7 @@ twin() {
     JsonManipulator.php)      echo "src/Composer/Json/JsonManipulator.php" ;;
     JsonConfigSource.php)     echo "src/Composer/Config/JsonConfigSource.php" ;;
     RemoveCommand.php)        echo "src/Composer/Command/RemoveCommand.php" ;;
+    VersionSelector.php)      echo "src/Composer/Package/Version/VersionSelector.php" ;;
     Locker.php)               echo "src/Composer/Package/Locker.php" ;;
     PackageSorter.php)        echo "src/Composer/Util/PackageSorter.php" ;;
     RootPackageLoader.php)    echo "src/Composer/Package/Loader/RootPackageLoader.php" ;;

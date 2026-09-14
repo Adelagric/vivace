@@ -19,6 +19,11 @@ byte-identical-output promise are the public API.
   `harness/steps.sh` (33 cases on the five snapshots, in CI) checks
   `composer.json`, `composer.lock` and the exit code against Composer.
   Not supported: `--dry-run`, `--minimal-changes`, `COMPOSER=other.json`.
+- Port of `VersionSelector` (the version `composer require` picks for a
+  package given without constraint, and the `^x.y` constraint it writes),
+  checked against the phar on 902 names over the five snapshots plus
+  platform-filter and minimum-stability variants. Groundwork for
+  `vivace require`.
 - `update` and `remove` honour `COMPOSER_IGNORE_PLATFORM_REQS` and
   `COMPOSER_IGNORE_PLATFORM_REQ`, as `BaseCommand` does.
 

@@ -26,4 +26,5 @@ pub mod session;
 pub mod solver;
 pub mod transaction;
 pub mod version;
+pub mod version_selector;
 pub mod watch;

@@ -21,6 +21,7 @@ use crate::transaction::LockTransaction;
 use crate::version::{parse_stability, regex, stability_rank};
 use pcre2::bytes::Regex;
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -278,6 +279,9 @@ pub struct UpdateSession {
     /// `--prefer-stable` / `--prefer-lowest` de la ligne de commande.
     pub prefer_stable: bool,
     pub prefer_lowest: bool,
+    /// `PHP_MAJOR.MINOR.RELEASE` du PHP sondé (règle `ext-*` du
+    /// `VersionSelector`).
+    pub php_version: String,
 }
 
 impl UpdateSession {
@@ -337,6 +341,21 @@ impl UpdateSession {
         let config = MergedConfig::load(&manifest, composer_home)?;
         let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
         let probed = probe().map_err(|e| SessionError::new(e.0))?;
+        // `PHP_MAJOR_VERSION.PHP_MINOR_VERSION.PHP_RELEASE_VERSION` du PHP
+        // réel (pas de `config.platform.php` ici) : les trois premiers
+        // nombres de PHP_VERSION.
+        let php_version = probed
+            .iter()
+            .find(|p| p.get("name").and_then(Value::as_str) == Some("php"))
+            .and_then(|p| p.get("version").and_then(Value::as_str))
+            .map(|v| {
+                v.split(['.', '-', '+'])
+                    .take(3)
+                    .map(|part| part.trim_end_matches(|c: char| !c.is_ascii_digit()))
+                    .collect::<Vec<_>>()
+                    .join(".")
+            })
+            .unwrap_or_default();
         let platform_pkgs =
             platform_packages(&probed, &config.platform).map_err(|e| SessionError::new(e.0))?;
 
@@ -488,6 +507,7 @@ impl UpdateSession {
             dev_mode,
             prefer_stable: false,
             prefer_lowest: false,
+            php_version,
         })
     }
 
@@ -708,6 +728,55 @@ impl UpdateSession {
 
     /// `createPool` avec le PoolOptimizer (sauf `COMPOSER_POOL_OPTIMIZER=0`),
     /// comme `Installer::doUpdate`.
+    /// `RepositorySet::findPackages($name)` sur le `CompositeRepository` de
+    /// `require` (plateforme puis dépôts du projet, tous fusionnés) avec un
+    /// `RepositorySet` réduit à `minimum-stability` (pas de drapeaux) ;
+    /// `ignore_stability` vaut `ALLOW_UNACCEPTABLE_STABILITIES`.
+    pub fn find_packages_for_require(
+        &mut self,
+        name: &str,
+        ignore_stability: bool,
+    ) -> Result<Vec<usize>, SessionError> {
+        let name = name.to_lowercase();
+        let mut acceptable = BTreeMap::new();
+        let min = crate::version::stability_rank(&self.root.minimum_stability);
+        for st in ["stable", "RC", "beta", "alpha", "dev"] {
+            let rank = crate::version::stability_rank(st);
+            if ignore_stability || rank <= min {
+                acceptable.insert(st.to_owned(), rank);
+            }
+        }
+        let flags = BTreeMap::new();
+        let already = BTreeMap::new();
+        let map = vec![(name.clone(), Constraint::MatchAll)];
+        let mut found: Vec<usize> = Vec::new();
+        let (_, ids) = crate::pool::array_repository_load_packages(
+            &self.platform,
+            &map,
+            &acceptable,
+            &flags,
+            &already,
+            &self.arena,
+        );
+        found.extend(ids);
+        for (i, repo) in self.set.repositories.iter().enumerate() {
+            if let Repository::Composer(repo) = repo {
+                let (_, ids) = repo
+                    .load_packages(
+                        &map,
+                        &acceptable,
+                        &flags,
+                        &already,
+                        Origin::Repository(i),
+                        &mut self.arena,
+                    )
+                    .map_err(|e| SessionError::new(e.0))?;
+                found.extend(ids);
+            }
+        }
+        Ok(found)
+    }
+
     pub fn create_optimized_pool(
         &mut self,
         policy: &mut DefaultPolicy,
