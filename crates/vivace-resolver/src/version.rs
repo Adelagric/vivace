@@ -275,6 +275,60 @@ pub fn normalize_default_branch(name: &str) -> String {
     }
 }
 
+/// `VersionParser::parseNameVersionPairs` : `a/b:^1`, `a/b=^1`, `a/b ^1`
+/// (deux arguments, sauf si le second ressemble à un nom de paquet).
+pub fn parse_name_version_pairs(pairs: &[String]) -> Vec<(String, Option<String>)> {
+    static SPLIT: OnceLock<Regex> = OnceLock::new();
+    static WILDCARD: OnceLock<Regex> = OnceLock::new();
+    let split = regex(&SPLIT, r"^([^=: ]+)[=: ](.*)$", false);
+    let wildcard = regex(&WILDCARD, r"(?<=[a-z0-9_/-])\*|\*(?=[a-z0-9_/-])", true);
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < pairs.len() {
+        let trimmed = pairs[i].trim();
+        let mut pair = match split.captures(trimmed.as_bytes()) {
+            Ok(Some(c)) => {
+                let g = |n: usize| {
+                    c.get(n)
+                        .and_then(|m| std::str::from_utf8(m.as_bytes()).ok())
+                        .unwrap_or("")
+                };
+                format!("{} {}", g(1), g(2))
+            }
+            _ => trimmed.to_owned(),
+        };
+        if !pair.contains(' ') {
+            if let Some(next) = pairs.get(i + 1) {
+                if !next.contains('/')
+                    && !wildcard.is_match(next.as_bytes()).unwrap_or(false)
+                    && !crate::platform::is_platform_package(next)
+                {
+                    pair.push(' ');
+                    pair.push_str(next);
+                    i += 1;
+                }
+            }
+        }
+        match pair.find(' ') {
+            Some(pos) if pos > 0 => {
+                result.push((pair[..pos].to_owned(), Some(pair[pos + 1..].to_owned())));
+            }
+            _ => result.push((pair, None)),
+        }
+        i += 1;
+    }
+    result
+}
+
+/// `{^\d+(\.\d+)?$}` : une contrainte « trop stricte » (`1` ou `1.2`),
+/// dont `require` avertit.
+pub fn looks_too_strict(constraint: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    regex(&RE, r"^\d+(\.\d+)?$", false)
+        .is_match(constraint.as_bytes())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +364,40 @@ mod tests {
         assert_eq!(normalize_branch("2.2"), "2.2.9999999.9999999-dev");
         assert_eq!(parse_numeric_alias_prefix("1.2.x-dev"), Some("1.2.".into()));
         assert_eq!(parse_numeric_alias_prefix("dev-main"), None);
+    }
+
+    #[test]
+    fn name_version_pairs_follow_composer() {
+        let pairs = |v: &[&str]| {
+            parse_name_version_pairs(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+        };
+        assert_eq!(
+            pairs(&["a/b:^1.0"]),
+            vec![("a/b".into(), Some("^1.0".into()))]
+        );
+        assert_eq!(
+            pairs(&["a/b=^1.0"]),
+            vec![("a/b".into(), Some("^1.0".into()))]
+        );
+        assert_eq!(
+            pairs(&["a/b", "^1.0"]),
+            vec![("a/b".into(), Some("^1.0".into()))]
+        );
+        assert_eq!(
+            pairs(&["a/b", "c/d"]),
+            vec![("a/b".into(), None), ("c/d".into(), None)]
+        );
+        assert_eq!(
+            pairs(&["a/b", "ext-json"]),
+            vec![("a/b".into(), None), ("ext-json".into(), None)]
+        );
+        assert_eq!(
+            pairs(&["a/b", "c/*"]),
+            vec![("a/b".into(), None), ("c/*".into(), None)]
+        );
+        assert_eq!(
+            pairs(&["a/b:dev-main as 1.x-dev"]),
+            vec![("a/b".into(), Some("dev-main as 1.x-dev".into()))]
+        );
     }
 }

@@ -3,6 +3,8 @@
 //! narratif va sur stderr. Codes retour : 0 ok, 1 erreur d'exécution,
 //! 2 usage (clap), 3 hors-scope sans fallback possible, 4 plateforme.
 
+mod require;
+
 use anyhow::Context as _;
 use clap::Parser;
 use std::path::PathBuf;
@@ -26,6 +28,103 @@ enum Cli {
     /// Retire des paquets de composer.json, puis met à jour (drop-in `composer remove`).
     #[command(alias = "rm")]
     Remove(RemoveArgs),
+    /// Ajoute des paquets à composer.json, puis met à jour (drop-in `composer require`).
+    #[command(alias = "r")]
+    Require(RequireArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct RequireArgs {
+    /// Paquets à requérir : `vendor/name`, `vendor/name:^1.0`, `vendor/name ^1.0`.
+    #[arg(value_name = "PACKAGES")]
+    packages: Vec<String>,
+    /// Ajouter à require-dev.
+    #[arg(long)]
+    dev: bool,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    prefer_source: bool,
+    #[arg(long)]
+    prefer_dist: bool,
+    #[arg(long)]
+    prefer_install: Option<String>,
+    /// Contrainte exacte (la version trouvée) au lieu de `^x.y`.
+    #[arg(long)]
+    fixed: bool,
+    #[arg(long)]
+    no_suggest: bool,
+    #[arg(long)]
+    no_progress: bool,
+    /// Ne pas mettre à jour les dépendances (implique --no-install).
+    #[arg(long)]
+    no_update: bool,
+    /// Écrire le lock sans installer.
+    #[arg(long)]
+    no_install: bool,
+    #[arg(long)]
+    no_audit: bool,
+    #[arg(long, value_name = "FORMAT")]
+    audit_format: Option<String>,
+    #[arg(long)]
+    no_blocking: bool,
+    #[arg(long)]
+    no_security_blocking: bool,
+    /// Mise à jour avec --no-dev.
+    #[arg(long)]
+    update_no_dev: bool,
+    /// Mettre aussi à jour les dépendances, sauf celles requises par la racine (`-w`).
+    #[arg(short = 'w', long)]
+    update_with_dependencies: bool,
+    /// Alias de --update-with-dependencies.
+    #[arg(long)]
+    with_dependencies: bool,
+    /// Mettre aussi à jour les dépendances, exigences racine comprises (`-W`).
+    #[arg(short = 'W', long)]
+    update_with_all_dependencies: bool,
+    /// Alias de --update-with-all-dependencies.
+    #[arg(long)]
+    with_all_dependencies: bool,
+    #[arg(short = 'm', long)]
+    minimal_changes: bool,
+    #[arg(long)]
+    prefer_stable: bool,
+    #[arg(long)]
+    prefer_lowest: bool,
+    /// Trier les paquets de la section (aussi `config.sort-packages`).
+    #[arg(long)]
+    sort_packages: bool,
+    #[arg(short = 'o', long)]
+    optimize_autoloader: bool,
+    #[arg(short = 'a', long)]
+    classmap_authoritative: bool,
+    #[arg(long)]
+    apcu_autoloader: bool,
+    #[arg(long, value_name = "PREFIX")]
+    apcu_autoloader_prefix: Option<String>,
+    #[arg(long)]
+    ignore_platform_reqs: bool,
+    #[arg(long = "ignore-platform-req", value_name = "REQ")]
+    ignore_platform_req: Vec<String>,
+    #[arg(short = 'n', long)]
+    no_interaction: bool,
+    #[arg(short = 'q', long)]
+    quiet: bool,
+    #[arg(short = 'v', long, action = clap::ArgAction::Count)]
+    verbose: u8,
+    #[arg(long)]
+    no_scripts: bool,
+    #[arg(long)]
+    no_plugins: bool,
+    /// Ne pas générer l'autoloader.
+    #[arg(long)]
+    no_autoloader: bool,
+    #[arg(long)]
+    no_fallback: bool,
+    #[arg(long)]
+    offline: bool,
+    #[arg(long, value_name = "DIR")]
+    working_dir: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -240,6 +339,7 @@ fn main() -> anyhow::Result<()> {
         Cli::DumpAutoload(args) => run_dump(&args)?,
         Cli::Update(args) => run_update(&args)?,
         Cli::Remove(args) => run_remove(&args)?,
+        Cli::Require(args) => require::run_require(&args)?,
     };
     if code != 0 {
         std::process::exit(code);
@@ -803,6 +903,47 @@ fn run_update_resolved(
     prefer_stable: bool,
     prefer_lowest: bool,
 ) -> anyhow::Result<i32> {
+    let resolved = resolve_and_lock(args, options, prefer_stable, prefer_lowest)?;
+    if resolved.status != 0 || args.no_install {
+        return Ok(resolved.status);
+    }
+    install_after_update(args)
+}
+
+/// L'installation qui suit l'écriture du lock (`Installer::run` avec
+/// `setInstall(true)`).
+fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
+    run_install(&InstallArgs {
+        no_dev: args.no_dev,
+        no_autoloader: args.no_autoloader,
+        optimize_autoloader: args.optimize_autoloader,
+        classmap_authoritative: args.classmap_authoritative,
+        no_scripts: args.no_scripts,
+        no_plugins: args.no_plugins,
+        ignore_platform_reqs: args.ignore_platform_reqs,
+        ignore_platform_req: args.ignore_platform_req.clone(),
+        no_fallback: args.no_fallback,
+        offline: args.offline,
+        working_dir: args.working_dir.clone(),
+        spawn_fallback: args.spawn_fallback,
+    })
+}
+
+/// Résolution et écriture du lock : 0, ou 2 sur un ensemble insoluble.
+/// Le résultat de la résolution : le statut (0, ou 2 sur un ensemble
+/// insoluble) et les données du lock, écrites ou non (`config.lock: false`
+/// résout sans écrire — Composer garde alors un lock « virtuel »).
+struct Resolved {
+    status: i32,
+    lock: Option<serde_json::Value>,
+}
+
+fn resolve_and_lock(
+    args: &UpdateArgs,
+    options: vivace_resolver::session::UpdateOptions,
+    prefer_stable: bool,
+    prefer_lowest: bool,
+) -> anyhow::Result<Resolved> {
     use vivace_resolver::platform_filter::PlatformRequirementFilter;
     use vivace_resolver::session::UpdateSession;
     let t0 = std::time::Instant::now();
@@ -857,7 +998,10 @@ fn run_update_resolved(
         Ok(r) => r,
         Err(e) if e.kind == vivace_resolver::session::SessionErrorKind::Unsolvable => {
             eprintln!("{e}");
-            return Ok(2);
+            return Ok(Resolved {
+                status: 2,
+                lock: None,
+            });
         }
         Err(e) => return Err(anyhow::anyhow!("{e}")),
     };
@@ -866,18 +1010,25 @@ fn run_update_resolved(
     let lock_path = project.join("composer.lock");
     let mut text =
         vivace_core::phpjson::php_json_encode_with(&lock, vivace_core::phpjson::FLAGS_JSONFILE)?;
+    // `JsonFile::read` retient l'indentation du lock existant, `write` la
+    // réutilise.
+    let old_text = std::fs::read_to_string(&lock_path).ok();
+    if let Some(old) = &old_text {
+        let indent = vivace_resolver::json_manipulator::detect_indenting(old)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        if indent != "    " {
+            text = vivace_resolver::config_source::reindent(&text, &indent);
+        }
+    }
     text.push('\n');
     // `JsonFile::write` passe par `filePutContentsIfModified` : le fichier
     // n'est réécrit que si ses octets changent. (`Locker::setLockData`
     // compare aussi les données décodées, mais `{}` contre `[]` y rend la
     // comparaison toujours fausse pour un lock ordinaire ; les octets sont
     // le critère observable.)
-    let unchanged = std::fs::read_to_string(&lock_path).is_ok_and(|old| old == text);
+    let unchanged = old_text.as_deref() == Some(text.as_str());
     // `config.lock: false` : Composer résout sans écrire de lock.
-    let write_lock = serde_json::from_str::<serde_json::Value>(&manifest_text)
-        .ok()
-        .and_then(|m| m.get("config")?.get("lock").cloned())
-        != Some(serde_json::Value::Bool(false));
+    let write_lock = config_lock_enabled(&manifest_text);
     if report.transaction.transaction.operations.is_empty() {
         eprintln!("Nothing to modify in lock file");
     } else {
@@ -904,23 +1055,25 @@ fn run_update_resolved(
         }
     }
     trace("write lock", t0);
-    if args.no_install {
-        return Ok(0);
-    }
-    run_install(&InstallArgs {
-        no_dev: args.no_dev,
-        no_autoloader: args.no_autoloader,
-        optimize_autoloader: args.optimize_autoloader,
-        classmap_authoritative: args.classmap_authoritative,
-        no_scripts: args.no_scripts,
-        no_plugins: args.no_plugins,
-        ignore_platform_reqs: args.ignore_platform_reqs,
-        ignore_platform_req: args.ignore_platform_req.clone(),
-        no_fallback: args.no_fallback,
-        offline: args.offline,
-        working_dir: args.working_dir.clone(),
-        spawn_fallback: args.spawn_fallback,
+    Ok(Resolved {
+        status: 0,
+        lock: Some(lock),
     })
+}
+
+/// `Config::get('lock')` : projet puis config globale, `"false"` et les
+/// valeurs fausses de PHP désactivent.
+fn config_lock_enabled(manifest_text: &str) -> bool {
+    let manifest: serde_json::Value = serde_json::from_str(manifest_text).unwrap_or_default();
+    match require::config_value(&manifest, "lock") {
+        None => true,
+        Some(serde_json::Value::String(s)) => s != "false" && !(s.is_empty() || s == "0"),
+        Some(serde_json::Value::Bool(b)) => b,
+        Some(serde_json::Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
+        Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Array(a)) => !a.is_empty(),
+        Some(serde_json::Value::Object(m)) => !m.is_empty(),
+    }
 }
 
 /// `join_all` minimal (pas de dépendance futures) : les tâches tournent

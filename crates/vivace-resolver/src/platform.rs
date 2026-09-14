@@ -140,17 +140,38 @@ pub fn platform_packages(
             add_overridden(&mut packages, o, None)?;
         }
     }
+    // La version réelle est ajoutée à la description de la surcharge
+    // (`, same as actual` / `, actual: x.y.z`).
+    let note_actual = |packages: &mut [Package], actual: &Package| {
+        if let Some(over) = packages.iter_mut().find(|q| q.name == actual.name) {
+            let text = if actual.version == over.version {
+                "same as actual".to_owned()
+            } else {
+                format!("actual: {}", actual.pretty_version)
+            };
+            let description = over
+                .raw
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            over.raw["description"] = serde_json::Value::String(format!("{description}, {text}"));
+        }
+    };
     // addPackage
     let add = |packages: &mut Vec<Package>, p: Package| -> Result<(), PlatformError> {
         if let Some(o) = override_of(&p.name) {
             if o.version.is_none() {
                 return Ok(()); // désactivé
             }
+            note_actual(packages, &p);
             return Ok(()); // déjà ajouté par la surcharge
         }
         if let Some(php) = override_of("php") {
             if p.name.starts_with("php-") {
-                return add_overridden(packages, php, Some(&p.pretty_name));
+                add_overridden(packages, php, Some(&p.pretty_name))?;
+                note_actual(packages, &p);
+                return Ok(());
             }
         }
         packages.push(p);

@@ -54,7 +54,7 @@ for fx in "${FIXTURES[@]}"; do
   fi
   if ! diff -q "$WORK/ref-$fx/composer.lock" "$reg/composer.lock.expected" >/dev/null; then
     echo "FAIL $fx : composer update sur l'instantané ≠ lock de référence (Composer non déterministe ?)"
-    diff "$WORK/ref-$fx/composer.lock" "$reg/composer.lock.expected" | head -10; status=1; continue
+    diff "$WORK/ref-$fx/composer.lock" "$reg/composer.lock.expected" | head -10 || true; status=1; continue
   fi
   if ! (cd "$WORK/viv-$fx" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
         "$VIVACE" update --no-install 2>"$WORK/$fx.vivace.log"); then
@@ -64,7 +64,7 @@ for fx in "${FIXTURES[@]}"; do
     echo "OK   $fx : composer.lock identique ($(jq '.packages | length' "$WORK/viv-$fx/composer.lock") paquets)"
   else
     echo "FAIL $fx : composer.lock diffère"
-    diff "$WORK/ref-$fx/composer.lock" "$WORK/viv-$fx/composer.lock" | head -20; status=1
+    diff "$WORK/ref-$fx/composer.lock" "$WORK/viv-$fx/composer.lock" | head -20 || true; status=1
   fi
   # Mises à jour partielles (`update a/b [-w|-W]`) depuis le lock de la
   # fixture : les paquets hors liste restent verrouillés, la liste et ses
@@ -88,7 +88,7 @@ for fx in "${FIXTURES[@]}"; do
       echo "OK   $fx update ${pargs[*]} : composer.lock identique"
     else
       echo "FAIL $fx update ${pargs[*]} : composer.lock diffère"
-      diff "$WORK/ref-$fx-partial/composer.lock" "$WORK/viv-$fx-partial/composer.lock" | head -20; status=1
+      diff "$WORK/ref-$fx-partial/composer.lock" "$WORK/viv-$fx-partial/composer.lock" | head -20 || true; status=1
     fi
   done
 done

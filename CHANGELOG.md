@@ -7,6 +7,23 @@ byte-identical-output promise are the public API.
 ## [Unreleased]
 
 ### Added
+- **`vivace require`**: a port of `RequireCommand` — `vendor/name`,
+  `vendor/name:^1.0`, `vendor/name ^1.0`, `--dev`, `--fixed`,
+  `--no-update`, `--no-install`, `-w`/`-W`, `--sort-packages`,
+  `--prefer-stable`/`--prefer-lowest`, `--update-no-dev`, the platform
+  filters; a package given without constraint gets the version
+  `VersionSelector` picks, the same partial update runs, then the
+  constraint is rewritten from the locked version and the lock's
+  `content-hash` and `stability-flags` are updated in place
+  (`Locker::updateHash`); `composer.json` and `composer.lock` are restored
+  (or deleted when just created) when the resolution fails. 25 cases in
+  `harness/steps.sh` compare `composer.json`, `composer.lock` and the exit
+  code with Composer on the five snapshots. Not supported: `--dry-run`,
+  `--minimal-changes`, the interactive prompts, the "Did you mean" search,
+  installing from a virtual lock (`config.lock: false` without
+  `--no-install`).
+- `update` and `require` keep the indentation of an existing
+  `composer.lock` when rewriting it, as `JsonFile::write` does.
 - **`vivace remove`**: a port of `RemoveCommand` — `composer.json` is
   edited in place through the `JsonManipulator` port (names matched
   case-insensitively and by `vendor/*` patterns, `--dev`, a package found

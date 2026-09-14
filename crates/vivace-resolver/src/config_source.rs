@@ -257,7 +257,7 @@ fn fixup_empty_objects(root: &mut Map<String, Value>) {
 
 /// `JsonFile::encode` avec une indentation autre que 4 espaces : chaque
 /// début de ligne de 4n espaces devient n indentations.
-fn reindent(text: &str, indent: &str) -> String {
+pub fn reindent(text: &str, indent: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (i, line) in text.split('\n').enumerate() {
         if i > 0 {

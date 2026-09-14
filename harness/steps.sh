@@ -23,6 +23,15 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @installed:a/b          vendor/composer/installed.json avec a/b et son répertoire
 #   @installed-nodir:a/b    idem sans le répertoire (purgé par Composer)
 #   @global-allow:a/b       config.allow-plugins {a/b: true} dans le config.json global
+#   @global-sort            config.sort-packages true dans le config.json global
+#   @emptyjson              composer.json vide (0 octet)
+#   @nojson                 pas de composer.json
+#   @notype                 clé `type` retirée du manifeste
+#   @lockfalse              config.lock false dans le manifeste
+#   @indent2                composer.lock réindenté à 2 espaces
+#   @corruptlock            composer.lock illisible
+#   @minstab:dev            minimum-stability dev + prefer-stable false
+#   @platform:php=7.4.0     config.platform.php dans le manifeste
 STEPS=(
   "laravel|remove laravel/tinker"
   "laravel|remove laravel/tinker @nolock"
@@ -57,6 +66,48 @@ STEPS=(
   "rector|remove rector/extension-installer phpstan/extension-installer @global-allow:other/plugin"
   "rector|remove symfony/process --dev --no-update-with-dependencies"
   "drupal|remove drupal/core-project-message"
+  "laravel|require symfony/uid"
+  "laravel|require symfony/uid --no-update"
+  "laravel|require symfony/uid:^7.0"
+  "laravel|require symfony/uid ^7.0 --dev"
+  "laravel|require symfony/uid --dev --fixed"
+  "laravel|require symfony/clock --fixed"
+  "laravel|require laravel/pint"
+  "laravel|require laravel/pint --dev"
+  "laravel|require laravel/tinker:^2.9 -W"
+  "laravel|require laravel/tinker"
+  "laravel|require symfony/uid @nolock"
+  "laravel|require symfony/uid @badlock"
+  "laravel|require symfony/uid symfony/process:^7"
+  "laravel|require symfony/uid --sort-packages @drop:laravel/tinker"
+  "laravel|require symfony/uid --dev @require:symfony/console=^99 @stub:symfony/console"
+  "laravel|require symfony/uid @emptyjson"
+  "laravel|require symfony/uid @nojson"
+  "laravel|require symfony/uid --no-update @nojson"
+  "laravel|require symfony/uid --fixed @notype"
+  "laravel|require symfony/uid @nolock @lockfalse"
+  "laravel|require laravel/pint @lockfalse"
+  "laravel|require symfony/uid @indent2"
+  "laravel|require symfony/uid @corruptlock"
+  "laravel|require ext-json @global-sort"
+  "laravel|require ext-nonexistent"
+  "laravel|require ext-nonexistent --ignore-platform-req=ext-nonexistent"
+  "laravel|require symfony/clock @platform:php=7.4.0"
+  "laravel|require symfony/uid symfony/uid:^7.1"
+  "laravel|require symfony/uid:^7.1 symfony/uid"
+  "laravel|require SYMFONY/UID"
+  "rector|require symfony/finder @minstab:dev"
+  "rector|require nette/utils @minstab:dev"
+  "symfony|require symfony/yaml"
+  "symfony|require symfony/string --dev"
+  "symfony|require twig/intl-extra"
+  "sylius|require symfony/uid"
+  "sylius|require symfony/uid -w"
+  "rector|require phpstan/phpdoc-parser --dev"
+  "rector|require nette/utils"
+  "rector|require symfony/finder"
+  "drupal|require drupal/core-project-message"
+  "drupal|require composer/installers"
 )
 [ -x "$VIVACE" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
@@ -92,6 +143,7 @@ for fx in "${FIXTURES[@]}"; do
             [ -f "$f" ] && mv "$f" "$f.orig"; printf '{"packages": {"%s": []}}' "$p" > "$f"; stubs+=("$f")
           done ;;
         @global-allow:*) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"allow-plugins": {"%s": true}}}\n' "$reg" "${prep#@global-allow:}" > "$home/config.json" ;;
+        @global-sort) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"sort-packages": true}}\n' "$reg" > "$home/config.json" ;;
       esac
     done
     for side in ref viv; do
@@ -99,7 +151,15 @@ for fx in "${FIXTURES[@]}"; do
       cp "$ROOT/fixtures/projects/$fx/composer.json" "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
-          @stub:*|@global-allow:*) ;;
+          @stub:*|@global-allow:*|@global-sort) ;;
+          @emptyjson) : > "$d/composer.json" ;;
+          @nojson) rm -f "$d/composer.json" "$d/composer.lock" ;;
+          @notype) jq 'del(.type)' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
+          @lockfalse) jq '.config.lock = false' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
+          @indent2) jq --indent 2 . "$d/composer.lock" > "$d/l.tmp" && mv "$d/l.tmp" "$d/composer.lock" ;;
+          @corruptlock) printf '{"packages": [' > "$d/composer.lock" ;;
+          @minstab:*) jq --arg s "${prep#@minstab:}" '.["minimum-stability"] = $s | .["prefer-stable"] = false' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
+          @platform:*) kv="${prep#@platform:}"; jq --arg p "${kv%%=*}" --arg v "${kv#*=}" '.config.platform[$p] = $v' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @nolock) rm -f "$d/composer.lock" ;;
           @badlock) printf '{"_readme": [], "content-hash": "x"}\n' > "$d/composer.lock" ;;
           @drop:*) jq --arg p "${prep#@drop:}" 'del(.require[$p])' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
@@ -126,9 +186,11 @@ for fx in "${FIXTURES[@]}"; do
     fi
     ok=1
     for f in composer.json composer.lock; do
-      if ! diff -q "$WORK/ref-$fx-$n/$f" "$WORK/viv-$fx-$n/$f" >/dev/null; then
+      # Absent des deux côtés (manifeste jamais créé, lock jamais écrit) : égal.
+      [ -e "$WORK/ref-$fx-$n/$f" ] || [ -e "$WORK/viv-$fx-$n/$f" ] || continue
+      if ! diff -q "$WORK/ref-$fx-$n/$f" "$WORK/viv-$fx-$n/$f" >/dev/null 2>&1; then
         echo "FAIL $label : $f diffère"
-        diff "$WORK/ref-$fx-$n/$f" "$WORK/viv-$fx-$n/$f" | head -20; ok=0
+        diff "$WORK/ref-$fx-$n/$f" "$WORK/viv-$fx-$n/$f" | head -20 || true; ok=0
       fi
     done
     if [ "$ok" = 1 ]; then

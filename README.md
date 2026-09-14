@@ -9,6 +9,7 @@ the same lock file as Composer 2.10.3, byte for byte. No PHP is run.
 ```
 composer install       →  vivace install
 composer update        →  vivace update        (also `update vendor/name [-w|-W]`)
+composer require       →  vivace require
 composer remove        →  vivace remove
 composer dump-autoload →  vivace dump-autoload
 ```
@@ -80,15 +81,20 @@ candidate pool, then the solver's complete decision sequence, with what
 Composer computes on the same data (`tools/oracle-pool.php`).
 
 Repositories: `composer` type only, Packagist v2 protocol and plain
-`packages.json` files, local or over HTTPS. Not yet: `require`, `--with`,
-`vcs`/`path` repositories, Composer's explanation when a set is unsolvable.
+`packages.json` files, local or over HTTPS. Not yet: `--with`,
+`vcs`/`path` repositories, Composer's explanation when a set is unsolvable,
+`--dry-run`, `--minimal-changes`.
 
-`vivace remove` edits `composer.json` the way Composer does — a port of
-`JsonManipulator`, which rewrites only the affected keys and keeps the
-file's layout — then runs the partial update `composer remove` runs.
-`harness/steps.sh` plays the same removals through both tools on the
-frozen snapshots and compares `composer.json`, `composer.lock` and the
-exit code.
+`vivace require` and `vivace remove` edit `composer.json` the way Composer
+does — a port of `JsonManipulator`, which rewrites only the affected keys
+and keeps the file's layout — pick the same `^x.y` constraint (a port of
+`VersionSelector`), then run the same partial update, and `require`
+rewrites the constraint and the lock's `content-hash` from the resolved
+version the way `RequireCommand` does. `harness/steps.sh` plays the same
+commands through both tools on the frozen snapshots and compares
+`composer.json`, `composer.lock` and the exit code. Not ported: the
+interactive prompts (vivace behaves like `--no-interaction`) and the
+Packagist search behind "Did you mean …".
 
 ## Plugins and scripts
 
