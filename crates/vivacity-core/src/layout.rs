@@ -162,7 +162,7 @@ fn place(
     match installers::placement(table, root_extra, name, package_type, package_extra) {
         Ok(Placement::Vendor) => Ok(vendor_rel(name, target_dir)),
         Ok(Placement::Custom(p)) => {
-            if p.starts_with('/') || p.starts_with('\\') {
+            if crate::pathutil::is_absolute_path(&p) {
                 return Err(format!(
                     "installers: {name} would install at an absolute path `{p}`"
                 ));
@@ -360,7 +360,7 @@ impl Layout {
             let Some(old_ip) = prev.get("install-path").and_then(Value::as_str) else {
                 continue; // metapackage
             };
-            let old_abs = if old_ip.starts_with('/') {
+            let old_abs = if crate::pathutil::is_absolute_path(old_ip) {
                 normalize_path(old_ip)
             } else {
                 normalize_path(&format!("{vendor_composer}/{old_ip}"))
@@ -495,7 +495,9 @@ mod tests {
     }
 
     fn root() -> PathBuf {
-        PathBuf::from("/proj")
+        // On Windows `/proj` is not absolute (no drive) and would be
+        // absolutized under the cwd; an explicit drive keeps the test stable.
+        PathBuf::from(if cfg!(windows) { "C:/proj" } else { "/proj" })
     }
 
     #[test]
@@ -588,7 +590,7 @@ mod tests {
         );
         assert_eq!(
             l.package_root("wpackagist-plugin/akismet"),
-            Some(PathBuf::from("/proj/web/app/plugins/akismet"))
+            Some(root().join("web/app/plugins/akismet"))
         );
 
         let blocked = json!({"config": {"allow-plugins": {"composer/installers": false}}});

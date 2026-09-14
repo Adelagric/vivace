@@ -1,0 +1,54 @@
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: build + tests (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A real php for the .bat proxy execution test — no Composer: the
+      # differential parity suite (harness/, oracles, fixtures/make.sh) is
+      # not wired for Windows yet, see docs/windows.md. That suite is the
+      # maintainer's real bar; this job covers build, lints, unit tests and
+      # the actual .bat execution.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Separate steps: under pwsh only the exit code of the last command in
+      # a `run` block counts — a single block would mask a failure.
+      - name: fmt (also proves the LF checkout from .gitattributes)
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: build
+        run: cargo build --release
+
+      - name: Unit tests
+        run: cargo test --workspace --lib
+
+      - name: Bin proxy .bat (Composer bytes)
+        run: cargo test -p vivacity-core --test fixtures_binproxy bat_proxy_is_written
+
+      - name: Bin proxy .bat (real execution via php)
+        run: cargo test -p vivacity-core --test fixtures_binproxy bat_proxy_executes -- --ignored
+
+      - name: Smoke (--version)
+        run: cargo run --release -p vivacity -- --version

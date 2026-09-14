@@ -4,6 +4,70 @@
 //! and the bin proxies; checked by tests/oracle_installers.rs.
 //! Unix paths only (no `C:`/`file://` prefix).
 
+/// `std::fs::canonicalize` without the Windows verbatim prefix (`\\?\`).
+/// PHP `realpath()` (and therefore Composer) returns classic Win32 paths
+/// (`C:\x`), and `normalize_path` would turn `\\?\C:\x` into `//?/C:/x` —
+/// a form neither the Win32 APIs nor the paths generated into the autoload
+/// files understand. Elsewhere: `std::fs::canonicalize` as-is.
+pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<std::path::PathBuf> {
+    std::fs::canonicalize(path).map(strip_verbatim)
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim(p: std::path::PathBuf) -> std::path::PathBuf {
+    p
+}
+
+/// `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\share\x` → `\\srv\share\x`. The classic
+/// form is returned EVEN beyond MAX_PATH: Rust (≥1.58) converts back to
+/// verbatim in its own syscalls, and PHP (≥7.1) does the same on its side —
+/// PHP's `realpath()` in fact returns the classic long form, so that is the
+/// form that preserves parity (verified: install + autoload under a
+/// 307-character root, `LongPathsEnabled=0`). The verbatim fallback only
+/// covers shapes a re-stat cannot find again (reserved component, trailing
+/// dot/space… — paths classic Win32 would mangle).
+#[cfg(windows)]
+fn strip_verbatim(p: std::path::PathBuf) -> std::path::PathBuf {
+    use std::path::{Component, Prefix};
+    let mut comps = p.components();
+    let Some(Component::Prefix(prefix)) = comps.next() else {
+        return p;
+    };
+    let root = match prefix.kind() {
+        Prefix::VerbatimDisk(d) => format!("{}:\\", d as char),
+        Prefix::VerbatimUNC(server, share) => format!(
+            "\\\\{}\\{}",
+            server.to_string_lossy(),
+            share.to_string_lossy()
+        ),
+        _ => return p,
+    };
+    let mut out = std::path::PathBuf::from(root);
+    for c in comps {
+        if !matches!(c, Component::RootDir) {
+            out.push(c.as_os_str());
+        }
+    }
+    // The classic form must stay openable (path < MAX_PATH, no reserved
+    // component): otherwise keep the verbatim form.
+    if out.symlink_metadata().is_ok() {
+        out
+    } else {
+        p
+    }
+}
+
+/// `Filesystem::isAbsolutePath`: `/…`, `\…`, `C:/…`/`C:\…`, or a stream
+/// wrapper (`phar://…`). On Unix only `/` exists in practice; the
+/// `starts_with('/')` form of the test missed Windows drive-letter paths.
+pub fn is_absolute_path(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with('\\') || path.contains("://") {
+        return true;
+    }
+    let b = path.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
+}
+
 /// `Filesystem::normalizePath`: single slashes, `.`/`..` resolution, no
 /// trailing slash (except for the root).
 pub fn normalize_path(path: &str) -> String {
@@ -144,6 +208,40 @@ pub fn php_str(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonicalize_has_no_verbatim_prefix() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let real = canonicalize(tmp.path()).expect("canonicalize");
+        let s = real.to_string_lossy().into_owned();
+        assert!(!s.starts_with(r"\\?\"), "verbatim prefix not stripped: {s}");
+        // The returned form must stay openable and normalize cleanly.
+        assert!(real.is_dir());
+        assert!(!normalize_path(&s).starts_with("//?/"), "{s}");
+    }
+
+    /// Beyond MAX_PATH, `canonicalize` returns the classic form (no `\\?\`)
+    /// and that form stays readable — it is what PHP `realpath()` would
+    /// return, hence what the generated files must contain.
+    #[cfg(windows)]
+    #[test]
+    fn canonicalize_strips_verbatim_beyond_max_path() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let mut deep = tmp.path().to_path_buf();
+        while deep.as_os_str().len() < 300 {
+            deep.push("abcdefghijklmnopqrstuvwxyz0123456789");
+        }
+        std::fs::create_dir_all(&deep).expect("mkdir deep");
+        std::fs::write(deep.join("f.txt"), b"x").expect("write");
+        let real = canonicalize(&deep).expect("canonicalize");
+        assert!(real.as_os_str().len() > 260, "{}", real.display());
+        assert!(
+            !real.to_string_lossy().starts_with(r"\\?\"),
+            "verbatim prefix beyond MAX_PATH: {}",
+            real.display()
+        );
+        assert!(std::fs::read(real.join("f.txt")).is_ok(), "unreadable form");
+    }
 
     #[test]
     fn normalize() {

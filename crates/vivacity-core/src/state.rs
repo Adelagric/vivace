@@ -123,7 +123,7 @@ impl RootPackage {
 /// or the string exported as is if Composer found no relative path
 /// (absolute).
 fn install_path_code(install_path: &str) -> String {
-    if install_path.starts_with('/') {
+    if crate::pathutil::is_absolute_path(install_path) {
         php_str(install_path)
     } else {
         format!("__DIR__ . {}", php_str(&format!("/{install_path}")))

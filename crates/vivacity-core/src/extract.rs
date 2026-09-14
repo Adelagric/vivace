@@ -105,6 +105,12 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
             let _ = std::fs::remove_file(&out);
             #[cfg(unix)]
             std::os::unix::fs::symlink(&target, &out).map_err(Error::io(&out))?;
+            // Off Unix: PHP ZipArchive (what Composer uses on Windows) does
+            // not recreate symlinks — the entry becomes an ordinary file
+            // whose content is the target. Same here, after the same
+            // hostility checks.
+            #[cfg(not(unix))]
+            std::fs::write(&out, target.as_bytes()).map_err(Error::io(&out))?;
         } else {
             if let Some(p) = out.parent() {
                 std::fs::create_dir_all(p).map_err(Error::io(p))?;
@@ -276,7 +282,17 @@ mod tests {
         let d = tmpdir();
         extract_zip(&ok, d.path()).expect("extract");
         let meta = d.path().join("sub/link").symlink_metadata().expect("meta");
+        #[cfg(unix)]
         assert!(meta.file_type().is_symlink());
+        #[cfg(not(unix))]
+        {
+            // Like PHP ZipArchive: an ordinary file containing the target.
+            assert!(meta.file_type().is_file());
+            assert_eq!(
+                std::fs::read(d.path().join("sub/link")).expect("read"),
+                b"../real.txt"
+            );
+        }
 
         for target in ["../../etc/passwd", "/etc/passwd", "../../../x"] {
             let bad = build_zip_with_symlink("r/link", target);

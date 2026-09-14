@@ -253,7 +253,75 @@ exec "${{dir}}/{file}" "$@"
     )
 }
 
+/// `BinaryInstaller::generateWindowsProxyCode`: a `.bat` whose target is the
+/// NEIGHBOURING unixy proxy (`%~dp0/<name>`) — the one that sets the
+/// `$GLOBALS['_composer_*']` and includes the real binary — invoked by `php`
+/// or by the binary from the real target's shebang. Exception: a real
+/// `.bat`/`.cmd` target is invoked directly (`call`), since a PHP proxy
+/// cannot include it. Verified byte-for-byte against native Composer 2.10.3
+/// on the psr/log + monolog + nikic/php-parser fixture, and by real
+/// execution under a Windows PHP (tests/fixtures_binproxy.rs — the full
+/// differential oracle, however, is not wired for Windows yet).
+pub fn windows_proxy_content(link_bat: &Path, link_name: &str, bin: &Path) -> Result<String> {
+    let caller = windows_binary_caller(bin)?;
+    let target = if caller == "call" {
+        let link_s = link_bat.to_string_lossy();
+        let bin_s = bin.to_string_lossy();
+        find_shortest_path(&link_s, &bin_s, false)
+    } else {
+        link_name.to_owned()
+    };
+    Ok(format!(
+        "@ECHO OFF\r\n\
+         setlocal DISABLEDELAYEDEXPANSION\r\n\
+         SET BIN_TARGET=%~dp0/{target}\r\n\
+         SET COMPOSER_RUNTIME_BIN_DIR=%~dp0\r\n\
+         {caller} \"%BIN_TARGET%\" %*\r\n"
+    ))
+}
+
+/// `BinaryInstaller::determineBinaryCaller`: `call` for a `.bat`/`.cmd`,
+/// otherwise the binary from the shebang, otherwise `php`.
+fn windows_binary_caller(bin: &Path) -> Result<String> {
+    if let Some(ext) = bin.extension().and_then(|e| e.to_str()) {
+        if ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd") {
+            return Ok("call".to_owned());
+        }
+    }
+    let mut head = [0u8; 500];
+    let n = {
+        use std::io::Read as _;
+        let mut f = std::fs::File::open(bin).map_err(Error::io(bin))?;
+        f.read(&mut head).map_err(Error::io(bin))?
+    };
+    let head = String::from_utf8_lossy(&head[..n]);
+    if let Some(first) = head.lines().next() {
+        if let Some(rest) = first.strip_prefix("#!") {
+            let rest = rest.trim();
+            let prog = rest
+                .strip_prefix("/usr/bin/env ")
+                .map(str::trim)
+                .unwrap_or(rest);
+            let base = prog
+                .split_whitespace()
+                .next()
+                .and_then(|p| p.rsplit('/').next())
+                .unwrap_or("");
+            if !base.is_empty() {
+                return Ok(base.to_owned());
+            }
+        }
+    }
+    Ok("php".to_owned())
+}
+
 /// Installs a package's proxies (laid out in `package_dir`) into vendor/bin (0755).
+/// A `.bat` proxy is written IN ADDITION to the unixy proxy, on EVERY
+/// platform: Composer, in its proxy mode, writes both (the `.bat` for
+/// cmd/PowerShell, the unixy one for POSIX shells) so a `vendor/` stays
+/// portable to Windows. vivacity always writes proxies (never symlinks), so
+/// it emits the `.bat` everywhere — otherwise a `vendor/bin` produced off
+/// Windows diverges from Composer's.
 pub fn install_binaries(vendor_dir: &Path, package_dir: &Path, bins: &[&str]) -> Result<()> {
     let bin_dir = vendor_dir.join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(Error::io(&bin_dir))?;
@@ -272,6 +340,11 @@ pub fn install_binaries(vendor_dir: &Path, package_dir: &Path, bins: &[&str]) ->
             use std::os::unix::fs::PermissionsExt as _;
             std::fs::set_permissions(&link, std::fs::Permissions::from_mode(0o755))
                 .map_err(Error::io(&link))?;
+        }
+        if !link_name.to_ascii_lowercase().ends_with(".bat") {
+            let bat = bin_dir.join(format!("{link_name}.bat"));
+            let content = windows_proxy_content(&bat, link_name, &target)?;
+            std::fs::write(&bat, content).map_err(Error::io(&bat))?;
         }
     }
     Ok(())

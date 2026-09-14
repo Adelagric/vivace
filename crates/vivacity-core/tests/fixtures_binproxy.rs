@@ -50,3 +50,99 @@ fn proxies_match_composer_byte_for_byte() {
     }
     assert!(checked >= 5, "too few proxies compared: {checked}");
 }
+
+/// The `.bat` proxy is written next to the unixy proxy, on EVERY platform
+/// (vivacity is always in proxy mode, like Composer), and its content is
+/// byte-identical to `generateWindowsProxyCode`. Self-contained: depends
+/// neither on the fixture, nor on Composer, nor on the network — so it runs
+/// everywhere.
+#[test]
+fn bat_proxy_is_written_on_every_platform_and_matches_composer() {
+    use vivacity_core::binproxy::{install_binaries, windows_proxy_content};
+
+    let root = std::env::temp_dir().join(format!(
+        "vivacity-bat-test-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    let vendor = root.join("vendor");
+    let pkg = vendor.join("nikic/php-parser");
+    std::fs::create_dir_all(pkg.join("bin")).unwrap();
+    // Real PHP target with a shebang -> caller `php`.
+    std::fs::write(
+        pkg.join("bin/php-parse"),
+        "#!/usr/bin/env php\n<?php\nrequire __DIR__.'/../lib/x.php';\n",
+    )
+    .unwrap();
+
+    install_binaries(&vendor, &pkg, &["bin/php-parse"]).expect("install_binaries");
+
+    let proxy = vendor.join("bin").join("php-parse");
+    let bat = vendor.join("bin").join("php-parse.bat");
+    assert!(proxy.is_file(), "unixy proxy missing");
+    assert!(
+        bat.is_file(),
+        ".bat proxy missing (must be written everywhere, not only on Windows)"
+    );
+
+    // Expected bytes of generateWindowsProxyCode for a PHP target named
+    // `php-parse` (caller = php, target = the neighbouring proxy), verified
+    // byte-for-byte against Composer 2.10.3 (php-parse.bat = 136 bytes, CRLF
+    // line endings).
+    let expected = "@ECHO OFF\r\n\
+         setlocal DISABLEDELAYEDEXPANSION\r\n\
+         SET BIN_TARGET=%~dp0/php-parse\r\n\
+         SET COMPOSER_RUNTIME_BIN_DIR=%~dp0\r\n\
+         php \"%BIN_TARGET%\" %*\r\n";
+    let got = std::fs::read_to_string(&bat).expect("read .bat");
+    assert_eq!(got, expected, ".bat diverges from Composer");
+    assert_eq!(got.len(), 136, ".bat must be 136 bytes");
+
+    // `windows_proxy_content` produces the same bytes directly.
+    let direct = windows_proxy_content(&bat, "php-parse", &pkg.join("bin/php-parse")).unwrap();
+    assert_eq!(direct, expected);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// ACTUALLY executes the `.bat` proxy: cmd.exe must launch `php` (from PATH)
+/// on the neighbouring unixy proxy, set `COMPOSER_RUNTIME_BIN_DIR` and pass
+/// the arguments through. Ignored by default because it requires a `php` on
+/// PATH; the Windows CI runs it explicitly (`--ignored`). Run without php it
+/// FAILS with a clear message — never a silent skip, like the oracles.
+#[cfg(windows)]
+#[test]
+#[ignore = "requires `php` on PATH — run by the Windows CI via --ignored"]
+fn bat_proxy_executes_with_a_real_php() {
+    use vivacity_core::binproxy::install_binaries;
+
+    let root = std::env::temp_dir().join(format!("vivacity-bat-exec-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let vendor = root.join("vendor");
+    let pkg = vendor.join("acme/tool");
+    std::fs::create_dir_all(pkg.join("bin")).unwrap();
+    std::fs::write(
+        pkg.join("bin/greet"),
+        "#!/usr/bin/env php\n<?php\n\
+         $dir = getenv('COMPOSER_RUNTIME_BIN_DIR') !== false ? 'bin-dir-set' : 'bin-dir-missing';\n\
+         echo 'vivacity-bat:' . implode(',', array_slice($argv, 1)) . ':' . $dir . \"\n\";\n",
+    )
+    .unwrap();
+    install_binaries(&vendor, &pkg, &["bin/greet"]).expect("install_binaries");
+
+    // Rust can launch a .bat directly (it goes through cmd.exe, escaping the
+    // arguments) — the same path as a user typing `vendor\bin\greet`.
+    let bat = vendor.join("bin").join("greet.bat");
+    let out = std::process::Command::new(&bat)
+        .args(["alpha", "beta"])
+        .output()
+        .expect("launch the .bat via cmd.exe");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        ".bat failed (php missing from PATH?)\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(stdout.trim_end(), "vivacity-bat:alpha,beta:bin-dir-set");
+    let _ = std::fs::remove_dir_all(&root);
+}

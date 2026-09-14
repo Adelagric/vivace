@@ -526,7 +526,8 @@ impl Scanner {
 
         let cached = cache.and_then(|c| c.load());
         if let Some(entries) = cached {
-            let base_real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let base_real =
+                vivacity_core::pathutil::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             for (rel, classes) in entries {
                 scanned_files.push((path.join(&rel), base_real.join(&rel), classes));
             }
@@ -602,10 +603,12 @@ impl Scanner {
         let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut saw_symlink = false;
         if path.is_file() {
-            let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let real =
+                vivacity_core::pathutil::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             files.push((path.to_path_buf(), real));
         } else if path.is_dir() {
-            let base_real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let base_real =
+                vivacity_core::pathutil::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             let mut symlinked_dirs: Vec<PathBuf> = Vec::new();
             for entry in walkdir::WalkDir::new(path)
                 .follow_links(true)
@@ -642,11 +645,13 @@ impl Scanner {
                 }
                 let under_symlink = symlinked_dirs.iter().any(|d| p.starts_with(d));
                 let real = if under_symlink {
-                    std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone())
+                    vivacity_core::pathutil::canonicalize(&p).unwrap_or_else(|_| p.clone())
                 } else {
                     match p.strip_prefix(path) {
                         Ok(rel) => base_real.join(rel),
-                        Err(_) => std::fs::canonicalize(&p).unwrap_or_else(|_| p.clone()),
+                        Err(_) => {
+                            vivacity_core::pathutil::canonicalize(&p).unwrap_or_else(|_| p.clone())
+                        }
                     }
                 };
                 files.push((p, real));

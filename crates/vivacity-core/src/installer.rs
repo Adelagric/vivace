@@ -269,7 +269,14 @@ fn prune_orphan_bin_proxies(vendor: &Path, wanted: &[&LockPackage]) -> Result<()
     }
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        if !expected.contains(&file_name) && !file_name.ends_with(".bat") {
+        // A `.bat` is the Windows proxy of an expected bin (kept), the proxy
+        // of a removed package (purged), or a user-placed file — the benefit
+        // of the doubt goes to the file only if its stem is expected.
+        let keep = expected.contains(&file_name)
+            || file_name
+                .strip_suffix(".bat")
+                .is_some_and(|stem| expected.contains(stem));
+        if !keep {
             let p = entry.path();
             std::fs::remove_file(&p).map_err(Error::io(&p))?;
         }
