@@ -51,8 +51,17 @@ runs, what was verified, what is deferred.
   with `-D warnings` is clean.
 - **A Windows CI leg** (`.github/workflows/windows.yml`, windows-latest):
   fmt (which also proves the LF checkout), clippy `-D warnings`, release
-  build, all `--lib` tests, both `.bat` proxy tests (bytes + real execution
-  under setup-php), and a `--version` smoke run.
+  build, all `--lib` tests, the `.bat` proxy tests (bin-compat rule, caller
+  semantics, skip-existing, Composer bytes + real execution under
+  setup-php), and a `--version` smoke run.
+- **The Windows parity oracle** (`windows.yml`, `parity` job): the full
+  six-project `harness/diff-vendor.sh` — without autoloader, then with
+  autoloader cold + warm — against a pinned native Windows Composer 2.10.3
+  (setup-php, PHP 8.4), 0 diff required, under Git Bash on windows-latest.
+  This is the same oracle `ci.yml` runs on ubuntu/macos, and the merge bar
+  this branch was missing. The only harness change it needed was resolving
+  the binary as `target/release/vivacity.exe` (guarded by `uname` so WSL's
+  binfmt interop doesn't pick the `.exe`).
 
 ## What the port changed
 
@@ -78,18 +87,28 @@ runs, what was verified, what is deferred.
   plain files whose content is the link target, after the same hostility
   checks. This matches what PHP's `ZipArchive` — i.e. what Composer itself —
   produces on Windows.
-- `binproxy.rs` — `vendor/bin/<name>.bat` proxies are written next to the
-  unixy proxies, **on every platform** (not just Windows). vivacity always
-  installs `vendor/bin` as a proxy (never a symlink), which mirrors Composer's
-  proxy mode — and Composer's proxy mode writes the `.bat` on every platform so
-  the `vendor/` stays portable to Windows. Emitting it only on Windows left a
-  Linux/macOS `vendor/bin` missing the `.bat` and diverging from Composer; it is
-  now unconditional. The `.bat` calls the neighbouring unixy proxy
-  (`php "%~dp0/<name>"`), like Composer's `generateWindowsProxyCode`; a
-  `.bat`/`.cmd` target is `call`'d directly. Orphan `.bat` proxies are now
-  pruned with their unixy siblings. Verified byte-identical to Composer 2.10.3
-  on native Windows **and** Linux (proxy mode), and executing under a real
-  Windows PHP 8.3 (see "What works").
+- `binproxy.rs` — `vendor/bin/<name>.bat` proxies follow **`bin-compat`**,
+  exactly like `BinaryInstaller::installBinaries` (2.10.3): the value comes
+  from `COMPOSER_BIN_COMPAT` else `config.bin-compat` (default `auto`), and
+  the `.bat` is written **iff it resolves to `full`** — `"full"` anywhere,
+  or `"auto"` on Windows or WSL (`Platform::isWindowsSubsystemForLinux`:
+  `/proc/version` contains "microsoft", not in a container). A plain
+  Linux/macOS install writes **no** `.bat`, matching what Composer produces
+  there. (An earlier revision of this branch wrote the `.bat` on every
+  platform on the theory that Composer's proxy mode does — that was wrong,
+  and made `vendor/bin` on Linux/macOS *diverge* from Composer; caught by
+  review with `harness/diff-vendor.sh`.) In full mode the `.bat` calls the
+  neighbouring unixy proxy (`php "%~dp0/<name>"`) for a plain `php` caller;
+  `determineBinaryCaller` is ported exactly — `call` for a `.bat` or `.exe`
+  target (NOT `.cmd`), and a shebang keeps everything after the last `/`,
+  arguments included (`#!/usr/bin/env php -dfoo` → caller `php -dfoo`), any
+  non-`php` caller targeting the real binary via `findShortestPath`. An
+  existing `<name>.bat` is **skipped**, not overwritten
+  (`installFullBinaries`). Orphan `.bat` proxies are pruned with their unixy
+  siblings; under a non-full bin-compat a leftover `.bat` is purged too.
+  Verified byte-identical to Composer 2.10.3 on native Windows (full mode)
+  **and** on Linux (no `.bat`, 0-diff `harness/diff-vendor.sh`), and
+  executing under a real Windows PHP 8.3 (see "What works").
 - `fetch.rs` — Composer-compatible Windows locations: home
   `%APPDATA%/Composer`, cache `%LOCALAPPDATA%/Composer`
   (`COMPOSER_HOME`/`COMPOSER_CACHE_DIR` still win).
@@ -104,13 +123,12 @@ runs, what was verified, what is deferred.
 
 ## What is deferred / not verified
 
-- **No Windows parity oracle in CI.** The differential harness (`harness/`,
-  `tests/oracle_*.rs`, `fixtures/make.sh`) drives a real `composer` binary
-  through bash scripts and is not wired for a Windows runner. The Windows CI
-  leg covers build, lints, unit tests and the `.bat` proxy (bytes +
-  execution) — *not* the six-project diff-vendor suite, which is the real
-  merge bar. The byte-parity claims above rest on the curated three-package
-  fixture (native Windows Composer 2.10.3 and Composer-in-WSL).
+- **The PHP-driven oracle tests (`tests/oracle_*.rs`) on Windows.** The
+  `parity` job covers the diff-vendor suite (see "What works"), but the
+  Rust oracle tests that spawn a PHP interpreter are exercised on Windows
+  only insofar as `cargo test --lib` reaches them; the remaining harness
+  scripts (`update.sh`, `steps.sh`, `removal.sh`, `transitions.sh`,
+  `boot.sh`, `drift-reference.sh`) still run on ubuntu/macos only.
 - **Symlink fallback semantics.** The copy fallback in `clone.rs` means a
   package whose dist contains symlinks materializes differently than on
   Unix (copies instead of links) when the host lacks the symlink privilege;
@@ -139,15 +157,14 @@ runs, what was verified, what is deferred.
   same spawn plumbing but were not run against a real Windows Composer.
 - **`.bat` special cases.** Execution is verified for the common shape
   (PHP target with shebang → `php` caller). The phpunit hack and a
-  `.bat`/`.cmd`-target package (`call` caller, `findShortestPath` over
-  backslashed paths) have byte-level unit coverage on the former but no
-  execution test on either.
+  `.bat`/`.exe`-target package (`call` caller, `findShortestPath` over
+  backslashed paths) have byte-level unit coverage but no execution test.
 
 ## What a mergeable port still needs
 
-1. The full oracle harness (diff-vendor, six projects) against a pinned
-   Windows Composer on the Windows CI leg — the current leg stops at unit
-   tests + `.bat` execution.
+1. ~~The full oracle harness (diff-vendor, six projects) against a pinned
+   Windows Composer on the Windows CI leg~~ — done: the `parity` job in
+   `windows.yml` (see "What works").
 2. `.bat` execution tests for the special cases: phpunit and a
    `.bat`-target package.
 3. A decision on symlink-carrying dists and `path` repositories (copy vs

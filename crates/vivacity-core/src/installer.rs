@@ -210,14 +210,17 @@ pub async fn install(
     }
 
     // Bin proxies: rebuilt for every wanted package, then purge of the
-    // orphaned proxies (removed packages).
+    // orphaned proxies (removed packages). The `.bat` follows the resolved
+    // bin-compat (`full`, or `auto` on Windows/WSL), like Composer's
+    // BinaryInstaller — a plain Linux/macOS install writes no `.bat`.
+    let bin_compat = crate::binproxy::resolve_bin_compat(root_manifest)?;
     for p in &wanted {
         let bins = p.bins();
         if let (false, Some(dir)) = (bins.is_empty(), layout.abs(p.name())) {
-            crate::binproxy::install_binaries(&vendor, &dir, &bins)?;
+            crate::binproxy::install_binaries(&vendor, &dir, &bins, bin_compat)?;
         }
     }
-    prune_orphan_bin_proxies(&vendor, &wanted)?;
+    prune_orphan_bin_proxies(&vendor, &wanted, bin_compat)?;
 
     // State files + runtime stub.
     let root = RootPackage::detect(root_manifest, project_dir, opts.with_dev);
@@ -254,7 +257,11 @@ fn prune_empty_parent(project_dir: &Path, removed: &Path) {
     }
 }
 
-fn prune_orphan_bin_proxies(vendor: &Path, wanted: &[&LockPackage]) -> Result<()> {
+fn prune_orphan_bin_proxies(
+    vendor: &Path,
+    wanted: &[&LockPackage],
+    bin_compat: crate::binproxy::BinCompat,
+) -> Result<()> {
     let bin_dir = vendor.join("bin");
     let Ok(entries) = std::fs::read_dir(&bin_dir) else {
         return Ok(());
@@ -269,13 +276,16 @@ fn prune_orphan_bin_proxies(vendor: &Path, wanted: &[&LockPackage]) -> Result<()
     }
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        // A `.bat` is the Windows proxy of an expected bin (kept), the proxy
-        // of a removed package (purged), or a user-placed file — the benefit
-        // of the doubt goes to the file only if its stem is expected.
+        // A `.bat` is the Windows proxy of an expected bin — kept only when
+        // the resolved bin-compat writes `.bat` proxies at all (otherwise a
+        // leftover from a previous full-mode install, purged, converging on
+        // what Composer produces on a bare checkout) — or the proxy of a
+        // removed package (purged), or a user-placed file.
         let keep = expected.contains(&file_name)
-            || file_name
-                .strip_suffix(".bat")
-                .is_some_and(|stem| expected.contains(stem));
+            || (bin_compat == crate::binproxy::BinCompat::Full
+                && file_name
+                    .strip_suffix(".bat")
+                    .is_some_and(|stem| expected.contains(stem)));
         if !keep {
             let p = entry.path();
             std::fs::remove_file(&p).map_err(Error::io(&p))?;

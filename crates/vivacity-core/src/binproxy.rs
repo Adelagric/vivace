@@ -253,23 +253,26 @@ exec "${{dir}}/{file}" "$@"
     )
 }
 
-/// `BinaryInstaller::generateWindowsProxyCode`: a `.bat` whose target is the
-/// NEIGHBOURING unixy proxy (`%~dp0/<name>`) — the one that sets the
-/// `$GLOBALS['_composer_*']` and includes the real binary — invoked by `php`
-/// or by the binary from the real target's shebang. Exception: a real
-/// `.bat`/`.cmd` target is invoked directly (`call`), since a PHP proxy
-/// cannot include it. Verified byte-for-byte against native Composer 2.10.3
-/// on the psr/log + monolog + nikic/php-parser fixture, and by real
-/// execution under a Windows PHP (tests/fixtures_binproxy.rs — the full
-/// differential oracle, however, is not wired for Windows yet).
+/// `BinaryInstaller::generateWindowsProxyCode`: a `.bat` whose target, for a
+/// `php` caller, is the NEIGHBOURING unixy proxy (`%~dp0/<name>` =
+/// `basename($link, '.bat')`) — the one that sets the
+/// `$GLOBALS['_composer_*']` and includes the real binary. Any other caller
+/// (`call` for a real `.bat`/`.exe` target, a non-php shebang such as `sh`,
+/// or a shebang carrying arguments such as `php -dfoo`) targets the real
+/// binary via `findShortestPath`. Composer wraps that path in
+/// `trim(ProcessExecutor::escape(...), '"\'')`, which is the bare path again
+/// for any path without embedded quotes — the simplification kept here.
+/// Verified byte-for-byte against native Composer 2.10.3 on the psr/log +
+/// monolog + nikic/php-parser fixture, and by real execution under a
+/// Windows PHP (tests/fixtures_binproxy.rs).
 pub fn windows_proxy_content(link_bat: &Path, link_name: &str, bin: &Path) -> Result<String> {
     let caller = windows_binary_caller(bin)?;
-    let target = if caller == "call" {
+    let target = if caller == "php" {
+        link_name.to_owned()
+    } else {
         let link_s = link_bat.to_string_lossy();
         let bin_s = bin.to_string_lossy();
         find_shortest_path(&link_s, &bin_s, false)
-    } else {
-        link_name.to_owned()
     };
     Ok(format!(
         "@ECHO OFF\r\n\
@@ -280,49 +283,162 @@ pub fn windows_proxy_content(link_bat: &Path, link_name: &str, bin: &Path) -> Re
     ))
 }
 
-/// `BinaryInstaller::determineBinaryCaller`: `call` for a `.bat`/`.cmd`,
-/// otherwise the binary from the shebang, otherwise `php`.
-fn windows_binary_caller(bin: &Path) -> Result<String> {
-    if let Some(ext) = bin.extension().and_then(|e| e.to_str()) {
-        if ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd") {
-            return Ok("call".to_owned());
-        }
+/// `BinaryInstaller::determineBinaryCaller`: `call` for a `.bat` or `.exe`
+/// target (`substr($bin, -4)` — case-sensitive, and NOT `.cmd`); otherwise
+/// the shebang interpreter — everything after the last path segment,
+/// arguments included (`#!/usr/bin/env php -dfoo` → `php -dfoo`); otherwise
+/// `php`.
+pub fn windows_binary_caller(bin: &Path) -> Result<String> {
+    let bin_s = bin.to_string_lossy();
+    if bin_s.ends_with(".bat") || bin_s.ends_with(".exe") {
+        return Ok("call".to_owned());
     }
-    let mut head = [0u8; 500];
-    let n = {
-        use std::io::Read as _;
-        let mut f = std::fs::File::open(bin).map_err(Error::io(bin))?;
-        f.read(&mut head).map_err(Error::io(bin))?
-    };
-    let head = String::from_utf8_lossy(&head[..n]);
-    if let Some(first) = head.lines().next() {
-        if let Some(rest) = first.strip_prefix("#!") {
-            let rest = rest.trim();
-            let prog = rest
-                .strip_prefix("/usr/bin/env ")
-                .map(str::trim)
-                .unwrap_or(rest);
-            let base = prog
-                .split_whitespace()
-                .next()
-                .and_then(|p| p.rsplit('/').next())
-                .unwrap_or("");
-            if !base.is_empty() {
-                return Ok(base.to_owned());
-            }
-        }
+    // fgets($handle): the first line, unbounded, as bytes.
+    let mut line = Vec::new();
+    {
+        use std::io::BufRead as _;
+        let f = std::fs::File::open(bin).map_err(Error::io(bin))?;
+        let mut reader = std::io::BufReader::new(f);
+        reader
+            .read_until(b'\n', &mut line)
+            .map_err(Error::io(bin))?;
     }
-    Ok("php".to_owned())
+    let line = String::from_utf8_lossy(&line);
+    Ok(shebang_caller(&line).unwrap_or_else(|| "php".to_owned()))
 }
 
-/// Installs a package's proxies (laid out in `package_dir`) into vendor/bin (0755).
-/// A `.bat` proxy is written IN ADDITION to the unixy proxy, on EVERY
-/// platform: Composer, in its proxy mode, writes both (the `.bat` for
-/// cmd/PowerShell, the unixy one for POSIX shells) so a `vendor/` stays
-/// portable to Windows. vivacity always writes proxies (never symlinks), so
-/// it emits the `.bat` everywhere — otherwise a `vendor/bin` produced off
-/// Windows diverges from Composer's.
-pub fn install_binaries(vendor_dir: &Path, package_dir: &Path, bins: &[&str]) -> Result<()> {
+/// The regex `{^#!/(?:usr/bin/env )?(?:[^/]+/)*(.+)$}m` of
+/// `determineBinaryCaller`, applied to the first line: everything after the
+/// last `/` is kept — arguments included — then `trim()`ed. Two details of
+/// the reference are preserved: the shebang must start with `#!/` (a bare
+/// `#!php` falls through to the `php` default), and the capture must be
+/// non-empty, so on a line ending in `/` the backtracked capture keeps its
+/// final `<segment>/`.
+fn shebang_caller(line: &str) -> Option<String> {
+    // `$` with the `m` flag matches before a final `\n`; a `\r` stays in the
+    // capture and is removed by trim() below.
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let rest = line.strip_prefix("#!/")?;
+    let rest = rest.strip_prefix("usr/bin/env ").unwrap_or(rest);
+    // `(?:[^/]+/)*(.+)`: drop leading `<segment>/` pairs while a non-empty
+    // capture remains — greedy with backtracking, like PCRE.
+    let mut capture = rest;
+    loop {
+        match capture.find('/') {
+            Some(i) if i > 0 && i + 1 < capture.len() => capture = &capture[i + 1..],
+            _ => break,
+        }
+    }
+    if capture.is_empty() {
+        return None; // `(.+)` cannot match: no shebang interpreter
+    }
+    // PHP trim() default character set.
+    Some(
+        capture
+            .trim_matches([' ', '\t', '\n', '\r', '\0', '\x0B'])
+            .to_owned(),
+    )
+}
+
+/// The resolved `bin-compat`: `Full` writes the `.bat` proxy in addition to
+/// the unixy proxy (`BinaryInstaller::installFullBinaries`), `Proxy` writes
+/// the unixy proxy alone (`installUnixyProxyBinaries`) — which is what
+/// Composer produces on plain Linux/macOS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinCompat {
+    Full,
+    Proxy,
+}
+
+/// `Config::get('bin-compat')` + the resolution in
+/// `BinaryInstaller::installBinaries` (2.10.3): the value comes from
+/// `COMPOSER_BIN_COMPAT` (non-empty) else `config.bin-compat` of the root
+/// composer.json else `"auto"`, and resolves to `Full` iff it is `"full"`,
+/// or `"auto"` on Windows or WSL (`Platform::isWindows() ||
+/// Platform::isWindowsSubsystemForLinux()`).
+pub fn resolve_bin_compat(root_manifest: &serde_json::Value) -> Result<BinCompat> {
+    let env = std::env::var("COMPOSER_BIN_COMPAT")
+        .ok()
+        .filter(|v| !v.is_empty());
+    resolve_bin_compat_with(
+        env.as_deref(),
+        root_manifest,
+        cfg!(windows) || is_windows_subsystem_for_linux(),
+    )
+}
+
+/// Pure core of [`resolve_bin_compat`], for tests: `env` is the
+/// `COMPOSER_BIN_COMPAT` override, `windows_or_wsl` the platform predicate.
+/// An unknown value is refused with Composer's own message; the deprecated
+/// `"symlink"` is accepted and behaves like `"proxy"` (Composer deprecation-
+/// warns then takes the non-full branch — vivacity never symlinks anyway).
+pub fn resolve_bin_compat_with(
+    env: Option<&str>,
+    root_manifest: &serde_json::Value,
+    windows_or_wsl: bool,
+) -> Result<BinCompat> {
+    let config = root_manifest
+        .get("config")
+        .and_then(|c| c.get("bin-compat"))
+        .and_then(serde_json::Value::as_str);
+    let value = env.or(config).unwrap_or("auto");
+    match value {
+        "full" => Ok(BinCompat::Full),
+        "auto" if windows_or_wsl => Ok(BinCompat::Full),
+        "auto" | "proxy" | "symlink" => Ok(BinCompat::Proxy),
+        other => Err(Error::Unsupported(format!(
+            "Invalid value for 'bin-compat': {other}. Expected auto, full or proxy"
+        ))),
+    }
+}
+
+/// `Platform::isWindowsSubsystemForLinux` (2.10.3): never on Windows itself;
+/// otherwise `/proc/version` readable and containing "microsoft"
+/// (case-insensitive), and not inside a container — Docker/Podman running
+/// inside WSL must not count as WSL. The reference also bails out under
+/// PHP's `open_basedir`, which has no analog here.
+fn is_windows_subsystem_for_linux() -> bool {
+    if cfg!(windows) {
+        return false;
+    }
+    let Ok(version) = std::fs::read_to_string("/proc/version") else {
+        return false;
+    };
+    version.to_ascii_lowercase().contains("microsoft") && !is_docker()
+}
+
+/// `Platform::isDocker` (2.10.3): the container marker files, then the
+/// cgroup/mountinfo markers.
+fn is_docker() -> bool {
+    if [
+        "/.dockerenv",
+        "/run/.containerenv",
+        "/var/run/.containerenv",
+    ]
+    .iter()
+    .any(|p| Path::new(p).exists())
+    {
+        return true;
+    }
+    ["/proc/self/mountinfo", "/proc/1/cgroup"].iter().any(|p| {
+        std::fs::read_to_string(p).is_ok_and(|data| {
+            data.contains("/var/lib/docker/") || data.contains("/io.containerd.snapshotter")
+        })
+    })
+}
+
+/// Installs a package's proxies (laid out in `package_dir`) into vendor/bin
+/// (0755), following the resolved [`BinCompat`] exactly as
+/// `BinaryInstaller::installBinaries` does: `Full` (bin-compat `"full"`, or
+/// `"auto"` on Windows/WSL) goes through [`install_full_binaries`]; `Proxy`
+/// writes the unixy proxy alone. vivacity always writes proxies (never
+/// symlinks), which is Composer's own proxy mode.
+pub fn install_binaries(
+    vendor_dir: &Path,
+    package_dir: &Path,
+    bins: &[&str],
+    compat: BinCompat,
+) -> Result<()> {
     let bin_dir = vendor_dir.join("bin");
     std::fs::create_dir_all(&bin_dir).map_err(Error::io(&bin_dir))?;
     for bin in bins {
@@ -333,19 +449,57 @@ pub fn install_binaries(vendor_dir: &Path, package_dir: &Path, bins: &[&str]) ->
         if !target.exists() {
             continue; // binary declared but missing from the dist: Composer skips it too
         }
-        let content = proxy_content(vendor_dir, &link, &target)?;
-        std::fs::write(&link, content).map_err(Error::io(&link))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&link, std::fs::Permissions::from_mode(0o755))
-                .map_err(Error::io(&link))?;
-        }
-        if !link_name.to_ascii_lowercase().ends_with(".bat") {
-            let bat = bin_dir.join(format!("{link_name}.bat"));
-            let content = windows_proxy_content(&bat, link_name, &target)?;
-            std::fs::write(&bat, content).map_err(Error::io(&bat))?;
+        match compat {
+            BinCompat::Full => install_full_binaries(vendor_dir, &link, link_name, &target)?,
+            BinCompat::Proxy => install_unixy_proxy(vendor_dir, &link, &target)?,
         }
     }
+    Ok(())
+}
+
+/// `BinaryInstaller::installFullBinaries`: a real `.bat` target
+/// (`substr($binPath, -4)`, case-sensitive) gets ONLY the windows proxy, at
+/// the link itself; any other target gets the unixy proxy plus a
+/// `<name>.bat` — which is SKIPPED when it already exists (Composer:
+/// "Skipped installation of bin <bin>.bat proxy for package <name>: a .bat
+/// proxy was already installed").
+fn install_full_binaries(
+    vendor_dir: &Path,
+    link: &Path,
+    link_name: &str,
+    target: &Path,
+) -> Result<()> {
+    let bat = if target.to_string_lossy().ends_with(".bat") {
+        link.to_path_buf()
+    } else {
+        install_unixy_proxy(vendor_dir, link, target)?;
+        link.with_file_name(format!("{link_name}.bat"))
+    };
+    if !bat.exists() {
+        let content = windows_proxy_content(&bat, link_name, target)?;
+        std::fs::write(&bat, content).map_err(Error::io(&bat))?;
+        set_executable(&bat)?;
+    }
+    Ok(())
+}
+
+/// `BinaryInstaller::installUnixyProxyBinaries`.
+fn install_unixy_proxy(vendor_dir: &Path, link: &Path, target: &Path) -> Result<()> {
+    let content = proxy_content(vendor_dir, link, target)?;
+    std::fs::write(link, content).map_err(Error::io(link))?;
+    set_executable(link)
+}
+
+/// `Silencer::call('chmod', $link, 0777 & ~umask())` — 0755 under the usual
+/// umask; a no-op on Windows.
+fn set_executable(link: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(link, std::fs::Permissions::from_mode(0o755))
+            .map_err(Error::io(link))?;
+    }
+    #[cfg(not(unix))]
+    let _ = link;
     Ok(())
 }

@@ -15,11 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A real php for the .bat proxy execution test — no Composer: the
-      # differential parity suite (harness/, oracles, fixtures/make.sh) is
-      # not wired for Windows yet, see docs/windows.md. That suite is the
-      # maintainer's real bar; this job covers build, lints, unit tests and
-      # the actual .bat execution.
+      # A real php for the .bat proxy execution test — no Composer here:
+      # the differential parity suite runs in the `parity` job below. This
+      # job covers build, lints, unit tests and the actual .bat execution.
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
@@ -44,11 +42,68 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace --lib
 
-      - name: Bin proxy .bat (Composer bytes)
-        run: cargo test -p vivacity-core --test fixtures_binproxy bat_proxy_is_written
+      - name: Bin proxy .bat (bin-compat rule, caller, skip, Composer bytes)
+        run: cargo test -p vivacity-core --test fixtures_binproxy bat_
 
       - name: Bin proxy .bat (real execution via php)
         run: cargo test -p vivacity-core --test fixtures_binproxy bat_proxy_executes -- --ignored
 
       - name: Smoke (--version)
         run: cargo run --release -p vivacity -- --version
+
+  # The real merge bar: the six-project differential oracle against a pinned
+  # native Windows Composer, exactly like ci.yml's parity job — 0 diff
+  # required. Everything runs under Git Bash (the harness is bash + tar +
+  # diff + jq, all present on windows-latest).
+  parity:
+    name: parity oracle (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deep fixture trees (sylius, drupal) can overflow MAX_PATH while
+      # composer/git materialize them.
+      - name: Allow long git paths
+        run: git config --system core.longpaths true
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          # Pinned to the vendored reference, like ci.yml: the harness
+          # compares byte-for-byte, so the Composer version must be
+          # deterministic.
+          tools: composer:2.10.3
+          # ci.yml's list + pdo_sqlite/sqlite3: compiled into php on Linux,
+          # separate DLLs in the Windows builds (symfony-demo requires them).
+          extensions: mbstring, intl, gd, exif, bcmath, sodium, xml, curl, zip, fileinfo, pdo_sqlite, sqlite3
+          ini-values: memory_limit=1G
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Composer downloads and fixtures
+        uses: actions/cache@v4
+        with:
+          # Composer-on-Windows caches under %LOCALAPPDATA%/Composer.
+          path: |
+            ~/AppData/Local/Composer
+            fixtures/work
+          key: fixtures-${{ runner.os }}-${{ hashFiles('fixtures/make.sh') }}
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Fixtures (create-project sans scripts, qualification à l'oracle)
+        run: fixtures/make.sh
+
+      - name: Parity without autoloader (0 diff required)
+        run: harness/diff-vendor.sh
+
+      - name: Parity with autoloader, cold then warm classmap cache
+        run: |
+          harness/diff-vendor.sh --with-autoloader
+          harness/diff-vendor.sh --with-autoloader
