@@ -30,7 +30,7 @@ pub struct Version {
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-#[error("version hors du sous-ensemble supporté: {0:?}")]
+#[error("version outside the supported subset: {0:?}")]
 pub struct UnsupportedVersion(pub String);
 
 impl Version {
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn rejects_out_of_subset() {
         for s in ["dev-master", "1.x-dev", "abc", "", "1.2.3.4.5", "1.2-foo"] {
-            assert!(Version::parse(s).is_err(), "{s} aurait dû être rejetée");
+            assert!(Version::parse(s).is_err(), "{s} should have been rejected");
         }
     }
 }

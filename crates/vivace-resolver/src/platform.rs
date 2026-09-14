@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(pk[0].version, "8.2.0.0");
         assert_eq!(
             pk[4].version, "8.2.0.0",
-            "php-64bit prend la version surchargée de php"
+            "php-64bit takes the overridden php version"
         );
         // PHP key without `lib-`, target with it (addLibrary).
         let link = pk[7].provides.get("dom-libxml").unwrap();

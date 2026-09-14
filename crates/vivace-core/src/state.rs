@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(
             names,
             vec!["a/lib", "a/meta", "d/tool"],
-            "tri global par nom"
+            "global sort by name"
         );
         assert_eq!(v["packages"][0]["version_normalized"], "1.2.0.0");
         assert_eq!(v["packages"][0]["installation-source"], "dist");
@@ -568,17 +568,17 @@ mod tests {
         assert!(text.contains("'a/lib-compat' => array("));
         assert!(
             text.contains("0 => 'v1.2.0',"),
-            "self.version résolu: {text}"
+            "self.version resolved: {text}"
         );
         assert!(text.contains("'psr/log-implementation' => array("));
         assert!(
             !text.contains("'php' => array("),
-            "les cibles plateforme sont exclues"
+            "platform targets are excluded"
         );
         assert!(text.contains("'install_path' => __DIR__ . '/../a/lib',"));
         assert!(
             text.contains("'install_path' => null,"),
-            "metapackage sans chemin"
+            "metapackage without a path"
         );
         assert!(text.contains("'dev_requirement' => true,"));
     }

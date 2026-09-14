@@ -39,8 +39,8 @@ fn matches_version_parser_normalize() {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
@@ -58,7 +58,7 @@ fn matches_version_parser_normalize() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     child
         .stdin
         .take()
@@ -74,9 +74,9 @@ fn matches_version_parser_normalize() {
             Some(exp) => assert_eq!(
                 ours.as_deref(),
                 Some(exp.as_str()),
-                "divergence sur {input:?}"
+                "divergence on {input:?}"
             ),
-            None => assert_eq!(ours, None, "on accepte {input:?} que l'oracle refuse"),
+            None => assert_eq!(ours, None, "we accept {input:?} which the oracle refuses"),
         }
     }
 }

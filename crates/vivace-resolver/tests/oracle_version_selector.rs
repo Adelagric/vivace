@@ -36,8 +36,8 @@ fn phar() -> PathBuf {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     phar
 }
@@ -269,7 +269,7 @@ fn check_stability(fx: &str, minimum_stability: &str, prefer_stable: bool) -> us
         .into_iter()
         .filter(|n| p2.join(format!("{n}~dev.json")).is_file())
         .collect();
-    assert!(names.len() > 20, "{fx}: {} noms avec ~dev", names.len());
+    assert!(names.len() > 20, "{fx}: {} names with ~dev", names.len());
     let expected = oracle(&s, &names, &[]);
     let got = port(&s, &names, &PlatformRequirementFilter::IgnoreNothing);
     let failures: Vec<String> = names
@@ -285,7 +285,7 @@ fn check_stability(fx: &str, minimum_stability: &str, prefer_stable: bool) -> us
         .collect();
     assert!(
         failures.is_empty(),
-        "{fx} {minimum_stability}/{prefer_stable}: {} divergence(s) sur {} noms :\n{}",
+        "{fx} {minimum_stability}/{prefer_stable}: {} divergence(s) over {} names:\n{}",
         failures.len(),
         names.len(),
         failures.join("\n")
@@ -311,7 +311,7 @@ fn check_stability(fx: &str, minimum_stability: &str, prefer_stable: bool) -> us
             *kinds.entry(kind).or_default() += 1;
         }
         eprintln!(
-            "{fx} {minimum_stability}/{prefer_stable}: {} noms, {kinds:?}",
+            "{fx} {minimum_stability}/{prefer_stable}: {} names, {kinds:?}",
             names.len()
         );
     }
@@ -321,7 +321,7 @@ fn check_stability(fx: &str, minimum_stability: &str, prefer_stable: bool) -> us
 fn check(fx: &str, filter_args: &[&str], filter: &PlatformRequirementFilter) -> usize {
     let s = setup(fx);
     let mut names = snapshot_names(&s);
-    assert!(names.len() > 50, "{fx}: {} noms", names.len());
+    assert!(names.len() > 50, "{fx}: {} names", names.len());
     // A name in a different case: `findPackages(strtolower($name))`.
     let mixed_case = names[0].to_uppercase();
     names.push(mixed_case);
@@ -350,7 +350,7 @@ fn check(fx: &str, filter_args: &[&str], filter: &PlatformRequirementFilter) -> 
                 .count()
         };
         eprintln!(
-            "{fx}: {} trouvés, {} avec avertissement, {} `@`, {} `dev-`, {} `^0.`, {} `*`",
+            "{fx}: {} found, {} with a warning, {} `@`, {} `dev-`, {} `^0.`, {} `*`",
             expected
                 .as_object()
                 .expect("map")
@@ -380,7 +380,7 @@ fn check(fx: &str, filter_args: &[&str], filter: &PlatformRequirementFilter) -> 
     }
     assert!(
         failures.is_empty(),
-        "{fx} {filter_args:?}: {} divergence(s) sur {} noms :\n{}",
+        "{fx} {filter_args:?}: {} divergence(s) over {} names:\n{}",
         failures.len(),
         names.len(),
         failures.join("\n")
@@ -401,8 +401,8 @@ fn best_candidates_match_composer_on_snapshots() {
         }
         total += check(fx, &[], &PlatformRequirementFilter::IgnoreNothing);
     }
-    assert!(total > 0, "aucun instantané");
-    eprintln!("{total} noms");
+    assert!(total > 0, "no snapshot");
+    eprintln!("{total} names");
 }
 
 #[test]

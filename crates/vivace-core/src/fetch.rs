@@ -260,7 +260,7 @@ impl Fetcher {
         if offline {
             return Err(Error::Http {
                 url: url.to_owned(),
-                message: format!("cache manquant pour {name} en mode offline"),
+                message: format!("missing cache for {name} in offline mode"),
             });
         }
 
@@ -296,7 +296,7 @@ impl Fetcher {
         }
         Err(Error::Http {
             url: url.to_owned(),
-            message: format!("échec après 3 tentatives: {last_err}"),
+            message: format!("failed after 3 attempts: {last_err}"),
         })
     }
 
@@ -415,7 +415,7 @@ impl Fetcher {
         }
         Err(Error::Http {
             url: url.to_owned(),
-            message: format!("échec après 3 tentatives: {last_err}"),
+            message: format!("failed after 3 attempts: {last_err}"),
         })
     }
 
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(
             auth.authorization_for("codeload.github.com").as_deref(),
             Some("token ghtok"),
-            "les dists github passent par codeload"
+            "github dists go through codeload"
         );
         assert_eq!(
             auth.authorization_for("api.github.com").as_deref(),

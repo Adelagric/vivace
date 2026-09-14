@@ -10,7 +10,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name);
     assert!(
         dir.is_dir(),
-        "fixture {name} absente — lancer fixtures/make.sh"
+        "fixture {name} missing — run fixtures/make.sh"
     );
     dir
 }
@@ -31,7 +31,7 @@ fn all_fixtures_are_native() {
         let report = analyze(name);
         assert!(
             report.is_native_ok(),
-            "fixture {name} hors scope: {:?}",
+            "fixture {name} out of scope: {:?}",
             report.issues
         );
     }
@@ -44,5 +44,5 @@ fn expected_benign_plugins_are_reported() {
     let sylius = analyze("sylius").skipped_plugins;
     assert!(sylius.contains(&"symfony/flex".to_owned()));
     assert!(sylius.contains(&"php-http/discovery".to_owned()));
-    assert_eq!(sylius.len(), 6, "liste bénigne inattendue: {sylius:?}");
+    assert_eq!(sylius.len(), 6, "unexpected benign list: {sylius:?}");
 }

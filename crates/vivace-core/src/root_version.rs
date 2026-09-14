@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(
             branch_alias(&m, &r),
             None,
-            "l'alias est indexé par dev-2.2, pas par la version jolie x-dev"
+            "the alias is indexed by dev-2.2, not by the pretty version x-dev"
         );
 
         // Exact tag on detached HEAD.

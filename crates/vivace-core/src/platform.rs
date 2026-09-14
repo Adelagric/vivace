@@ -105,7 +105,7 @@ impl Platform {
         }
         let platform: Platform =
             serde_json::from_slice(&out.stdout).map_err(|source| Error::Json {
-                context: "détection plateforme php".to_owned(),
+                context: "php platform detection".to_owned(),
                 source,
             })?;
 

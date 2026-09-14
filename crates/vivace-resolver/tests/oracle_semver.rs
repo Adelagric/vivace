@@ -24,8 +24,8 @@ fn phar() -> std::path::PathBuf {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     phar
 }
@@ -106,7 +106,7 @@ fn php(script: &str, input: &Value) -> Value {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     child
         .stdin
         .take()
@@ -129,12 +129,12 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
     let (constraints, versions) = corpus();
     assert!(
         constraints.len() > 500,
-        "corpus contraintes: {}",
+        "corpus constraints: {}",
         constraints.len()
     );
     assert!(versions.len() > 500, "corpus versions: {}", versions.len());
     eprintln!(
-        "corpus : {} contraintes, {} versions",
+        "corpus: {} constraints, {} versions",
         constraints.len(),
         versions.len()
     );
@@ -166,11 +166,11 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
         if ours != exp {
             bad += 1;
             if bad <= 15 {
-                eprintln!("contrainte {c:?}: composer={exp:?} vivace={ours:?}");
+                eprintln!("constraint {c:?}: composer={exp:?} vivace={ours:?}");
             }
         }
     }
-    assert_eq!(bad, 0, "{bad} contraintes divergentes");
+    assert_eq!(bad, 0, "{bad} diverging constraints");
 
     // Versions: normalize + parseStability.
     let script = format!(
@@ -207,7 +207,7 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
             normalized.push(n);
         }
     }
-    assert_eq!(bad, 0, "{bad} versions divergentes");
+    assert_eq!(bad, 0, "{bad} diverging versions");
 
     // version_compare on pairs of normalized versions (deterministic
     // sample) and matches(constraint, version).
@@ -264,7 +264,7 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
             }
         }
     }
-    assert_eq!(bad, 0, "{bad} comparaisons divergentes");
+    assert_eq!(bad, 0, "{bad} diverging comparisons");
     let mut bad = 0;
     let mut idx = 0;
     for (i, c) in csample.iter().enumerate() {
@@ -282,9 +282,9 @@ fn semver_matches_composer_on_the_snapshot_corpus() {
             }
         }
     }
-    assert_eq!(bad, 0, "{bad} matches divergents");
+    assert_eq!(bad, 0, "{bad} diverging matches");
     eprintln!(
-        "oracle semver: {} contraintes, {} versions, {} comparaisons, {} matches — 0 divergence",
+        "oracle semver: {} constraints, {} versions, {} comparisons, {} matches — 0 divergences",
         constraints.len(),
         versions.len(),
         sample.len(),
@@ -332,7 +332,7 @@ fn intervals_match_composer() {
         let a = pair[0].as_str().expect("a");
         let b = pair[1].as_str().expect("b");
         let (Ok(ca), Ok(cb)) = (parse_constraints(a), parse_constraints(b)) else {
-            assert!(exp.is_null(), "{a:?}/{b:?}: composer a parsé, pas nous");
+            assert!(exp.is_null(), "{a:?}/{b:?}: composer parsed it, we did not");
             continue;
         };
         let (ca, cb) = (ca.constraint, cb.constraint);
@@ -356,6 +356,6 @@ fn intervals_match_composer() {
             }
         }
     }
-    assert_eq!(bad, 0, "{bad} paires divergentes sur {}", pairs.len());
-    eprintln!("oracle intervals: {} paires — 0 divergence", pairs.len());
+    assert_eq!(bad, 0, "{bad} diverging pairs out of {}", pairs.len());
+    eprintln!("oracle intervals: {} pairs — 0 divergences", pairs.len());
 }

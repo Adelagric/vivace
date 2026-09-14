@@ -10,7 +10,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name);
     assert!(
         dir.is_dir(),
-        "fixture {name} absente — lancer fixtures/make.sh"
+        "fixture {name} missing — run fixtures/make.sh"
     );
     dir
 }
@@ -18,17 +18,14 @@ fn fixture(name: &str) -> PathBuf {
 #[test]
 fn detection_is_cached_and_sane() {
     let p = vivace_core::platform::Platform::detect()
-        .expect("détection")
-        .expect("php présent sur la machine de dev");
+        .expect("detection")
+        .expect("php present on the dev machine");
     assert!(p.php_version.starts_with(|c: char| c.is_ascii_digit()));
     assert!(p.is_64bit);
-    assert!(
-        p.extensions.contains_key("json"),
-        "ext json toujours présente"
-    );
+    assert!(p.extensions.contains_key("json"), "ext json always present");
     // Second call: served by the cache (same result).
     let p2 = vivace_core::platform::Platform::detect()
-        .expect("détection")
+        .expect("detection")
         .expect("php");
     assert_eq!(p.php_version, p2.php_version);
 }
@@ -36,8 +33,8 @@ fn detection_is_cached_and_sane() {
 #[test]
 fn fixture_locks_are_installable_here() {
     let mut platform = vivace_core::platform::Platform::detect()
-        .expect("détection")
-        .expect("php présent");
+        .expect("detection")
+        .expect("php present");
     for name in ["laravel", "symfony", "sylius"] {
         let dir = fixture(name);
         let lock = vivace_core::lock::Lock::read(&dir.join("composer.lock")).expect("lock");
@@ -49,7 +46,7 @@ fn fixture_locks_are_installable_here() {
         let failures = vivace_core::platform::check(&lock, &platform, true, &[]);
         assert!(
             failures.is_empty(),
-            "fixture {name}: échecs plateforme inattendus: {failures:?}"
+            "fixture {name}: unexpected platform failures: {failures:?}"
         );
     }
 }

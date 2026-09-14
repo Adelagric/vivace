@@ -582,7 +582,7 @@ fn scaffold_matches_the_real_plugin() {
         }
     }
     eprintln!(
-        "oracle scaffold: {compared} fichiers comparés sur {} cas",
+        "oracle scaffold: {compared} files compared over {} cases",
         cases().len()
     );
     assert!(compared > 80);

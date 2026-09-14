@@ -17,7 +17,7 @@ fn fixtures_dir() -> PathBuf {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/work");
     assert!(
         root.is_dir(),
-        "fixtures absentes ({}) — lancer fixtures/make.sh d'abord",
+        "fixtures missing ({}) — run fixtures/make.sh first",
         root.display()
     );
     root
@@ -34,7 +34,7 @@ fn golden_fixture_locks() {
         .expect("lock JSON");
         let expected = lock["content-hash"].as_str().expect("content-hash");
         let actual = vivace_core::content_hash::content_hash(&json).expect("hash");
-        assert_eq!(actual, expected, "content-hash divergent pour {fx}");
+        assert_eq!(actual, expected, "diverging content-hash for {fx}");
     }
 }
 
@@ -51,7 +51,7 @@ fn oracle_hash(manifest: &str) -> String {
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()
-        .expect("php doit être installé (brew install php)");
+        .expect("php must be installed (brew install php)");
     use std::io::Write as _;
     child
         .stdin
@@ -60,7 +60,7 @@ fn oracle_hash(manifest: &str) -> String {
         .write_all(manifest.as_bytes())
         .expect("write manifest");
     let out = child.wait_with_output().expect("php exit");
-    assert!(out.status.success(), "oracle PHP en échec: {out:?}");
+    assert!(out.status.success(), "PHP oracle failed: {out:?}");
     String::from_utf8(out.stdout).expect("utf8")
 }
 
@@ -80,9 +80,9 @@ fn which_composer_phar() -> PathBuf {
         let src = src.trim();
         assert!(
             !src.is_empty(),
-            "composer doit être installé (brew install composer)"
+            "composer must be installed (brew install composer)"
         );
-        std::fs::copy(src, &target).expect("copie du phar");
+        std::fs::copy(src, &target).expect("phar copy");
     }
     target
 }
@@ -119,6 +119,6 @@ fn differential_against_php_oracle() {
     for m in manifests {
         let ours = vivace_core::content_hash::content_hash(m).expect("hash");
         let theirs = oracle_hash(m);
-        assert_eq!(ours, theirs, "divergence oracle sur: {m}");
+        assert_eq!(ours, theirs, "oracle divergence on: {m}");
     }
 }

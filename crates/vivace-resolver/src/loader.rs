@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(
             ids,
             vec![1, 0],
-            "alias d'abord, comme ArrayRepository::addPackage"
+            "alias first, like ArrayRepository::addPackage"
         );
         let p = &arena[0];
         assert_eq!(p.name, "acme/lib");

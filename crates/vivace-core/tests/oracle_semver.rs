@@ -90,9 +90,9 @@ fn oracle_matrix() -> Vec<(String, String, bool)> {
         .expect("utf8");
         assert!(
             !src.trim().is_empty(),
-            "composer requis (brew install composer)"
+            "composer required (brew install composer)"
         );
-        std::fs::copy(src.trim(), &phar).expect("copie du phar");
+        std::fs::copy(src.trim(), &phar).expect("phar copy");
     }
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
@@ -111,7 +111,7 @@ fn oracle_matrix() -> Vec<(String, String, bool)> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis (brew install php)");
+        .expect("php required (brew install php)");
     let payload = serde_json::json!({ "versions": VERSIONS, "constraints": CONSTRAINTS });
     child
         .stdin
@@ -120,7 +120,7 @@ fn oracle_matrix() -> Vec<(String, String, bool)> {
         .write_all(payload.to_string().as_bytes())
         .expect("write");
     let out = child.wait_with_output().expect("php exit");
-    assert!(out.status.success(), "oracle en échec: {out:?}");
+    assert!(out.status.success(), "oracle failed: {out:?}");
     let rows: Vec<(String, String, i32)> =
         serde_json::from_slice(&out.stdout).expect("json oracle");
     rows.into_iter()
@@ -134,7 +134,7 @@ fn matches_semver_satisfies() {
     let matrix = oracle_matrix();
     assert!(
         matrix.len() > 900,
-        "matrice oracle trop petite: {}",
+        "oracle matrix too small: {}",
         matrix.len()
     );
     let mut compared = 0usize;
@@ -155,13 +155,13 @@ fn matches_semver_satisfies() {
     }
     assert!(
         diverging.is_empty(),
-        "{} divergences (sur {compared} comparées):\n{}",
+        "{} divergences (out of {compared} compared):\n{}",
         diverging.len(),
         diverging.join("\n")
     );
     // Refusal must remain the exception in this subset, chosen to be covered.
     assert!(
         refused * 20 <= compared,
-        "trop de refus: {refused} refusées vs {compared} comparées"
+        "too many refusals: {refused} refused vs {compared} compared"
     );
 }

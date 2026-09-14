@@ -42,8 +42,8 @@ fn phar() -> PathBuf {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     phar
 }
@@ -251,7 +251,7 @@ fn compare(fx: &str, expected: &Value, got: &[Value]) -> usize {
                 divergences += 1;
                 if divergences <= 5 {
                     eprintln!(
-                        "{fx}: divergence à l'index {i}\n  composer: {}\n  vivace:   {}",
+                        "{fx}: divergence at index {i}\n  composer: {}\n  vivace:   {}",
                         e.map(|v| v.to_string())
                             .unwrap_or_else(|| "(absent)".into()),
                         g.map(|v| v.to_string())
@@ -262,7 +262,7 @@ fn compare(fx: &str, expected: &Value, got: &[Value]) -> usize {
         }
     }
     eprintln!(
-        "{fx}: composer {} paquets, vivace {} paquets, {divergences} divergence(s)",
+        "{fx}: composer {} packages, vivace {} packages, {divergences} divergence(s)",
         exp.len(),
         got.len()
     );
@@ -381,20 +381,16 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
             match solved {
                 Err(vivace_resolver::solver::SolveError::Problems(p)) => {
                     eprintln!(
-                        "{fx}: insoluble des deux côtés ({} problème(s) chez vivace)",
+                        "{fx}: unsolvable on both sides ({} problem(s) on the vivace side)",
                         p.len()
                     );
                 }
                 Err(e) => {
-                    eprintln!(
-                        "{fx}: Composer n'a pas de solution, vivace échoue autrement : {e:?}"
-                    );
+                    eprintln!("{fx}: Composer has no solution, vivace fails differently: {e:?}");
                     total += 1;
                 }
                 Ok(_) => {
-                    eprintln!(
-                        "{fx}: Composer n'a pas de solution, vivace en trouve une :\n{problems}"
-                    );
+                    eprintln!("{fx}: Composer has no solution, vivace finds one:\n{problems}");
                     total += 1;
                 }
             }
@@ -403,7 +399,7 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
         let report = match solved {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("{fx}: vivace n'a pas de solution : {e:?}");
+                eprintln!("{fx}: vivace has no solution: {e:?}");
                 total += 1;
                 return total;
             }
@@ -456,7 +452,7 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
             .collect();
         let mut d = 0;
         if rules != exp_rules || learned != exp_learned {
-            eprintln!("{fx}: règles composer {exp_rules} (apprises {exp_learned}), vivace {rules} (apprises {learned})");
+            eprintln!("{fx}: rules composer {exp_rules} (learned {exp_learned}), vivace {rules} (learned {learned})");
             d += 1;
         }
         if decisions != exp_decisions {
@@ -465,7 +461,7 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
                 .zip(&exp_decisions)
                 .position(|(a, b)| a != b);
             eprintln!(
-                "{fx}: décisions composer {} / vivace {}, première divergence à {:?} (composer {:?}, vivace {:?})",
+                "{fx}: decisions composer {} / vivace {}, first divergence at {:?} (composer {:?}, vivace {:?})",
                 exp_decisions.len(),
                 decisions.len(),
                 first,
@@ -475,19 +471,19 @@ fn solve_case(fx: &str, update: &[&str], mode: &str) -> usize {
             d += 1;
         }
         if ops != exp_ops {
-            eprintln!("{fx}: opérations composer {exp_ops:?}\n  vivace {ops:?}");
+            eprintln!("{fx}: operations composer {exp_ops:?}\n  vivace {ops:?}");
             d += 1;
         }
         if lock != exp_lock {
             eprintln!(
-                "{fx}: lock composer {} paquets, vivace {} paquets",
+                "{fx}: lock composer {} packages, vivace {} packages",
                 exp_lock.len(),
                 lock.len()
             );
             d += 1;
         }
         eprintln!(
-            "{fx}: pool optimisé {} paquets, {rules} règles ({learned} apprises), {} décisions, {} opérations, {} paquets de lock — {d} divergence(s)",
+            "{fx}: optimized pool {} packages, {rules} rules ({learned} learned), {} decisions, {} operations, {} lock packages — {d} divergence(s)",
             pool.len(),
             decisions.len(),
             ops.len(),

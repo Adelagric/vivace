@@ -25,8 +25,8 @@ fn phar() -> PathBuf {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     phar
 }
@@ -133,7 +133,7 @@ fn run_php(phar: &Path, files: &[(String, Vec<Vec<Op>>)]) -> Vec<Vec<Outcome>> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     child
         .stdin
         .take()
@@ -368,11 +368,7 @@ fn corpus() -> Vec<(String, String)> {
             }
         }
     }
-    assert!(
-        out.len() >= 8,
-        "fixtures/projects: {} manifestes",
-        out.len()
-    );
+    assert!(out.len() >= 8, "fixtures/projects: {} manifests", out.len());
     let work = root().join("fixtures/work");
     if work.is_dir() {
         for f in walk(&work) {
@@ -428,10 +424,10 @@ fn check(phar: &Path, files: Vec<(String, String)>) -> usize {
             }
         }
     }
-    eprintln!("{scenarios_run} scénarios, dont {failed_both} en échec côté PHP");
+    eprintln!("{scenarios_run} scenarios, {failed_both} of which failed on the PHP side");
     assert!(
         failures.is_empty(),
-        "{} divergence(s) sur {scenarios_run} scénarios :\n{}",
+        "{} divergence(s) over {scenarios_run} scenarios:\n{}",
         failures.len(),
         failures.join("\n\n")
     );
@@ -446,7 +442,7 @@ fn synthetic_cases_match_composer() {
         .map(|(n, s)| (n.to_owned(), s))
         .collect();
     let n = check(&phar, files);
-    eprintln!("synthétiques : {n} scénarios");
+    eprintln!("synthetic: {n} scenarios");
 }
 
 #[test]
@@ -455,5 +451,5 @@ fn real_manifests_match_composer() {
     let files = corpus();
     let count = files.len();
     let n = check(&phar, files);
-    eprintln!("corpus : {count} manifestes, {n} scénarios");
+    eprintln!("corpus: {count} manifests, {n} scenarios");
 }

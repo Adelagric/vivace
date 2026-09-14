@@ -14,7 +14,7 @@ fn fixture_vendor(name: &str) -> PathBuf {
         .join("vendor");
     assert!(
         dir.is_dir(),
-        "fixture {name} absente — lancer fixtures/make.sh"
+        "fixture {name} missing — run fixtures/make.sh"
     );
     dir
 }
@@ -46,8 +46,8 @@ fn oracle(files: &[PathBuf]) -> std::collections::BTreeMap<String, Option<Vec<St
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
@@ -72,7 +72,7 @@ fn oracle(files: &[PathBuf]) -> std::collections::BTreeMap<String, Option<Vec<St
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     let list: Vec<String> = files
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -86,7 +86,7 @@ fn oracle(files: &[PathBuf]) -> std::collections::BTreeMap<String, Option<Vec<St
     let out = child.wait_with_output().expect("php");
     assert!(
         out.status.success(),
-        "oracle en échec: {}",
+        "oracle failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
@@ -103,11 +103,7 @@ fn find_classes_matches_oracle_on_fixtures() {
     files.extend(php_files(&fixture_vendor("sylius")));
     files.sort();
     files.dedup();
-    assert!(
-        files.len() > 20_000,
-        "trop peu de fichiers: {}",
-        files.len()
-    );
+    assert!(files.len() > 20_000, "too few files: {}", files.len());
 
     let expected = oracle(&files);
     let finder = vivace_autoload::classmap::ClassFinder::new().expect("regex");
@@ -130,13 +126,13 @@ fn find_classes_matches_oracle_on_fixtures() {
             .collect();
         compared += 1;
         if &ours != exp {
-            diverging.push(format!("{key}\n   nous:   {ours:?}\n   oracle: {exp:?}"));
+            diverging.push(format!("{key}\n   ours:   {ours:?}\n   oracle: {exp:?}"));
         }
     }
-    assert!(compared > 20_000, "trop peu comparés: {compared}");
+    assert!(compared > 20_000, "too few compared: {compared}");
     assert!(
         diverging.is_empty(),
-        "{} divergences sur {compared} fichiers:\n{}",
+        "{} divergences over {compared} files:\n{}",
         diverging.len(),
         diverging
             .iter()

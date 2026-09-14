@@ -8,7 +8,7 @@ fn laravel_vendor() -> PathBuf {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/work/laravel/vendor");
     assert!(
         dir.is_dir(),
-        "fixture laravel absente — lancer fixtures/make.sh"
+        "fixture laravel missing — run fixtures/make.sh"
     );
     dir
 }
@@ -40,10 +40,10 @@ fn proxies_match_composer_byte_for_byte() {
                     .expect("proxy vivace");
             assert_eq!(
                 ours, expected,
-                "proxy divergent pour {link_name} (paquet {name})"
+                "diverging proxy for {link_name} (package {name})"
             );
             checked += 1;
         }
     }
-    assert!(checked >= 5, "trop peu de proxies comparés: {checked}");
+    assert!(checked >= 5, "too few proxies compared: {checked}");
 }

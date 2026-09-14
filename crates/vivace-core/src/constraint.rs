@@ -18,7 +18,7 @@
 use crate::version::{Stability, Version};
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-#[error("contrainte hors du sous-ensemble supporté: {0:?}")]
+#[error("constraint outside the supported subset: {0:?}")]
 pub struct UnsupportedConstraint(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,7 +334,10 @@ mod tests {
     #[test]
     fn unsupported_forms_error_out() {
         for c in ["dev-master", "1.0 as 2.0", "@dev", "~>1.2"] {
-            assert!(satisfies("1.0.0", c).is_err(), "{c} aurait dû être rejetée");
+            assert!(
+                satisfies("1.0.0", c).is_err(),
+                "{c} should have been rejected"
+            );
         }
     }
 }

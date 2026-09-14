@@ -31,7 +31,7 @@ pub enum AutoloadError {
     },
     #[error(transparent)]
     ClassMap(#[from] crate::classmap::ClassMapError),
-    #[error("regex d'exclusion invalide: {0}")]
+    #[error("invalid exclusion regex: {0}")]
     Regex(String),
 }
 

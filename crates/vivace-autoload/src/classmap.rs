@@ -23,9 +23,9 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClassMapError {
-    #[error("regex interne invalide: {0}")]
+    #[error("invalid internal regex: {0}")]
     Regex(String),
-    #[error("lecture impossible de {0}")]
+    #[error("cannot read {0}")]
     Read(PathBuf),
     #[error(
         "Could not scan for classes inside \"{0}\" which does not appear to be a file nor a folder"
@@ -364,9 +364,8 @@ fn find_all_parallel(
         handles
             .into_iter()
             .map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    Err(ClassMapError::Regex("thread de scan interrompu".into()))
-                })
+                h.join()
+                    .unwrap_or_else(|_| Err(ClassMapError::Regex("scan thread interrupted".into())))
             })
             .collect()
     });
@@ -706,7 +705,7 @@ impl Scanner {
                     };
                     map_sep(sub_ns, b'\\')
                 }
-                AutoloadType::ClassMap => unreachable!("filtré en amont"),
+                AutoloadType::ClassMap => unreachable!("filtered upstream"),
             };
             if sub_path == real_sub.as_bytes() {
                 valid.push(class);
@@ -848,13 +847,13 @@ mod cache_tests {
         };
         let direct = run(None);
         let first = run(Some(&slot)); // fills the cache
-        assert!(slot.file.is_file(), "cache non écrit");
+        assert!(slot.file.is_file(), "cache not written");
         let cached = run(Some(&slot)); // served from the cache
         assert_eq!(direct, first);
         assert_eq!(direct, cached);
         assert_eq!(direct.0.len(), 4);
         assert!(direct.0.contains_key(&vec![0x7fu8]));
-        assert_eq!(direct.1.len(), 1, "l'ambiguïté Acme\\A doit être rejouée");
+        assert_eq!(direct.1.len(), 1, "the Acme\\A ambiguity must be replayed");
     }
 
     #[test]
@@ -871,7 +870,7 @@ mod cache_tests {
         #[cfg(unix)]
         assert!(
             !slot.file.exists(),
-            "un arbre avec symlink ne doit pas être caché"
+            "a tree with a symlink must not be cached"
         );
     }
 }

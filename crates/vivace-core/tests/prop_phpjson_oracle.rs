@@ -47,7 +47,7 @@ fn php_oracle_encode(json_text: &str) -> String {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php doit être installé");
+        .expect("php must be installed");
     child
         .stdin
         .take()
@@ -55,7 +55,7 @@ fn php_oracle_encode(json_text: &str) -> String {
         .write_all(json_text.as_bytes())
         .expect("write");
     let out = child.wait_with_output().expect("php exit");
-    assert!(out.status.success(), "oracle PHP en échec");
+    assert!(out.status.success(), "PHP oracle failed");
     String::from_utf8(out.stdout).expect("utf8")
 }
 
@@ -90,6 +90,6 @@ fn exact_ties_round_to_even_like_dtoa() {
     ] {
         let v: Value = serde_json::from_str(text).expect("parse");
         let ours = vivace_core::phpjson::php_json_encode(&v).expect("encode");
-        assert_eq!(ours, php_oracle_encode(text), "divergence sur {text}");
+        assert_eq!(ours, php_oracle_encode(text), "divergence on {text}");
     }
 }

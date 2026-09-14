@@ -54,8 +54,8 @@ fn matches_array_loader_branch_alias() {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     let script = format!(
         r#"require "phar://{}/vendor/autoload.php";
@@ -78,7 +78,7 @@ fn matches_array_loader_branch_alias() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     child
         .stdin
         .take()
@@ -97,6 +97,6 @@ fn matches_array_loader_branch_alias() {
             .unwrap_or(false);
         let ours =
             vivace_core::root_version::branch_alias_of(version, cfg.get("extra"), default_branch);
-        assert_eq!(ours, expected, "divergence sur {cfg}");
+        assert_eq!(ours, expected, "divergence on {cfg}");
     }
 }

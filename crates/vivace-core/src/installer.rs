@@ -148,7 +148,7 @@ pub async fn install(
             .ok_or_else(|| Error::Http {
                 url: name.clone(),
                 message:
-                    "paquet sans dist url (le détecteur de scope aurait dû router en fallback)"
+                    "package without a dist url (the scope detector should have routed to the fallback)"
                         .to_owned(),
             })?
             .to_owned();
@@ -158,7 +158,7 @@ pub async fn install(
         tasks.spawn(async move {
             let _permit = sem.acquire().await.map_err(|_| Error::Http {
                 url: url.clone(),
-                message: "semaphore fermé".to_owned(),
+                message: "semaphore closed".to_owned(),
             })?;
             let fetched = fetcher
                 .dist_bytes(&name, &url, shasum.as_deref(), offline)
@@ -178,7 +178,7 @@ pub async fn install(
             .await
             .map_err(|e| Error::Http {
                 url: name.clone(),
-                message: format!("tâche d'extraction interrompue: {e}"),
+                message: format!("extraction task interrupted: {e}"),
             })??;
             Ok::<Option<Provenance>, Error>(Some(provenance))
         });

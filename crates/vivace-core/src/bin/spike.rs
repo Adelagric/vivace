@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
                     name,
                     url: url.to_string(),
                 }),
-                None => eprintln!("skip (pas de dist): {name}"),
+                None => eprintln!("skip (no dist): {name}"),
             }
         }
     }
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             let bytes = if cp.exists() {
                 std::fs::read(&cp)?
             } else if offline {
-                anyhow::bail!("cache miss en mode offline: {}", d.name)
+                anyhow::bail!("cache miss in offline mode: {}", d.name)
             } else {
                 let b = client
                     .get(&d.url)
@@ -130,7 +130,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     println!(
-        "spike: {} paquets extraits ({} erreurs) en {:.3}s",
+        "spike: {} packages extracted ({} errors) in {:.3}s",
         total - errs,
         errs,
         t0.elapsed().as_secs_f64()

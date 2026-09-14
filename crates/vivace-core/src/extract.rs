@@ -32,7 +32,7 @@ fn entry_path(entry: &zip::read::ZipFile<'_>, dest: &Path) -> Result<PathBuf> {
         })
         .ok_or_else(|| Error::HostileArchive {
             dest: dest.to_path_buf(),
-            reason: format!("chemin d'entrée invalide: {:?}", entry.name()),
+            reason: format!("invalid entry path: {:?}", entry.name()),
         })
 }
 
@@ -76,7 +76,7 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
         if total > MAX_UNCOMPRESSED {
             return Err(Error::HostileArchive {
                 dest: dest.to_path_buf(),
-                reason: format!("taille décompressée > {MAX_UNCOMPRESSED} octets"),
+                reason: format!("uncompressed size > {MAX_UNCOMPRESSED} bytes"),
             });
         }
         let raw = entry_path(&entry, dest)?;
@@ -134,7 +134,9 @@ fn check_symlink_target(link_rel: &Path, target: &str, dest: &Path) -> Result<()
     };
     let target_path = Path::new(target);
     if target_path.is_absolute() {
-        return Err(hostile(format!("symlink absolu: {link_rel:?} -> {target}")));
+        return Err(hostile(format!(
+            "absolute symlink: {link_rel:?} -> {target}"
+        )));
     }
     let mut depth: i64 = link_rel.components().count() as i64 - 1; // depth of the link's directory
     for c in target_path.components() {
@@ -143,7 +145,7 @@ fn check_symlink_target(link_rel: &Path, target: &str, dest: &Path) -> Result<()
                 depth -= 1;
                 if depth < 0 {
                     return Err(hostile(format!(
-                        "symlink sortant de l'archive: {link_rel:?} -> {target}"
+                        "symlink escaping the archive: {link_rel:?} -> {target}"
                     )));
                 }
             }
@@ -151,7 +153,7 @@ fn check_symlink_target(link_rel: &Path, target: &str, dest: &Path) -> Result<()
             Component::CurDir => {}
             _ => {
                 return Err(hostile(format!(
-                    "symlink invalide: {link_rel:?} -> {target}"
+                    "invalid symlink: {link_rel:?} -> {target}"
                 )))
             }
         }
@@ -208,7 +210,7 @@ mod tests {
                 .expect("meta")
                 .permissions()
                 .mode();
-            assert_eq!(mode & 0o111, 0o111, "bit exécutable perdu");
+            assert_eq!(mode & 0o111, 0o111, "executable bit lost");
         }
     }
 
@@ -224,10 +226,10 @@ mod tests {
         let mixed = build_zip(&[("README", b"r", None), ("src/a.php", b"<?php", None)]);
         let d = tmpdir();
         extract_zip(&mixed, d.path()).expect("extract");
-        assert!(d.path().join("README").is_file(), "fichier racine perdu");
+        assert!(d.path().join("README").is_file(), "root file lost");
         assert!(
             d.path().join("src/a.php").is_file(),
-            "dossier aplati à tort"
+            "directory wrongly flattened"
         );
 
         // Two top-level directories: nothing is stripped.
@@ -240,7 +242,7 @@ mod tests {
         let file = build_zip(&[("only.txt", b"o", None)]);
         let d = tmpdir();
         extract_zip(&file, d.path()).expect("extract");
-        assert!(d.path().join("only.txt").is_file(), "fichier unique perdu");
+        assert!(d.path().join("only.txt").is_file(), "single file lost");
 
         // Top-level .DS_Store: ignored for the count (the single directory is
         // stripped, it disappears); without a single directory, extracted like
@@ -281,7 +283,7 @@ mod tests {
             let d = tmpdir();
             assert!(
                 extract_zip(&bad, d.path()).is_err(),
-                "symlink hostile accepté: {target}"
+                "hostile symlink accepted: {target}"
             );
         }
     }
@@ -304,8 +306,11 @@ mod tests {
             }
             bytes
         };
-        assert_ne!(benign, patched, "le patch n'a rien remplacé");
+        assert_ne!(benign, patched, "the patch replaced nothing");
         let d = tmpdir();
-        assert!(extract_zip(&patched, d.path()).is_err(), "zip-slip accepté");
+        assert!(
+            extract_zip(&patched, d.path()).is_err(),
+            "zip-slip accepted"
+        );
     }
 }

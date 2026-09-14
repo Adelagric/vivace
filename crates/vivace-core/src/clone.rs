@@ -85,7 +85,7 @@ mod tests {
                 .expect("meta")
                 .permissions()
                 .mode();
-            assert_eq!(mode & 0o111, 0o111, "bit exécutable perdu au clone");
+            assert_eq!(mode & 0o111, 0o111, "executable bit lost on clone");
             assert!(dst
                 .join("link")
                 .symlink_metadata()

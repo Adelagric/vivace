@@ -147,8 +147,8 @@ fn php_oracle(cases: &[Case], cwd: &Path) -> Vec<Vec<Value>> {
                 .stdout,
         )
         .expect("utf8");
-        assert!(!src.trim().is_empty(), "composer requis");
-        std::fs::copy(src.trim(), &phar).expect("copie");
+        assert!(!src.trim().is_empty(), "composer required");
+        std::fs::copy(src.trim(), &phar).expect("copy");
     }
     let installers_src = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/reference/installers/src/Composer/Installers")
@@ -211,7 +211,7 @@ fn php_oracle(cases: &[Case], cwd: &Path) -> Vec<Vec<Value>> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .expect("php requis");
+        .expect("php required");
     child
         .stdin
         .take()
@@ -271,7 +271,7 @@ fn layout_matches_composer_with_the_real_plugin() {
                     let ours_ip = layout.install_path(name);
                     assert!(
                         expected.get("error").is_none(),
-                        "{name} ({}) extra={}: vivace accepte, Composer échoue: {}",
+                        "{name} ({}) extra={}: vivace accepts, Composer fails: {}",
                         p["type"],
                         case.root_extra,
                         expected["error"]
@@ -279,14 +279,14 @@ fn layout_matches_composer_with_the_real_plugin() {
                     assert_eq!(
                         ours_path.as_deref(),
                         expected["path"].as_str(),
-                        "chemin de {name} ({}) extra={}",
+                        "path of {name} ({}) extra={}",
                         p["type"],
                         case.root_extra
                     );
                     assert_eq!(
                         ours_ip.as_deref(),
                         expected["install_path"].as_str(),
-                        "install-path de {name} ({}) extra={}",
+                        "install-path of {name} ({}) extra={}",
                         p["type"],
                         case.root_extra
                     );
@@ -306,7 +306,7 @@ fn layout_matches_composer_with_the_real_plugin() {
                     if !deliberate {
                         assert!(
                             expected.get("error").is_some(),
-                            "{name} ({}) extra={}: vivace refuse ({msg}) mais Composer réussit: {expected}",
+                            "{name} ({}) extra={}: vivace refuses ({msg}) but Composer succeeds: {expected}",
                             p["type"], case.root_extra
                         );
                     }
@@ -314,6 +314,6 @@ fn layout_matches_composer_with_the_real_plugin() {
             }
         }
     }
-    eprintln!("oracle installers: {compared} chemins comparés, {refused} refus");
-    assert!(compared > 300, "matrice trop petite: {compared}");
+    eprintln!("oracle installers: {compared} paths compared, {refused} refusals");
+    assert!(compared > 300, "matrix too small: {compared}");
 }
