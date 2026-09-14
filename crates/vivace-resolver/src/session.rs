@@ -906,7 +906,12 @@ pub fn install_policy_problems(
         }
         // Le constructeur ne fait aucune entrée-sortie : une erreur ici est
         // une erreur de configuration, fatale comme chez Composer.
-        repositories.push(open_repository(repo, http.as_ref(), cache_repo_dir)?);
+        repositories.push(open_repository_with(
+            repo,
+            http.as_ref(),
+            cache_repo_dir,
+            true,
+        )?);
     }
     let mut arena: Vec<Package> = Vec::new();
     let locked = crate::repository::locked_repository_with(&lock, &mut arena, with_dev)
@@ -943,6 +948,18 @@ fn open_repository(
     http: Option<&HttpTransports>,
     cache_repo_dir: Option<&Path>,
 ) -> Result<Repository, SessionError> {
+    open_repository_with(repo, http, cache_repo_dir, false)
+}
+
+/// `for_policies` : un dépôt avec `only`/`exclude`/`canonical`
+/// (`FilterRepository`) est accepté — les chemins des avis et des listes
+/// respectent `only`/`exclude` — là où la résolution le refuse encore.
+fn open_repository_with(
+    repo: &RepoConfig,
+    http: Option<&HttpTransports>,
+    cache_repo_dir: Option<&Path>,
+    for_policies: bool,
+) -> Result<Repository, SessionError> {
     let def = &repo.definition;
     let kind = def.get("type").and_then(Value::as_str).ok_or_else(|| {
         SessionError::new(format!(
@@ -956,7 +973,11 @@ fn open_repository(
             key_string(&repo.key)
         )));
     }
-    if def.get("only").is_some() || def.get("exclude").is_some() || def.get("canonical").is_some() {
+    if !for_policies
+        && (def.get("only").is_some()
+            || def.get("exclude").is_some()
+            || def.get("canonical").is_some())
+    {
         return Err(SessionError::new(format!(
             "repository filters (only/exclude/canonical) are not supported by vivace update yet ({})",
             key_string(&repo.key)
@@ -991,6 +1012,10 @@ fn open_repository(
     }
     repo.set_user_filter(def.get("filter"))
         .map_err(|e| SessionError::new(e.0))?;
+    if for_policies {
+        repo.set_name_filter(def.get("only"), def.get("exclude"))
+            .map_err(|e| SessionError::new(e.0))?;
+    }
     if let Some(dir) = cache_repo_dir {
         repo.cache = Some(crate::metacache::MetadataCache::new(dir, &repo.url));
     }

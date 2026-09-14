@@ -194,6 +194,8 @@ struct RootData {
     /// Dépôt sans `metadata-url` ni providers : toutes les métadonnées
     /// (`packages` + `includes`), dans l'ordre de `loadIncludes`.
     plain: Option<Vec<Value>>,
+    /// Dépôt au protocole v1 (`providers-url`…) : refusé à la résolution.
+    v1_protocol: bool,
     /// `security-advisories` de packages.json : `metadata`, `api-url`.
     security_advisories: Option<AdvisoryConfig>,
     /// `filter` de packages.json (`ComposerRepositoryFilterInformation`).
@@ -407,6 +409,15 @@ pub struct ComposerRepository {
     /// ce processus (les chemins `summary-url`/`api-url` des listes sont
     /// alors ignorés).
     fresh_metadata: std::cell::Cell<bool>,
+    /// `FilterRepository` (`only` / `exclude` de la définition) : les noms
+    /// que ce dépôt sert ; les chemins des avis et des listes s'y limitent.
+    name_filter: Option<NameFilter>,
+}
+
+/// `only` (autoriser) ou `exclude` (refuser) une liste de motifs.
+pub struct NameFilter {
+    regex: Regex,
+    only: bool,
 }
 
 /// `empty()` PHP sur une valeur JSON.
@@ -486,7 +497,70 @@ impl ComposerRepository {
             degraded: std::cell::Cell::new(false),
             user_filter: Some(Vec::new()),
             fresh_metadata: std::cell::Cell::new(false),
+            name_filter: None,
         })
+    }
+
+    /// `FilterRepository::__construct` : `only` ou `exclude` (pas les deux).
+    pub fn set_name_filter(
+        &mut self,
+        only: Option<&Value>,
+        exclude: Option<&Value>,
+    ) -> Result<(), RepoError> {
+        let patterns = |v: &Value, key: &str| -> Result<Vec<String>, RepoError> {
+            v.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .ok_or_else(|| {
+                    RepoError::data(format!(
+                        "\"{key}\" key for repository {} should be an array",
+                        self.repo_name()
+                    ))
+                })
+        };
+        if only.is_some() && exclude.is_some() {
+            return Err(RepoError::data(format!(
+                "Only one of \"only\" and \"exclude\" can be specified for repository {}",
+                self.repo_name()
+            )));
+        }
+        let (list, is_only) = match (only, exclude) {
+            (Some(o), _) => (patterns(o, "only")?, true),
+            (_, Some(e)) => (patterns(e, "exclude")?, false),
+            _ => return Ok(()),
+        };
+        let parts: Vec<String> = list
+            .iter()
+            .map(|n| crate::version::preg_quote(n).replace("\\*", ".*"))
+            .collect();
+        let regex = pcre2::bytes::RegexBuilder::new()
+            .caseless(true)
+            .build(&format!("^(?:{})\\z", parts.join("|")))
+            .map_err(|e| RepoError::data(e.to_string()))?;
+        self.name_filter = Some(NameFilter {
+            regex,
+            only: is_only,
+        });
+        Ok(())
+    }
+
+    /// `FilterRepository::isAllowed`.
+    fn is_allowed(&self, name: &str) -> bool {
+        match &self.name_filter {
+            None => true,
+            Some(f) => {
+                let hit = f.regex.is_match(name.as_bytes()).unwrap_or(false);
+                if f.only {
+                    hit
+                } else {
+                    !hit
+                }
+            }
+        }
     }
 
     /// `parseUserFilterConfig` de l'option `filter` du dépôt.
@@ -663,10 +737,10 @@ impl ComposerRepository {
             || non_empty("providers-includes")
             || has_providers
         {
-            return Err(RepoError::data(format!(
-                "{}: Composer v1 repository protocol (providers) is not supported by vivace",
-                self.url
-            )));
+            // Le protocole v1 n'est pas porté pour la résolution ; ses
+            // packages.json restent lisibles pour ce qu'ils déclarent (avis,
+            // listes), comme Composer le fait.
+            r.v1_protocol = true;
         }
         if has_partial {
             // `initializePartialPackages` : indexés par le `name` de chaque
@@ -899,7 +973,11 @@ impl ComposerRepository {
         let Some(config) = &root.security_advisories else {
             return Ok((Vec::new(), Vec::new()));
         };
-        let mut map: Vec<(String, Constraint)> = map.to_vec();
+        let mut map: Vec<(String, Constraint)> = map
+            .iter()
+            .filter(|(n, _)| self.is_allowed(n))
+            .cloned()
+            .collect();
         if root.has_available_package_list {
             map.retain(|(n, _)| Self::contains(root, &n.to_lowercase()));
         }
@@ -1038,7 +1116,11 @@ impl ComposerRepository {
         configured_lists: &[String],
     ) -> Result<FilterEntriesByList, RepoError> {
         let root = self.root_data_max_age(Some(600))?;
-        let mut map: Vec<(String, Constraint)> = map.to_vec();
+        let mut map: Vec<(String, Constraint)> = map
+            .iter()
+            .filter(|(n, _)| self.is_allowed(n))
+            .cloned()
+            .collect();
         if root.has_available_package_list {
             map.retain(|(n, _)| Self::contains(root, &n.to_lowercase()));
         }
@@ -1412,6 +1494,12 @@ impl ComposerRepository {
         arena: &mut Vec<Package>,
     ) -> Result<(Vec<String>, Vec<usize>), RepoError> {
         let root = self.root_data()?;
+        if root.v1_protocol {
+            return Err(RepoError::data(format!(
+                "{}: Composer v1 repository protocol (providers) is not supported by vivace",
+                self.url
+            )));
+        }
         if let Some(plain) = &root.plain {
             // `parent::loadPackages` (ArrayRepository) sur `getPackages()`.
             if self.members.get().is_none() {
