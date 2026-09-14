@@ -32,7 +32,7 @@ Also `cargo binstall vivace`, or `cargo install --path crates/vivace`.
 GitHub Actions:
 
 ```yaml
-- uses: Adelagric/vivace@v0.4.0
+- uses: Adelagric/vivace@v0.5.0
 - run: vivace install
 ```
 

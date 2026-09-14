@@ -4,29 +4,9 @@ All notable changes to vivace. The format follows [Keep a Changelog](https://kee
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-14
 
 ### Added
-- **Dependency policies** (Composer 2.10): the pool filters that remove
-  versions covered by a security advisory (`policy.advisories`, default
-  on), versions on a filter list — Packagist's malware list
-  (`policy.malware`, default on, `block-scope`) — and abandoned packages
-  (`policy.abandoned`, default off) are ported, with the legacy
-  `config.audit` keys, the global/project merge, `COMPOSER_POLICY`,
-  `COMPOSER_POLICY_*_BLOCK`, `COMPOSER_NO_BLOCKING` and `--no-blocking`;
-  `ignore`/`ignore-id`/`ignore-severity`/`ignore-source` rules, the
-  `ignore-unreachable` behaviour, and the security-advisories API call
-  when a rule needs complete advisories. A locked version flagged by a
-  list is a resolution problem (exit 2) as in Composer, and `install`
-  refuses a lock that pins one, with Composer's message. Until now vivace
-  behaved as if `--no-blocking` were always set. The snapshots carry the
-  advisories Packagist embeds in its metadata, so the resolver oracle and
-  the harnesses now run with the policies on (5 fixtures, pools reduced by
-  2-23 %, locks unchanged) plus a synthetic `solver-policies` fixture (30
-  cases: advisory, malware, abandoned, every config knob, locked flagged
-  version, install; 54 with the review's additions).
-- `install --dry-run`: the checks (policies, scope, platform) without
-  writing anything; `install --no-install` is refused as in Composer.
 - **`vivace require`**: a port of `RequireCommand` — `vendor/name`,
   `vendor/name:^1.0`, `vendor/name ^1.0`, `--dev`, `--fixed`,
   `--no-update`, `--no-install`, `-w`/`-W`, `--sort-packages`,
@@ -36,63 +16,79 @@ byte-identical-output promise are the public API.
   constraint is rewritten from the locked version and the lock's
   `content-hash` and `stability-flags` are updated in place
   (`Locker::updateHash`); `composer.json` and `composer.lock` are restored
-  (or deleted when just created) when the resolution fails. 25 cases in
-  `harness/steps.sh` compare `composer.json`, `composer.lock` and the exit
-  code with Composer on the five snapshots. Not supported: `--dry-run`,
-  `--minimal-changes`, the interactive prompts, the "Did you mean" search,
-  installing from a virtual lock (`config.lock: false` without
-  `--no-install`).
-- `update` and `require` keep the indentation of an existing
-  `composer.lock` when rewriting it, as `JsonFile::write` does.
+  (or deleted when just created) when the resolution fails. Not
+  supported: `--dry-run`, `--minimal-changes`, the interactive prompts,
+  the "Did you mean" search, installing from a virtual lock
+  (`config.lock: false` without `--no-install`).
 - **`vivace remove`**: a port of `RemoveCommand` — `composer.json` is
-  edited in place through the `JsonManipulator` port (names matched
-  case-insensitively and by `vendor/*` patterns, `--dev`, a package found
-  in the other section is reported and left alone as in non-interactive
-  Composer), `allow-plugins` entries of removed plugins are dropped, then
-  the same partial update as Composer runs (`-W`,
-  `--no-update-with-dependencies`, `--no-update`, `--no-install`,
-  `--update-no-dev`, `--unused`), `composer.json` is restored when it
-  fails, and exit code 2 is returned when the package is still installed.
-  `harness/steps.sh` (33 cases on the five snapshots, in CI) checks
-  `composer.json`, `composer.lock` and the exit code against Composer.
-  Not supported: `--dry-run`, `--minimal-changes`, `COMPOSER=other.json`.
-- Port of `VersionSelector` (the version `composer require` picks for a
-  package given without constraint, and the `^x.y` constraint it writes),
-  checked against the phar on 902 names over the five snapshots plus
-  platform-filter and minimum-stability variants. Groundwork for
-  `vivace require`.
-- `update` and `remove` honour `COMPOSER_IGNORE_PLATFORM_REQS` and
-  `COMPOSER_IGNORE_PLATFORM_REQ`, as `BaseCommand` does.
+  edited in place (names matched case-insensitively and by `vendor/*`
+  patterns, `--dev`, a package found in the other section is reported and
+  left alone as in non-interactive Composer), `allow-plugins` entries of
+  removed plugins are dropped, then the same partial update as Composer
+  runs (`-W`, `--no-update-with-dependencies`, `--no-update`,
+  `--no-install`, `--update-no-dev`, `--unused`), `composer.json` is
+  restored when it fails, and exit code 2 is returned when the package is
+  still installed. Not supported: `--dry-run`, `--minimal-changes`,
+  `COMPOSER=other.json`.
+- **Partial updates**: `vivace update vendor/name [-w|-W]` (patterns,
+  `COMPOSER_WITH_DEPENDENCIES`/`COMPOSER_WITH_ALL_DEPENDENCIES`), with
+  Composer's warnings; `update lock|nothing|mirrors` and temporary
+  constraints are refused.
+- **Dependency policies** (Composer 2.10): the pool filters that remove
+  versions covered by a security advisory (`policy.advisories`, default
+  on), versions on a filter list — Packagist's malware list
+  (`policy.malware`, default on, `block-scope`) — and abandoned packages
+  (`policy.abandoned`, default off), with the legacy `config.audit`
+  keys, the global/project merge, `COMPOSER_POLICY`,
+  `COMPOSER_POLICY_*_BLOCK`, `COMPOSER_NO_BLOCKING` and `--no-blocking`;
+  `ignore`/`ignore-id`/`ignore-severity`/`ignore-source` rules, the
+  `ignore-unreachable` behaviour, and the security-advisories API call
+  when a rule needs complete advisories. A locked version flagged by a
+  list is a resolution problem (exit 2) as in Composer, and `install`
+  refuses a lock that pins one, with Composer's message. Until now vivace
+  behaved as if `--no-blocking` were always set. `install --dry-run` runs
+  the checks without writing anything; `install --no-install` is refused
+  as in Composer.
+- `update` keeps a metadata cache in Composer's own `cache-repo-dir`, in
+  Composer's layout and byte format, revalidated with `If-Modified-Since`;
+  a cache written by Composer is read by vivace and vice versa. When the
+  network fails and the cache has a dated copy, the copy is used with a
+  warning, like Composer's degraded mode. Metadata files of a pool batch
+  are fetched in parallel (12 at a time), as `loadAsyncPackages` does.
+- Ports checked against the phar on their own: `JsonManipulator` (12 102
+  editing scenarios over 794 real manifests plus 725 synthetic layouts)
+  and `VersionSelector` (902 names over the five snapshots, platform and
+  stability variants).
+- The `vivace` crate is a library with a thin binary: `vivace::run(args)`
+  runs any command in-process and returns the exit code, so another
+  program can embed the commands instead of shelling out. Crate metadata
+  is ready for crates.io.
+- `update`, `require` and `remove` honour `COMPOSER_IGNORE_PLATFORM_REQS`
+  and `COMPOSER_IGNORE_PLATFORM_REQ`, as `BaseCommand` does.
+- Verification: `harness/steps.sh` plays `require`, `remove`, `update`
+  and `install` cases through Composer and vivace on the frozen snapshots
+  and compares `composer.json`, `composer.lock` and the exit code (128
+  cases, in CI); the resolver oracle and the harnesses now run with the
+  policies on (5 fixtures, pools reduced by 2-23 %, locks unchanged) plus
+  the synthetic `solver-policies` fixture.
 
 ### Changed
-- The `vivace` crate is now a library with a thin binary: `vivace::run(args)`
-  runs any command in-process and returns the exit code, so another
-  program can embed the commands instead of shelling out.
 - `update` exits with code 2 when the requirements cannot be resolved,
   Composer's `ERROR_DEPENDENCY_RESOLUTION_FAILED`, instead of 1.
-- `update` keeps a metadata cache in Composer's own `cache-repo-dir`, in
-  Composer's layout and byte format (`packages.json`,
-  `provider-<vendor>~<name>[~dev].json`, `last-modified` injected the way
-  `ComposerRepository` does it), revalidated with `If-Modified-Since`;
-  a cache written by Composer is read by vivace and vice versa (checked:
-  137 files identical after a resolution of the Laravel skeleton against
-  Packagist). When the network fails and the cache has a dated copy, the
-  copy is used with a warning, like Composer's degraded mode.
-- Metadata files of a pool batch are fetched in parallel (12 at a time),
-  as `loadAsyncPackages` does.
-- Port of `JsonManipulator` (the part `require`/`remove` use: `addLink`
-  with `sort-packages`, `addSubNode`/`removeSubNode`, root keys,
-  `removeConfigSetting`, `format`), with Composer's own regular
-  expressions and PHP's `strnatcmp`; checked against the phar on 12 102
-  editing scenarios over 794 real manifests plus synthetic layouts.
-  Groundwork for `vivace require` and `vivace remove`; no command uses
-  it yet.
+- `update` and `require` keep the indentation of an existing
+  `composer.lock` when rewriting it, as `JsonFile::write` does.
+- `install` now reads the repositories' `packages.json` (and, for the
+  malware list, Packagist's summary) before installing, as Composer 2.10
+  does; unreachable repositories are ignored with a warning by default.
 
 ### Fixed
 - The JSON encoder now escapes U+2028 and U+2029 as `json_encode` does
   without `JSON_UNESCAPED_LINE_TERMINATORS`; a package description
   containing either would have produced a `composer.lock` differing from
   Composer's by those two characters.
+- `config.allow-plugins` rules from the project now take precedence over
+  the global ones in the order Composer merges them; a global `*` rule
+  could win over a project rule for the same package.
 
 ## [0.4.0] — 2026-09-12
 
