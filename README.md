@@ -158,4 +158,8 @@ Design notes: [DECISIONS.md](DECISIONS.md). Plans: `docs/plans/`.
 
 ## License
 
-MIT or Apache-2.0, at your option.
+MIT or Apache-2.0, at your option. The ports are derived from Composer
+and its libraries (MIT, © Nils Adermann, Jordi Boggiano, and the Composer
+project) and from `composer/installers` (MIT, © Kyle Robinson Young);
+the reference sources are vendored in `docs/reference/` with their
+license texts — see [NOTICE.md](NOTICE.md).

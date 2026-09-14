@@ -62,6 +62,18 @@ mainteneur). Une fois publiés, `cargo install vivace` et l'embarquement
 | v0.4 résolveur (option A : port du solveur) | publié (v0.4.0, 2026-09-12) : `vivace update` écrit le lock de Composer à l'octet (pool, séquence de décisions du solveur, opérations, lock) ; cache de métadonnées au format de Composer ; mises à jour partielles | docs/plans/v0.4-resolver.md, tests/oracle_pool.rs, harness/update.sh |
 | v0.5 require/remove/politiques | prêt à publier (0.5.0 dans Cargo.toml et CHANGELOG, 2026-09-14 ; tag et crates.io à la main du mainteneur) : partielles, `JsonManipulator` (12 102 + 725 scénarios vs phar), `remove`, `VersionSelector` (902 noms), `require`, politiques de blocage (54 cas) ; `harness/steps.sh` 128 cas | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
 
+## Licences (2026-09-14)
+
+NOTICE.md liste les origines des ports et leurs licences ; les textes MIT de
+Composer, composer/semver, class-map-generator, metadata-minifier et
+composer/installers sont à côté des sources vendorées. **Point ouvert** :
+`docs/reference/drupal-scaffold/` est GPL-2.0-or-later et
+`crates/vivace-core/src/scaffold.rs` en est un port (œuvre dérivée) — en
+conflit avec la distribution MIT/Apache-2.0 des crates et des binaires. Options
+posées au mainteneur : retirer l'émulation (fallback `composer install`),
+l'isoler dans un crate GPL hors des binaires, passer tout vivace en GPL, ou
+réécrire en salle blanche. À trancher avant toute communication publique.
+
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
 - **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACE_NO_CLASSMAP_CACHE=1` pour désactiver. Sur un vendor/ posé par Composer, le premier `vivace install` chauffe le store depuis le cache zip (≈1 s sur Laravel) ; les suivants profitent du cache (65 ms). `VIVACE_TRACE=1` affiche les phases (temps cumulés).

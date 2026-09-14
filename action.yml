@@ -9,8 +9,8 @@ branding:
 inputs:
   version:
     description: >
-      Release tag to install (e.g. v0.2.0). Defaults to the ref this action
-      was used with (`uses: Adelagric/vivace@v0.2.0` installs v0.2.0), so the
+      Release tag to install (e.g. v0.5.0). Defaults to the ref this action
+      was used with (`uses: Adelagric/vivace@v0.5.0` installs v0.5.0), so the
       action and the binary always match.
     required: false
     default: ${{ github.action_ref }}
@@ -63,7 +63,7 @@ runs:
         else
           case "$VIVACE_VERSION" in
             v[0-9]*) ;;
-            *) echo "::error::inputs.version must be a release tag like v0.2.0 (got '$VIVACE_VERSION'); pin the action to a release tag"; exit 1 ;;
+            *) echo "::error::inputs.version must be a release tag like v0.5.0 (got '$VIVACE_VERSION'); pin the action to a release tag"; exit 1 ;;
           esac
           sh "$GITHUB_ACTION_PATH/install.sh"
         fi

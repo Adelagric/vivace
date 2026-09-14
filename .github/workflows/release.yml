@@ -22,6 +22,15 @@ jobs:
           - { os: macos-latest, target: x86_64-apple-darwin }
     steps:
       - uses: actions/checkout@v4
+      # The tag, the workspace version and the pins in README/action.yml must
+      # agree: a release must not point users at an older release.
+      - name: Version consistency
+        run: |
+          tag="${{ github.ref_name }}"; v="${tag#v}"
+          grep -q "^version = \"$v\"" Cargo.toml || { echo "::error::Cargo.toml version is not $v"; exit 1; }
+          grep -q "Adelagric/vivace@$tag" README.md || { echo "::error::README.md does not pin uses: Adelagric/vivace@$tag"; exit 1; }
+          grep -q "$tag" action.yml || { echo "::error::action.yml examples do not mention $tag"; exit 1; }
+          grep -q "^## \[$v\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$v] entry"; exit 1; }
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
