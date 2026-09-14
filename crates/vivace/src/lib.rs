@@ -245,6 +245,11 @@ struct UpdateArgs {
     /// Accepté pour compatibilité : vivace n'audite pas (encore).
     #[arg(long)]
     no_audit: bool,
+    /// Désactiver les politiques de blocage (avis de sécurité, malware).
+    #[arg(long)]
+    no_blocking: bool,
+    #[arg(long)]
+    no_security_blocking: bool,
     #[arg(long)]
     prefer_stable: bool,
     #[arg(long)]
@@ -318,6 +323,18 @@ struct InstallArgs {
     /// N'utiliser que les caches locaux (aucun accès réseau).
     #[arg(long)]
     offline: bool,
+    /// Désactiver les politiques de blocage (liste malware du lock).
+    #[arg(long)]
+    no_blocking: bool,
+    #[arg(long)]
+    no_security_blocking: bool,
+    /// Refusé, comme chez Composer (`composer update --no-install`).
+    #[arg(long)]
+    no_install: bool,
+    /// Vérifications (politiques, portée, plateforme) sans rien écrire ;
+    /// Composer affiche en plus les opérations.
+    #[arg(long)]
+    dry_run: bool,
     /// Répertoire du projet (défaut : répertoire courant).
     #[arg(long, value_name = "DIR")]
     working_dir: Option<PathBuf>,
@@ -325,6 +342,10 @@ struct InstallArgs {
     /// remplacer le processus (quand l'appelant a encore du travail après).
     #[arg(skip)]
     spawn_fallback: bool,
+    /// Interne : installation qui suit une résolution (`doInstall` avec
+    /// `alreadySolved`) — le pool du lock a déjà été filtré.
+    #[arg(skip)]
+    after_update: bool,
 }
 
 /// `VIVACE_TRACE=1` : durée de chaque phase sur stderr (diagnostic perf).
@@ -446,6 +467,10 @@ fn scaffold_profile_installed(
 }
 
 fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
+    if args.no_install {
+        eprintln!("Invalid option \"--no-install\". Use \"composer update --no-install\" instead if you are trying to update the composer.lock file.");
+        return Ok(1);
+    }
     let t0 = std::time::Instant::now();
     let project = project_dir(args.working_dir.as_deref())?;
     let manifest_path = project.join("composer.json");
@@ -479,6 +504,34 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     }
 
     let with_dev = !args.no_dev && std::env::var("COMPOSER_NO_DEV").as_deref() != Ok("1");
+
+    // `Installer::doInstall` passe le pool du lock par le filtre de listes
+    // en portée install : une version verrouillée signalée (liste malware)
+    // n'est pas installée.
+    if !args.after_update {
+        let http = http_transport(&project, args.offline)?;
+        let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
+        let (problems, warnings) = vivace_resolver::session::install_policy_problems(
+            &project,
+            vivace_core::fetch::composer_home().as_deref(),
+            Some(http),
+            Some(&cache_repo_dir),
+            with_dev,
+            args.no_blocking || args.no_security_blocking,
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        for w in &warnings {
+            eprintln!("Warning: {w}");
+        }
+        if !problems.is_empty() {
+            eprintln!("Your lock file does not contain a compatible set of packages. Please run composer update.");
+            for (i, p) in problems.iter().enumerate() {
+                eprintln!("\n  Problem {}\n    {p}", i + 1);
+            }
+            return Ok(2);
+        }
+        trace("policy", t0);
+    }
 
     // Hors-scope → fallback exec composer (par défaut) ou erreur explicite.
     let scope = vivace_core::scope::analyze(&project, &lock, &manifest, with_dev, !args.no_plugins);
@@ -548,6 +601,10 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     }
 
     trace("platform check", t0);
+    if args.dry_run {
+        eprintln!("Installing dependencies from lock file (dry run)");
+        return Ok(0);
+    }
 
     // Transaction.
     let store = Arc::new(vivace_core::store::Store::default_location());
@@ -817,10 +874,7 @@ fn which_composer() -> Option<PathBuf> {
 fn http_transport(
     project: &std::path::Path,
     offline: bool,
-) -> anyhow::Result<(
-    vivace_resolver::repository::HttpFetch,
-    vivace_resolver::repository::HttpFetchMany,
-)> {
+) -> anyhow::Result<vivace_resolver::repository::HttpTransports> {
     let runtime =
         Arc::new(tokio::runtime::Runtime::new().context("cannot start the async runtime")?);
     let fetcher = Arc::new(vivace_core::fetch::Fetcher::new(
@@ -888,7 +942,21 @@ fn http_transport(
             })
         })
     };
-    Ok((http, http_many))
+    // POST de formulaire (API des avis de sécurité).
+    let http_post: vivace_resolver::repository::HttpPost = {
+        let runtime = runtime.clone();
+        let fetcher = fetcher.clone();
+        Arc::new(move |url: &str, body: &str| {
+            if offline {
+                return Err(format!("offline: cannot fetch {url}"));
+            }
+            runtime
+                .block_on(fetcher.post_form(url, body))
+                .map(to_fetched)
+                .map_err(|e| e.to_string())
+        })
+    };
+    Ok((http, Some(http_many), Some(http_post)))
 }
 
 fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
@@ -909,11 +977,12 @@ fn run_update(args: &UpdateArgs) -> anyhow::Result<i32> {
     } else {
         vivace_resolver::pool::UpdateMode::OnlyListed
     };
-    let options = if args.packages.is_empty() {
+    let mut options = if args.packages.is_empty() {
         vivace_resolver::session::UpdateOptions::default()
     } else {
         vivace_resolver::session::UpdateOptions::partial(&args.packages, transitive)
     };
+    options.no_blocking = args.no_blocking || args.no_security_blocking;
     // BaseCommand : COMPOSER_PREFER_STABLE / COMPOSER_PREFER_LOWEST valent
     // les options.
     let prefer_stable = args.prefer_stable || env_flag("COMPOSER_PREFER_STABLE");
@@ -950,8 +1019,13 @@ fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
         ignore_platform_req: args.ignore_platform_req.clone(),
         no_fallback: args.no_fallback,
         offline: args.offline,
+        no_blocking: args.no_blocking,
+        no_security_blocking: args.no_security_blocking,
+        no_install: false,
+        dry_run: false,
         working_dir: args.working_dir.clone(),
         spawn_fallback: args.spawn_fallback,
+        after_update: true,
     })
 }
 
@@ -978,13 +1052,13 @@ fn resolve_and_lock(
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .with_context(|| format!("cannot read {}", manifest_path.display()))?;
     let home = vivace_core::fetch::composer_home();
-    let (http, http_many) = http_transport(&project, args.offline)?;
+    let http = http_transport(&project, args.offline)?;
     let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
     let mut session = UpdateSession::prepare_update(
         &project,
         home.as_deref(),
         true,
-        Some((http, Some(http_many))),
+        Some(http),
         Some(&cache_repo_dir),
         &options,
     )
@@ -1301,11 +1375,12 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     }
     eprintln!("Running composer update {}{flags}", packages.join(" "));
     // `setUpdateAllowList` seulement si un lock existe.
-    let options = if locked_data.is_some() {
+    let mut options = if locked_data.is_some() {
         vivace_resolver::session::UpdateOptions::partial(&packages, transitive)
     } else {
         vivace_resolver::session::UpdateOptions::default()
     };
+    options.no_blocking = args.no_blocking || args.no_security_blocking;
     let update_args = UpdateArgs {
         packages: Vec::new(),
         with_dependencies: false,
@@ -1318,6 +1393,8 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         no_scripts: args.no_scripts,
         no_plugins: args.no_plugins,
         no_audit: args.no_audit,
+        no_blocking: args.no_blocking,
+        no_security_blocking: args.no_security_blocking,
         prefer_stable: false,
         prefer_lowest: false,
         ignore_platform_reqs: args.ignore_platform_reqs,

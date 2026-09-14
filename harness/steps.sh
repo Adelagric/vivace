@@ -7,12 +7,13 @@
 #
 # Usage : harness/steps.sh [fixture...]
 set -euo pipefail
-export COMPOSER_NO_BLOCKING=1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/registry.sh
+. "$ROOT/harness/lib/registry.sh"
 VIVACE="$ROOT/target/release/vivace"
 WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/steps"
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies)
 # "fixture|arguments" : la commande et ses arguments. Les mots finaux en
 # `@…` préparent la copie avant l'étape (et ne sont pas passés) :
 #   @nolock                 pas de composer.lock
@@ -32,6 +33,11 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @corruptlock            composer.lock illisible
 #   @minstab:dev            minimum-stability dev + prefer-stable false
 #   @platform:php=7.4.0     config.platform.php dans le manifeste
+#   @lockfile:name          copie `name` (dans le répertoire de la fixture) sur composer.lock
+#   @jq:expr                applique l'expression jq au manifeste (ex. .config.policy.abandoned.block=true)
+#   @registry-jq:expr       applique l'expression jq au packages.json de l'instantané (le cas seulement)
+#   @repofilter:json        redéclare le dépôt `snapshot` dans le manifeste avec cette option `filter`
+#   @env:NAME=VALUE         variable d'environnement des deux côtés (le cas seulement)
 STEPS=(
   "laravel|remove laravel/tinker"
   "laravel|remove laravel/tinker @nolock"
@@ -97,6 +103,59 @@ STEPS=(
   "laravel|require symfony/uid:^7.1 symfony/uid"
   "laravel|require SYMFONY/UID"
   "rector|require symfony/finder @minstab:dev"
+  "solver-policies|update @nolock"
+  "solver-policies|update --no-blocking @nolock"
+  "solver-policies|update --no-security-blocking @nolock"
+  "solver-policies|update @nolock @jq:.config.policy=false"
+  "solver-policies|update @nolock @require:acme/only-bad=^1"
+  "solver-policies|update @nolock @require:acme/vuln=1.1.0"
+  "solver-policies|update @nolock @require:acme/replacer=^2"
+  "solver-policies|update @nolock @jq:.config.policy.abandoned.block=true"
+  "solver-policies|update @nolock @jq:.config.audit[\"block-abandoned\"]=true"
+  "solver-policies|update @nolock @jq:.config.policy.malware.ignore={\"acme/bad\":null}"
+  "solver-policies|update @nolock @jq:.config.policy.malware[\"block-scope\"]=\"install\""
+  "solver-policies|update @nolock @jq:.config.policy.malware[\"ignore-source\"]=[\"testsource\"]"
+  "solver-policies|update @nolock @jq:.config.policy.malware=false"
+  "solver-policies|update @nolock @jq:.config.policy.advisories[\"ignore-id\"]=[\"PKSA-test-vuln-0001\"]"
+  "solver-policies|update @nolock @jq:.config.policy.advisories.ignore={\"acme/vuln\":\"known\"}"
+  "solver-policies|update @nolock @jq:.config.audit.ignore=[\"CVE-2026-0001\"]"
+  "solver-policies|update @nolock @jq:.config.audit.ignore=[\"acme/vuln\"]"
+  "solver-policies|update @nolock @jq:.config.audit[\"block-insecure\"]=false"
+  "solver-policies|update @nolock @jq:.config.policy.advisories[\"ignore-severity\"]=[\"high\"]"
+  "solver-policies|update acme/vuln @lockfile:composer.lock.malware"
+  "solver-policies|update acme/lib @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"update\""
+  "solver-policies|update acme/lib @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"install\""
+  "solver-policies|update acme/bad"
+  "solver-policies|require acme/replacer"
+  "solver-policies|remove acme/abandoned"
+  "solver-policies|install @lockfile:composer.lock.malware"
+  "solver-policies|install --no-blocking @lockfile:composer.lock.malware"
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"update\""
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware.ignore={\"acme/bad\":{\"constraint\":\"1.1.0\"}}"
+  "solver-policies|install"
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.repositories={\"dead\":{\"type\":\"composer\",\"url\":\"https://127.0.0.1:1\"}}"
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware.ignore={\"acme/bad\":[]}"
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"install\""
+  "solver-policies|install @lockfile:composer.lock.malware @repofilter:{\"malware\":\"x\"}"
+  "solver-policies|install @lockfile:composer.lock.malware @repofilter:{\"malware\":false}"
+  "solver-policies|install --no-install @lockfile:composer.lock.malware"
+  "solver-policies|update @nolock @registry-jq:.filter.metadata=false"
+  "solver-policies|update @nolock @require:acme/partial=^1"
+  "solver-policies|update @nolock @require:acme/partial=^1 @jq:.config.policy.advisories.ignore={\"acme/partial\":null}"
+  "solver-policies|update @nolock @require:acme/partial=^1 @jq:.config.policy.advisories[\"ignore-id\"]=[\"PKSA-test-partial-0001\"]"
+  "solver-policies|update @nolock @jq:.config.policy.advisories.ignore={\"acme/vuln\":[]}"
+  "solver-policies|update @nolock @jq:.config.audit[\"ignore-severity\"]={\"high\":{\"apply\":\"audit\"}}"
+  "solver-policies|update @nolock @jq:.config.audit[\"ignore-severity\"]={\"high\":{\"apply\":\"block\"}}"
+  "solver-policies|update @nolock @jq:.config.policy.foo=true"
+  "solver-policies|update @nolock @jq:.config.policy.foo=false"
+  "solver-policies|update @nolock @env:COMPOSER_AUDIT_ABANDONED=foo"
+  "solver-policies|update @nolock @env:COMPOSER_POLICY=0"
+  "solver-policies|update @nolock @jq:.config.policy=false @env:COMPOSER_POLICY=1"
+  "solver-policies|update @nolock @env:COMPOSER_POLICY_ADVISORIES_BLOCK=0"
+  "solver-policies|update @nolock @env:COMPOSER_POLICY_MALWARE_BLOCK=off"
+  "solver-policies|update @nolock @env:COMPOSER_NO_BLOCKING=yes"
+  "solver-policies|update @nolock @jq:.config.policy[\"ignore-unreachable\"]=false"
+  "solver-policies|update @nolock @require:acme/replacer=^2 @jq:.require[\"acme/vuln\"]=\"1.1.0\""
   "rector|require nette/utils @minstab:dev"
   "symfony|require symfony/yaml"
   "symfony|require symfony/string --dev"
@@ -117,7 +176,10 @@ for fx in "${FIXTURES[@]}"; do
   [ -f "$archive" ] || { echo "SKIP $fx : pas d'instantané (tools/snapshot-packagist.sh $fx)"; continue; }
   reg="$WORK/registry-$fx"; rm -rf "$reg"; mkdir -p "$reg"
   tar -C "$reg" -xzf "$archive"
-  printf '{"packages": [], "notify-batch": "https://packagist.org/downloads/", "metadata-url": "file://%s/p2/%%package%%.json"}\n' "$reg" > "$reg/packages.json"
+  # packages.json avec l'URL absolue (Composer résout un metadata-url
+  # relatif contre la racine du système de fichiers) et les politiques de
+  # blocage déclarées comme sur Packagist.
+  write_snapshot_packages_json "$reg"
   home="$WORK/home-$fx"; rm -rf "$home"; mkdir -p "$home"
   printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$reg" > "$home/config.json"
   root_version=""; [ "$fx" = "rector" ] && root_version="dev-main"
@@ -126,7 +188,7 @@ for fx in "${FIXTURES[@]}"; do
     [ "${spec%%|*}" = "$fx" ] || continue
     n=$((n + 1))
     read -r -a sargs <<< "${spec#*|}"
-    preps=(); stubs=()
+    preps=(); stubs=(); envs=(); registry_edited=0
     while [ ${#sargs[@]} -gt 0 ]; do
       last=$(( ${#sargs[@]} - 1 ))
       case "${sargs[$last]}" in
@@ -144,6 +206,8 @@ for fx in "${FIXTURES[@]}"; do
           done ;;
         @global-allow:*) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"allow-plugins": {"%s": true}}}\n' "$reg" "${prep#@global-allow:}" > "$home/config.json" ;;
         @global-sort) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"sort-packages": true}}\n' "$reg" > "$home/config.json" ;;
+        @registry-jq:*) jq "${prep#@registry-jq:}" "$reg/packages.json" > "$reg/p.tmp" && mv "$reg/p.tmp" "$reg/packages.json"; registry_edited=1 ;;
+        @env:*) kv="${prep#@env:}"; export "${kv%%=*}=${kv#*=}"; envs+=("${kv%%=*}") ;;
       esac
     done
     for side in ref viv; do
@@ -151,7 +215,8 @@ for fx in "${FIXTURES[@]}"; do
       cp "$ROOT/fixtures/projects/$fx/composer.json" "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
-          @stub:*|@global-allow:*|@global-sort) ;;
+          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*) ;;
+          @repofilter:*) jq --arg u "file://$reg" --argjson f "${prep#@repofilter:}" '.repositories.snapshot = {"type": "composer", "url": $u, "filter": $f}' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @emptyjson) : > "$d/composer.json" ;;
           @nojson) rm -f "$d/composer.json" "$d/composer.lock" ;;
           @notype) jq 'del(.type)' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
@@ -160,6 +225,8 @@ for fx in "${FIXTURES[@]}"; do
           @corruptlock) printf '{"packages": [' > "$d/composer.lock" ;;
           @minstab:*) jq --arg s "${prep#@minstab:}" '.["minimum-stability"] = $s | .["prefer-stable"] = false' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @platform:*) kv="${prep#@platform:}"; jq --arg p "${kv%%=*}" --arg v "${kv#*=}" '.config.platform[$p] = $v' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
+          @lockfile:*) cp "$ROOT/fixtures/projects/$fx/${prep#@lockfile:}" "$d/composer.lock" ;;
+          @jq:*) jq "${prep#@jq:}" "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @nolock) rm -f "$d/composer.lock" ;;
           @badlock) printf '{"_readme": [], "content-hash": "x"}\n' > "$d/composer.lock" ;;
           @drop:*) jq --arg p "${prep#@drop:}" 'del(.require[$p])' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
@@ -172,13 +239,20 @@ for fx in "${FIXTURES[@]}"; do
       done
     done
     ref_code=0
+    # `install` : ni --no-audit (il n'audite que sur --audit) ni --no-install
+    # (refusé) ; --dry-run vérifie le lock (politiques, plateforme) sans
+    # rien télécharger.
+    extra=(--no-install --no-audit); [ "${sargs[0]}" = "install" ] && extra=(--dry-run)
     (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      composer "${sargs[@]}" --no-install --no-scripts --no-plugins --no-interaction --no-audit --quiet >"$WORK/$fx-$n.composer.log" 2>&1) || ref_code=$?
+      composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction --quiet >"$WORK/$fx-$n.composer.log" 2>&1) || ref_code=$?
     viv_code=0
     (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      "$VIVACE" "${sargs[@]}" --no-install >"$WORK/$fx-$n.vivace.log" 2>&1) || viv_code=$?
-    # Les métadonnées remplacées par @stub sont rendues à l'instantané.
+      "$VIVACE" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivace.log" 2>&1) || viv_code=$?
+    # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
+    # packages.json et l'environnement aussi.
     for f in "${stubs[@]+"${stubs[@]}"}"; do rm -f "$f"; [ -f "$f.orig" ] && mv "$f.orig" "$f"; done
+    [ "$registry_edited" = 0 ] || write_snapshot_packages_json "$reg"
+    for e in "${envs[@]+"${envs[@]}"}"; do unset "$e"; done
     label="$fx ${sargs[*]}"; [ ${#preps[@]} -gt 0 ] && label="$label (${preps[*]})"
     if [ "$ref_code" != "$viv_code" ]; then
       echo "FAIL $label : code retour composer=$ref_code vivace=$viv_code"

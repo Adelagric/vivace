@@ -256,6 +256,9 @@ impl RepositorySet {
 
 /// `Composer\DependencyResolver\Pool` : identifiants 1-based dans l'ordre
 /// de construction.
+/// Versions retirées par une liste de filtrage : nom → (version, entrées).
+pub type FilterListRemoved = BTreeMap<String, Vec<(String, Vec<crate::repository::FilterEntry>)>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct Pool {
     /// Identité du pool (`spl_object_id($pool)` chez Composer) : les caches
@@ -267,6 +270,9 @@ pub struct Pool {
     package_by_name: HashMap<String, Vec<usize>>,
     pub unacceptable_fixed_or_locked: Vec<usize>,
     pub warnings: Vec<String>,
+    /// `filterListRemovedVersions` : ce qu'une liste de filtrage a retiré
+    /// (le générateur de règles et le solveur le consultent).
+    pub filter_list_removed: FilterListRemoved,
 }
 
 impl Pool {
@@ -279,6 +285,7 @@ impl Pool {
             package_by_name: HashMap::new(),
             unacceptable_fixed_or_locked: unacceptable,
             warnings: Vec::new(),
+            filter_list_removed: BTreeMap::new(),
         };
         for idx in packages {
             pool.packages.push(idx);
@@ -362,6 +369,22 @@ impl Pool {
             }
         }
         false
+    }
+
+    /// `isFilterListRemovedPackageVersion($name, Constraint('==', $version))`.
+    pub fn is_filter_list_removed(&self, name: &str, version: &str) -> bool {
+        self.filter_list_removed
+            .get(name)
+            .is_some_and(|versions| versions.iter().any(|(v, _)| v == version))
+    }
+
+    /// Le même pool réduit à `kept` (identifiants renumérotés), les
+    /// versions retirées et les avertissements conservés.
+    pub fn with_packages(&self, kept: Vec<usize>, arena: &[Package]) -> Pool {
+        let mut pool = Pool::new(kept, self.unacceptable_fixed_or_locked.clone(), arena);
+        pool.warnings = self.warnings.clone();
+        pool.filter_list_removed = self.filter_list_removed.clone();
+        pool
     }
 
     pub fn is_unacceptable_fixed_or_locked(&self, arena_idx: usize) -> bool {

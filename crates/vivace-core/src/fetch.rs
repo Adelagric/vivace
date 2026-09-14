@@ -311,6 +311,47 @@ impl Fetcher {
     }
 
     /// GET conditionnel de métadonnées : `If-Modified-Since` quand le cache
+    /// POST `application/x-www-form-urlencoded` (l'API des avis de
+    /// sécurité : `packages[]=…`), délai de 10 s comme Composer, une
+    /// seule tentative ; 404 → `NotFound`.
+    pub async fn post_form(&self, url: &str, body: &str) -> Result<MetadataResponse> {
+        let mut req = self
+            .client
+            .post(url)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .timeout(std::time::Duration::from_secs(10))
+            .body(body.to_owned());
+        if let Ok(parsed) = reqwest::Url::parse(url) {
+            if let Some(host) = parsed.host_str() {
+                if let Some(authz) = self.auth.authorization_for(host) {
+                    req = req.header(reqwest::header::AUTHORIZATION, authz);
+                }
+            }
+        }
+        let resp = req.send().await.map_err(|e| Error::Http {
+            url: url.to_owned(),
+            message: e.to_string(),
+        })?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(MetadataResponse::NotFound);
+        }
+        let resp = resp.error_for_status().map_err(|e| Error::Http {
+            url: url.to_owned(),
+            message: e.to_string(),
+        })?;
+        let bytes = resp.bytes().await.map_err(|e| Error::Http {
+            url: url.to_owned(),
+            message: e.to_string(),
+        })?;
+        Ok(MetadataResponse::Body {
+            bytes: bytes.to_vec(),
+            last_modified: None,
+        })
+    }
+
     /// a une date, 304 → `NotModified`, 404 → `NotFound`, sinon le corps et
     /// l'en-tête `Last-Modified` ; 3 tentatives sur les erreurs de transport.
     pub async fn metadata_fetch(

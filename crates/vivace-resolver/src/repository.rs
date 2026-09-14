@@ -14,9 +14,31 @@ use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
+/// Erreur de dépôt : de transport (`TransportException` chez Composer —
+/// réseau, fichier absent, 404 là où il est fatal) ou de données (JSON,
+/// contrainte, forme d'une réponse) ; seules les premières relèvent de
+/// `ignore-unreachable`.
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
-pub struct RepoError(pub String);
+pub struct RepoError(pub String, pub RepoErrorKind);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepoErrorKind {
+    Transport,
+    Data,
+}
+
+impl RepoError {
+    pub fn data(message: impl Into<String>) -> RepoError {
+        RepoError(message.into(), RepoErrorKind::Data)
+    }
+    pub fn transport(message: impl Into<String>) -> RepoError {
+        RepoError(message.into(), RepoErrorKind::Transport)
+    }
+    pub fn is_transport(&self) -> bool {
+        self.1 == RepoErrorKind::Transport
+    }
+}
 
 /// Récupération d'une URL : `Ok(None)` = 404 (paquet inconnu, toléré par
 /// Composer en HTTP).
@@ -40,6 +62,14 @@ pub type Request = (String, Option<String>);
 
 pub trait Transport {
     fn fetch(&self, url: &str, if_modified_since: Option<&str>) -> Result<Fetched, RepoError>;
+    /// POST `application/x-www-form-urlencoded` (l'API des avis de
+    /// sécurité de Packagist) ; le corps est déjà encodé. Par défaut
+    /// refusé.
+    fn post_form(&self, url: &str, _body: &str) -> Result<Fetched, RepoError> {
+        Err(RepoError::transport(format!(
+            "POST {url}: not supported by this transport"
+        )))
+    }
     /// Plusieurs requêtes d'un coup (un lot de `loadAsyncPackages`, que
     /// Composer télécharge en parallèle) ; résultats dans l'ordre. Par
     /// défaut séquentiel.
@@ -59,20 +89,34 @@ pub type HttpFetch =
 pub type HttpFetchMany =
     std::sync::Arc<dyn Fn(&[Request]) -> Vec<Result<Fetched, String>> + Send + Sync>;
 
+/// POST d'un formulaire encodé ; `Ok(None)` sur 404.
+pub type HttpPost = std::sync::Arc<dyn Fn(&str, &str) -> Result<Fetched, String> + Send + Sync>;
+/// Les trois fermetures réseau d'un appelant : GET conditionnel, lot, POST.
+pub type HttpTransports = (HttpFetch, Option<HttpFetchMany>, Option<HttpPost>);
+
 pub struct HttpTransport {
     pub fetch: HttpFetch,
     pub fetch_many: Option<HttpFetchMany>,
+    pub post: Option<HttpPost>,
 }
 
 impl Transport for HttpTransport {
     fn fetch(&self, url: &str, if_modified_since: Option<&str>) -> Result<Fetched, RepoError> {
-        (self.fetch)(url, if_modified_since).map_err(RepoError)
+        (self.fetch)(url, if_modified_since).map_err(RepoError::transport)
+    }
+    fn post_form(&self, url: &str, body: &str) -> Result<Fetched, RepoError> {
+        match &self.post {
+            Some(p) => p(url, body).map_err(RepoError::transport),
+            None => Err(RepoError::transport(format!(
+                "POST {url}: no transport for it"
+            ))),
+        }
     }
     fn fetch_many(&self, requests: &[Request]) -> Vec<Result<Fetched, RepoError>> {
         match &self.fetch_many {
             Some(f) => f(requests)
                 .into_iter()
-                .map(|r| r.map_err(RepoError))
+                .map(|r| r.map_err(RepoError::transport))
                 .collect(),
             None => requests
                 .iter()
@@ -90,14 +134,14 @@ impl Transport for FileTransport {
     fn fetch(&self, url: &str, _if_modified_since: Option<&str>) -> Result<Fetched, RepoError> {
         let path = url
             .strip_prefix("file://")
-            .ok_or_else(|| RepoError(format!("unsupported url scheme: {url}")))?;
+            .ok_or_else(|| RepoError::transport(format!("unsupported url scheme: {url}")))?;
         std::fs::read(path)
             .map(|bytes| Fetched::Body {
                 bytes,
                 last_modified: None,
             })
             .map_err(|e| {
-                RepoError(format!(
+                RepoError::transport(format!(
                     "The \"{url}\" file could not be downloaded: Failed to open stream: {e}"
                 ))
             })
@@ -150,7 +194,191 @@ struct RootData {
     /// Dépôt sans `metadata-url` ni providers : toutes les métadonnées
     /// (`packages` + `includes`), dans l'ordre de `loadIncludes`.
     plain: Option<Vec<Value>>,
+    /// `security-advisories` de packages.json : `metadata`, `api-url`.
+    security_advisories: Option<AdvisoryConfig>,
+    /// `filter` de packages.json (`ComposerRepositoryFilterInformation`).
+    filter: Option<FilterInfo>,
 }
+
+#[derive(Debug, Clone)]
+pub struct AdvisoryConfig {
+    pub metadata: bool,
+    pub api_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterInfo {
+    pub metadata: bool,
+    /// Listes annoncées et activées, noms réservés exclus.
+    pub lists: Vec<String>,
+    pub summary_url: Option<String>,
+    pub api_url: Option<String>,
+}
+
+/// Un avis de sécurité tel que Composer le charge : partiel (`advisoryId`,
+/// `affectedVersions`) ou complet (avec `title`, `sources`, `reportedAt`).
+#[derive(Debug, Clone)]
+pub struct Advisory {
+    pub package_name: String,
+    pub advisory_id: String,
+    pub affected_versions: Constraint,
+    /// `SecurityAdvisory` : cve, sévérité, `remoteId` des sources.
+    pub complete: Option<CompleteAdvisory>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompleteAdvisory {
+    pub cve: Option<String>,
+    pub severity: Option<String>,
+    pub source_remote_ids: Vec<String>,
+}
+
+/// `PartialSecurityAdvisory::create` : contrainte analysée avec ses deux
+/// replis, complet si `title`, `sources` et `reportedAt` sont là.
+pub fn advisory_from_data(package_name: &str, data: &Value) -> Option<Advisory> {
+    let affected = data.get("affectedVersions")?.as_str()?.to_owned();
+    let advisory_id = data.get("advisoryId")?.as_str()?.to_owned();
+    let constraint = match crate::constraint::parse_constraints(&affected) {
+        Ok(c) => c.constraint,
+        Err(_) => {
+            static HEAD: OnceLock<Regex> = OnceLock::new();
+            let re = regex(&HEAD, r"(^[>=<^~]*[\d.]+).*", false);
+            let head = re
+                .captures(affected.as_bytes())
+                .ok()
+                .flatten()
+                .map(|c| crate::version::group(&c, 1).to_owned())
+                .unwrap_or_default();
+            match crate::constraint::parse_constraints(&head) {
+                Ok(c) => c.constraint,
+                Err(_) => Constraint::new(crate::constraint::Op::Eq, "0.0.0-invalid-version"),
+            }
+        }
+    };
+    let complete = if data.get("title").is_some_and(|v| !v.is_null())
+        && data.get("sources").is_some_and(|v| !v.is_null())
+        && data.get("reportedAt").is_some_and(|v| !v.is_null())
+    {
+        Some(CompleteAdvisory {
+            cve: data.get("cve").and_then(Value::as_str).map(str::to_owned),
+            severity: data
+                .get("severity")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            source_remote_ids: data
+                .get("sources")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|s| s.get("remoteId").and_then(Value::as_str))
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    } else {
+        None
+    };
+    Some(Advisory {
+        package_name: package_name.to_owned(),
+        advisory_id,
+        affected_versions: constraint,
+        complete,
+    })
+}
+
+/// Avis par nom de paquet (`[name => [advisory…]]`).
+pub type AdvisoriesByName = Vec<(String, Vec<Advisory>)>;
+/// Entrées de liste par nom de liste.
+pub type FilterEntriesByList = Vec<(String, Vec<FilterEntry>)>;
+/// Résumé des listes : liste → (nom, contrainte).
+type FilterSummary = Vec<(String, Vec<(String, String)>)>;
+
+/// `FilterListEntry` : une version signalée par une liste.
+#[derive(Debug, Clone)]
+pub struct FilterEntry {
+    pub package_name: String,
+    pub constraint: Constraint,
+    pub list_name: String,
+    pub url: Option<String>,
+    pub reason: Option<String>,
+    pub id: Option<String>,
+    pub source: Option<String>,
+}
+
+/// `FilterListEntryBuilder::build` : entrées par liste, restreintes aux
+/// noms demandés et aux versions qui les concernent.
+fn build_filter_entries(
+    raw_by_list: &Value,
+    map: &[(String, Constraint)],
+    default_package: Option<&str>,
+) -> Result<FilterEntriesByList, RepoError> {
+    let mut result: FilterEntriesByList = Vec::new();
+    let Some(lists) = raw_by_list.as_object() else {
+        return Ok(result);
+    };
+    for (list_name, entries) in lists {
+        let Some(entries) = entries.as_array() else {
+            continue;
+        };
+        for data in entries {
+            let Some(obj) = data.as_object() else {
+                continue;
+            };
+            let Some(constraint) = obj.get("constraint").and_then(Value::as_str) else {
+                continue;
+            };
+            let package = match obj.get("package").and_then(Value::as_str) {
+                Some(p) => p.to_owned(),
+                None => match default_package {
+                    Some(d) => d.to_owned(),
+                    None => continue,
+                },
+            };
+            let parsed = crate::constraint::parse_constraints(constraint)
+                .map_err(|e| RepoError::data(e.to_string()))?
+                .constraint;
+            let Some((_, wanted)) = map.iter().find(|(n, _)| *n == package) else {
+                continue;
+            };
+            if !parsed.matches(wanted) {
+                continue;
+            }
+            let entry = FilterEntry {
+                package_name: package,
+                constraint: parsed,
+                list_name: list_name.clone(),
+                url: obj.get("url").and_then(Value::as_str).map(str::to_owned),
+                reason: obj.get("reason").and_then(Value::as_str).map(str::to_owned),
+                id: obj.get("id").and_then(Value::as_str).map(str::to_owned),
+                source: obj.get("source").and_then(Value::as_str).map(str::to_owned),
+            };
+            match result.iter_mut().find(|(l, _)| l == list_name) {
+                Some((_, v)) => v.push(entry),
+                None => result.push((list_name.clone(), vec![entry])),
+            }
+        }
+    }
+    Ok(result)
+}
+
+/// `PolicyConfig::RESERVED_NAMES` + `FUTURE_RESERVED_NAMES` : des noms
+/// de liste qu'un dépôt ne peut pas annoncer ; le préfixe `ignore` est
+/// réservé aussi.
+const RESERVED_LIST_NAMES: &[&str] = &[
+    "advisories",
+    "abandoned",
+    "package",
+    "packages",
+    "license",
+    "licence",
+    "licenses",
+    "licences",
+    "support",
+    "maintenance",
+    "security",
+    "minimum-release-age",
+];
 
 pub struct ComposerRepository {
     pub url: String,
@@ -172,6 +400,13 @@ pub struct ComposerRepository {
     /// Le dépôt a déjà été signalé en mode dégradé (réseau en panne, cache
     /// utilisé) : un seul avertissement.
     degraded: std::cell::Cell<bool>,
+    /// Option `filter` de la définition du dépôt : `None` = `false` (aucune
+    /// liste), sinon les listes désactivées.
+    pub user_filter: Option<Vec<String>>,
+    /// `freshMetadataUrls` : un fichier de métadonnées a été chargé dans
+    /// ce processus (les chemins `summary-url`/`api-url` des listes sont
+    /// alors ignorés).
+    fresh_metadata: std::cell::Cell<bool>,
 }
 
 /// `empty()` PHP sur une valeur JSON.
@@ -249,17 +484,75 @@ impl ComposerRepository {
             members: std::cell::OnceCell::new(),
             cache: None,
             degraded: std::cell::Cell::new(false),
+            user_filter: Some(Vec::new()),
+            fresh_metadata: std::cell::Cell::new(false),
         })
+    }
+
+    /// `parseUserFilterConfig` de l'option `filter` du dépôt.
+    pub fn set_user_filter(&mut self, raw: Option<&Value>) -> Result<(), RepoError> {
+        self.user_filter = match raw {
+            Some(Value::Bool(false)) => None,
+            None | Some(Value::Null) | Some(Value::Bool(true)) => Some(Vec::new()),
+            Some(Value::Object(m)) => {
+                let mut disabled = Vec::new();
+                for (list, v) in m {
+                    if list.is_empty() {
+                        return Err(RepoError::data(
+                            "Repository \"filter\" keys must be non-empty list-name strings.",
+                        ));
+                    }
+                    match v {
+                        Value::Bool(true) => {}
+                        Value::Bool(false) => disabled.push(list.clone()),
+                        other => {
+                            return Err(RepoError::data(format!(
+                                "Repository \"filter\" entry for \"{list}\" must be a boolean; got {other}."
+                            )))
+                        }
+                    }
+                }
+                Some(disabled)
+            }
+            Some(_) => {
+                return Err(RepoError::data(
+                    "Repository \"filter\" must be a boolean or an object mapping advertised list names to false.",
+                ))
+            }
+        };
+        Ok(())
     }
 
     /// `loadRootServerFile`, une fois.
     fn root_data(&self) -> Result<&RootData, RepoError> {
+        self.root_data_max_age(None)
+    }
+
+    /// `loadRootServerFile($rootMaxAge)` : avec un âge maximal, un
+    /// packages.json en cache plus récent est pris sans requête (les
+    /// chemins des avis et des listes passent 600 s).
+    fn root_data_max_age(&self, max_age: Option<u64>) -> Result<&RootData, RepoError> {
         if let Some(r) = self.root.get() {
             return Ok(r);
         }
-        let data: Value = self
-            .fetch_cached(&self.packages_json_url, "packages.json")?
-            .ok_or_else(|| RepoError(format!("{} not found", self.packages_json_url)))?;
+        let fresh_enough = max_age.is_some_and(|max| {
+            self.cache
+                .as_ref()
+                .and_then(|c| c.age("packages.json"))
+                .is_some_and(|age| age <= max)
+        });
+        let data: Value = if fresh_enough {
+            self.cached("packages.json")
+                .map(|(v, _)| v)
+                .ok_or_else(|| {
+                    RepoError::transport(format!("{} not found", self.packages_json_url))
+                })?
+        } else {
+            self.fetch_cached(&self.packages_json_url, "packages.json")?
+                .ok_or_else(|| {
+                    RepoError::transport(format!("{} not found", self.packages_json_url))
+                })?
+        };
         let non_empty = |k: &str| !php_empty(data.get(k));
         let mut r = RootData::default();
         if non_empty("notify-batch") {
@@ -322,12 +615,55 @@ impl ComposerRepository {
                 }
                 r.has_available_package_list = true;
             }
+            if let Some(sa) = data.get("security-advisories").and_then(Value::as_object) {
+                let api_url = sa
+                    .get("api-url")
+                    .and_then(Value::as_str)
+                    .map(|u| self.canonicalize_url(u));
+                if api_url.is_none() && !r.has_available_package_list {
+                    return Err(RepoError::data(format!(
+                        "Invalid security advisory configuration on {}: If the repository does not provide a security-advisories.api-url then available-packages or available-package-patterns are required to be provided for performance reason.",
+                        self.repo_name()
+                    )));
+                }
+                r.security_advisories = Some(AdvisoryConfig {
+                    metadata: !php_empty(sa.get("metadata")),
+                    api_url,
+                });
+            }
+            if let Some(f) = data.get("filter").and_then(Value::as_object) {
+                let mut lists = Vec::new();
+                if let Some(ls) = f.get("lists").and_then(Value::as_object) {
+                    for (name, cfg) in ls {
+                        if cfg
+                            .as_object()
+                            .is_some_and(|c| !php_empty(c.get("enabled")))
+                            && !RESERVED_LIST_NAMES.contains(&name.as_str())
+                            && !name.starts_with("ignore")
+                        {
+                            lists.push(name.clone());
+                        }
+                    }
+                }
+                let url_of = |k: &str| {
+                    f.get(k)
+                        .and_then(Value::as_str)
+                        .filter(|u| !u.is_empty())
+                        .map(|u| self.canonicalize_url(u))
+                };
+                r.filter = Some(FilterInfo {
+                    metadata: !php_empty(f.get("metadata")),
+                    lists,
+                    summary_url: url_of("summary-url"),
+                    api_url: url_of("api-url"),
+                });
+            }
         } else if non_empty("providers-url")
             || non_empty("providers")
             || non_empty("providers-includes")
             || has_providers
         {
-            return Err(RepoError(format!(
+            return Err(RepoError::data(format!(
                 "{}: Composer v1 repository protocol (providers) is not supported by vivace",
                 self.url
             )));
@@ -401,7 +737,7 @@ impl ComposerRepository {
                 };
                 let included = self
                     .fetch_cached(&url, include)?
-                    .ok_or_else(|| RepoError(format!("{url} not found")))?;
+                    .ok_or_else(|| RepoError::transport(format!("{url} not found")))?;
                 out.extend(self.load_includes(&included)?);
             }
         }
@@ -472,7 +808,7 @@ impl ComposerRepository {
                 last_modified,
             }) => {
                 let data: Value = serde_json::from_slice(&bytes)
-                    .map_err(|e| RepoError(format!("{url}: invalid JSON: {e}")))?;
+                    .map_err(|e| RepoError::data(format!("{url}: invalid JSON: {e}")))?;
                 if let Some(cache) = &self.cache {
                     match &last_modified {
                         Some(lm) => {
@@ -524,14 +860,291 @@ impl ComposerRepository {
             return Ok(v.clone());
         }
         let Some(template) = &self.root_data()?.lazy_providers_url else {
-            return Err(RepoError("startCachedAsyncDownload only supports v2 protocol composer repos with a metadata-url".into()));
+            return Err(RepoError::data("startCachedAsyncDownload only supports v2 protocol composer repos with a metadata-url"));
         };
         let url = template.replace("%package%", &key);
         let cache_key = crate::metacache::MetadataCache::provider_key(&key);
         let data = self.fetch_cached(&url, &cache_key)?;
+        self.fresh_metadata.set(true);
         let value = Self::parse_provider(package_name, data);
         self.fetched.borrow_mut().insert(key, value.clone());
         Ok(value)
+    }
+
+    /// `getRepoName`.
+    pub fn repo_name(&self) -> String {
+        format!("composer repo ({})", self.url)
+    }
+
+    /// `hasSecurityAdvisories`.
+    pub fn has_security_advisories(&self) -> Result<bool, RepoError> {
+        Ok(self
+            .root_data_max_age(Some(600))?
+            .security_advisories
+            .as_ref()
+            .is_some_and(|c| c.metadata || c.api_url.is_some()))
+    }
+
+    /// `getSecurityAdvisories` : les avis par nom pour les contraintes
+    /// demandées — chemin métadonnées (fichiers p2, avis partiels) puis
+    /// API (POST) pour ce qui reste. `allow_partial` faux = chargement
+    /// complet exigé (erreur si un avis embarqué n'est que partiel et
+    /// qu'aucune API ne peut le compléter).
+    pub fn get_security_advisories(
+        &self,
+        map: &[(String, Constraint)],
+        allow_partial: bool,
+    ) -> Result<(Vec<String>, AdvisoriesByName), RepoError> {
+        let root = self.root_data_max_age(Some(600))?;
+        let Some(config) = &root.security_advisories else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        let mut map: Vec<(String, Constraint)> = map.to_vec();
+        if root.has_available_package_list {
+            map.retain(|(n, _)| Self::contains(root, &n.to_lowercase()));
+        }
+        let mut advisories: AdvisoriesByName = Vec::new();
+        let mut names_found: Vec<String> = Vec::new();
+        let create = |data: &Value,
+                      name: &str,
+                      wanted: &Constraint|
+         -> Result<Option<Advisory>, RepoError> {
+            let Some(adv) = advisory_from_data(name, data) else {
+                return Ok(None);
+            };
+            if !allow_partial && adv.complete.is_none() {
+                return Err(RepoError::data(format!(
+                    "Advisory for {name} could not be loaded as a full advisory from {}\n{data}",
+                    self.repo_name()
+                )));
+            }
+            if !adv.affected_versions.matches(wanted) {
+                return Ok(None);
+            }
+            Ok(Some(adv))
+        };
+        if config.metadata && (allow_partial || config.api_url.is_none()) {
+            let wanted: Vec<(String, String)> = map
+                .iter()
+                .map(|(n, _)| n.to_lowercase())
+                .filter(|n| !is_platform_package(n) && n != "__root__")
+                .map(|n| (n.clone(), n))
+                .collect();
+            self.prefetch(&wanted)?;
+            let mut done: Vec<String> = Vec::new();
+            for (name, constraint) in &map {
+                let name = name.to_lowercase();
+                if is_platform_package(&name) || name == "__root__" {
+                    continue;
+                }
+                let Some(response) = self.provider(&name, &name)? else {
+                    continue;
+                };
+                let Some(list) = response
+                    .get("security-advisories")
+                    .and_then(Value::as_array)
+                else {
+                    continue;
+                };
+                names_found.push(name.clone());
+                if !list.is_empty() {
+                    let mut found = Vec::new();
+                    for data in list {
+                        if let Some(a) = create(data, &name, constraint)? {
+                            found.push(a);
+                        }
+                    }
+                    advisories.push((name.clone(), found));
+                }
+                done.push(name);
+            }
+            map.retain(|(n, _)| !done.contains(&n.to_lowercase()));
+        }
+        if let (Some(api_url), false) = (&config.api_url, map.is_empty()) {
+            let body: Vec<String> = map
+                .iter()
+                .map(|(n, _)| format!("packages%5B%5D={}", urlencode(n)))
+                .collect();
+            let fetched = self.transport.post_form(api_url, &body.join("&"))?;
+            let bytes = match fetched {
+                Fetched::Body { bytes, .. } => bytes,
+                Fetched::NotFound => {
+                    return Err(RepoError::transport(format!(
+                        "The \"{api_url}\" file could not be downloaded (HTTP/404)"
+                    )))
+                }
+                Fetched::NotModified => Vec::new(),
+            };
+            let data: Value = serde_json::from_slice(&bytes)
+                .map_err(|e| RepoError::data(format!("{api_url}: {e}")))?;
+            let mut warned = false;
+            for (name, list) in data
+                .get("advisories")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+            {
+                let Some((_, constraint)) = map.iter().find(|(n, _)| n == name) else {
+                    if !warned {
+                        eprintln!(
+                            "{} returned names which were not requested in response to the security-advisories API. {name} was not requested but is present in the response. Requested names were: {}",
+                            self.repo_name(),
+                            map.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                        );
+                        warned = true;
+                    }
+                    continue;
+                };
+                let list = list.as_array().cloned().unwrap_or_default();
+                if !list.is_empty() {
+                    let mut found = Vec::new();
+                    for d in &list {
+                        if let Some(a) = create(d, name, constraint)? {
+                            found.push(a);
+                        }
+                    }
+                    advisories.push((name.clone(), found));
+                }
+                names_found.push(name.clone());
+            }
+        }
+        Ok((names_found, advisories))
+    }
+
+    /// `hasFilter` / `getFilterLists` : les listes annoncées, moins
+    /// celles que l'option `filter` du dépôt désactive.
+    pub fn get_filter_lists(&self) -> Result<Vec<String>, RepoError> {
+        let Some(disabled) = &self.user_filter else {
+            return Ok(Vec::new());
+        };
+        let root = self.root_data_max_age(Some(600))?;
+        // `hasFilter()` : sans `metadata`, le dépôt n'est pas un fournisseur.
+        let Some(f) = root.filter.as_ref().filter(|f| f.metadata) else {
+            return Ok(Vec::new());
+        };
+        Ok(f.lists
+            .iter()
+            .filter(|l| !disabled.contains(l))
+            .cloned()
+            .collect())
+    }
+
+    /// `getFilter` : les entrées de liste pour les contraintes demandées —
+    /// API (non portée : erreur), sinon résumé puis fichiers p2 des
+    /// candidats, sinon fichiers p2 de tous les noms.
+    pub fn get_filter(
+        &self,
+        map: &[(String, Constraint)],
+        configured_lists: &[String],
+    ) -> Result<FilterEntriesByList, RepoError> {
+        let root = self.root_data_max_age(Some(600))?;
+        let mut map: Vec<(String, Constraint)> = map.to_vec();
+        if root.has_available_package_list {
+            map.retain(|(n, _)| Self::contains(root, &n.to_lowercase()));
+        }
+        let fresh = self.fresh_metadata.get();
+        if let Some(f) = &root.filter {
+            if f.api_url.is_some() && !fresh {
+                return Err(RepoError::data(format!(
+                    "{}: a filter api-url is not supported by vivace yet",
+                    self.repo_name()
+                )));
+            }
+            if f.summary_url.is_some() && !fresh {
+                let summary = self.load_filter_summary()?;
+                let mut candidates: Vec<String> = Vec::new();
+                for list in configured_lists {
+                    let Some(packages) = summary.iter().find(|(l, _)| l == list) else {
+                        continue;
+                    };
+                    for (package, constraint) in &packages.1 {
+                        let Some((_, wanted)) = map.iter().find(|(n, _)| n == package) else {
+                            continue;
+                        };
+                        if !matches!(wanted, Constraint::MatchAll)
+                            && !crate::constraint::parse_constraints(constraint)
+                                .map_err(|e| RepoError::data(e.to_string()))?
+                                .constraint
+                                .matches(wanted)
+                        {
+                            continue;
+                        }
+                        if !candidates.contains(package) {
+                            candidates.push(package.clone());
+                        }
+                    }
+                }
+                map.retain(|(n, _)| candidates.contains(n));
+            }
+        }
+        let wanted: Vec<(String, String)> = map
+            .iter()
+            .map(|(n, _)| n.to_lowercase())
+            .filter(|n| !is_platform_package(n) && n != "__root__")
+            .map(|n| (n.clone(), n))
+            .collect();
+        self.prefetch(&wanted)?;
+        let mut filter: FilterEntriesByList = Vec::new();
+        for (name, _) in &map {
+            let name = name.to_lowercase();
+            if is_platform_package(&name) || name == "__root__" {
+                continue;
+            }
+            let Some(response) = self.provider(&name, &name)? else {
+                continue;
+            };
+            let Some(raw) = response.get("filter").filter(|v| v.is_object()) else {
+                continue;
+            };
+            for (list, entries) in build_filter_entries(raw, &map, Some(&name))? {
+                match filter.iter_mut().find(|(l, _)| *l == list) {
+                    Some((_, v)) => v.extend(entries),
+                    None => filter.push((list, entries)),
+                }
+            }
+        }
+        Ok(filter)
+    }
+
+    /// `loadFilterSummary` : `summary.json` (cache `filter-summary.json`,
+    /// requête conditionnelle) → liste → nom (minuscule) → contrainte.
+    fn load_filter_summary(&self) -> Result<FilterSummary, RepoError> {
+        let root = self.root_data_max_age(Some(600))?;
+        let Some(url) = root.filter.as_ref().and_then(|f| f.summary_url.clone()) else {
+            return Ok(Vec::new());
+        };
+        let data = self.fetch_cached(&url, "filter-summary.json")?;
+        let Some(filter) = data
+            .as_ref()
+            .and_then(|d| d.get("filter"))
+            .and_then(Value::as_object)
+        else {
+            return Err(RepoError::transport(format!(
+                "Filter summary URL {url} returned 404 for {}",
+                self.repo_name()
+            )));
+        };
+        let mut summary: FilterSummary = Vec::new();
+        for (list, packages) in filter {
+            let Some(packages) = packages.as_object() else {
+                return Err(RepoError::data(format!(
+                    "Invalid filter summary received from {}: list \"{list}\" must map to an object of package => constraint",
+                    self.repo_name()
+                )));
+            };
+            let mut entries = Vec::new();
+            for (name, constraint) in packages {
+                let Some(c) = constraint.as_str() else {
+                    return Err(RepoError::data(format!(
+                        "Invalid filter summary received from {}: list \"{list}\" entries must be strings",
+                        self.repo_name()
+                    )));
+                };
+                entries.push((name.to_lowercase(), c.to_owned()));
+            }
+            summary.push((list.clone(), entries));
+        }
+        Ok(summary)
     }
 
     fn parse_provider(package_name: &str, data: Option<Value>) -> Option<std::rc::Rc<Value>> {
@@ -580,6 +1193,7 @@ impl ComposerRepository {
             .map(|((_, _, url), c)| (url.clone(), c.as_ref().and_then(|(_, lm)| lm.clone())))
             .collect();
         let results = self.transport.fetch_many(&requests);
+        self.fresh_metadata.set(true);
         let mut settled = Vec::with_capacity(todo.len());
         for (((key, package_name, url), c), result) in todo.into_iter().zip(cached).zip(results) {
             let cache_key = crate::metacache::MetadataCache::provider_key(&key);
@@ -685,7 +1299,7 @@ impl ComposerRepository {
         for (_, config) in &to_load {
             let config = Self::with_notification_url(config, root);
             let (mut package, alias) =
-                loader::load(&config, origin, true).map_err(|e| RepoError(e.0))?;
+                loader::load(&config, origin, true).map_err(|e| RepoError::data(e.0))?;
             self.configure_package(root, &mut package);
             let idx = arena.len();
             arena.push(package);
@@ -772,11 +1386,11 @@ impl ComposerRepository {
             .to_owned();
         match data.get("version_normalized").and_then(Value::as_str) {
             None => {
-                let n = normalize(&pretty, None).map_err(|e| RepoError(e.0))?;
+                let n = normalize(&pretty, None).map_err(|e| RepoError::data(e.0))?;
                 data.insert("version_normalized".into(), Value::String(n));
             }
             Some(v) if v == DEFAULT_BRANCH_ALIAS => {
-                let n = normalize(&pretty, None).map_err(|e| RepoError(e.0))?;
+                let n = normalize(&pretty, None).map_err(|e| RepoError::data(e.0))?;
                 data.insert("version_normalized".into(), Value::String(n));
             }
             _ => {}
@@ -806,7 +1420,7 @@ impl ComposerRepository {
                     .map(|c| Self::with_notification_url(c, root))
                     .collect();
                 let ids = loader::load_packages(&configs, origin, arena, true)
-                    .map_err(|e| RepoError(e.0))?;
+                    .map_err(|e| RepoError::data(e.0))?;
                 for &id in &ids {
                     let mut p = std::mem::replace(&mut arena[id], Package::new("", "", "", origin));
                     self.configure_package(root, &mut p);
@@ -961,8 +1575,8 @@ impl ComposerRepository {
                     to_load.push(Value::Object(data));
                 }
             }
-            let ids =
-                loader::load_packages(&to_load, origin, arena, true).map_err(|e| RepoError(e.0))?;
+            let ids = loader::load_packages(&to_load, origin, arena, true)
+                .map_err(|e| RepoError::data(e.0))?;
             for &id in &ids {
                 let base = arena[id].alias_of.unwrap_or(id);
                 let mut p = std::mem::replace(&mut arena[base], Package::new("", "", "", origin));
@@ -983,24 +1597,35 @@ impl ComposerRepository {
 /// `Locker::getLockedRepository(true)` : paquets du lock (+ dev) puis les
 /// alias racine (`aliases`), chaque alias avant son paquet.
 pub fn locked_repository(lock: &Value, arena: &mut Vec<Package>) -> Result<Vec<usize>, RepoError> {
+    locked_repository_with(lock, arena, true)
+}
+
+/// `Locker::getLockedRepository($withDevReqs)`.
+pub fn locked_repository_with(
+    lock: &Value,
+    arena: &mut Vec<Package>,
+    with_dev: bool,
+) -> Result<Vec<usize>, RepoError> {
     let mut configs: Vec<Value> = lock
         .get("packages")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    match lock.get("packages-dev").and_then(Value::as_array) {
-        Some(dev) => configs.extend(dev.iter().cloned()),
-        None => {
-            return Err(RepoError(
-                "The lock file does not contain require-dev information, run install with the --no-dev option or delete it and run composer update to generate a new lock file.".into(),
-            ))
+    if with_dev {
+        match lock.get("packages-dev").and_then(Value::as_array) {
+            Some(dev) => configs.extend(dev.iter().cloned()),
+            None => {
+                return Err(RepoError::data(
+                    "The lock file does not contain require-dev information, run install with the --no-dev option or delete it and run composer update to generate a new lock file.",
+                ))
+            }
         }
     }
     if configs.is_empty() {
         return Ok(Vec::new());
     }
     let ids = loader::load_packages(&configs, Origin::Locked, arena, false)
-        .map_err(|e| RepoError(e.0))?;
+        .map_err(|e| RepoError::data(e.0))?;
     let mut out = ids.clone();
     // `$packageByName[$name] = $package` : pour un alias, les deux noms
     // pointent (alias → dernier écrit gagne : le paquet de base).
@@ -1115,6 +1740,19 @@ fn dist_urls(
         }
     }
     urls
+}
+
+/// `http_build_query` : encodage RFC 1738 d'une valeur (`/` → `%2F`).
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

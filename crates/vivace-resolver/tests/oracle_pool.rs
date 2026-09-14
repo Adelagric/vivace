@@ -21,6 +21,7 @@ const FIXTURES: &[&str] = &[
     "solver-conflict",
     "solver-aliases",
     "solver-providers",
+    "solver-policies",
 ];
 
 fn root() -> PathBuf {
@@ -114,11 +115,21 @@ fn setup(fx: &str) -> Setup {
             .success(),
         "{fx}: archive"
     );
+    // Comme harness/lib/registry.sh : les politiques de blocage déclarées
+    // comme sur Packagist (avis partiels dans les p2, résumé malware vide
+    // si l'instantané n'en a pas).
+    if !reg.join("summary.json").is_file() {
+        std::fs::write(
+            reg.join("summary.json"),
+            "{\"filter\": {\"malware\": {}}}\n",
+        )
+        .expect("summary.json");
+    }
     std::fs::write(
         reg.join("packages.json"),
         format!(
-            "{{\"packages\": [], \"notify-batch\": \"https://packagist.org/downloads/\", \"metadata-url\": \"file://{}/p2/%package%.json\"}}\n",
-            reg.display()
+            "{{\"packages\": [], \"notify-batch\": \"https://packagist.org/downloads/\", \"metadata-url\": \"file://{r}/p2/%package%.json\", \"available-package-patterns\": [\"*\"], \"security-advisories\": {{\"metadata\": true, \"api-url\": null}}, \"filter\": {{\"metadata\": true, \"lists\": {{\"malware\": {{\"enabled\": true}}}}, \"summary-url\": \"file://{r}/summary.json\"}}}}\n",
+            r = reg.display()
         ),
     )
     .expect("packages.json");
@@ -250,7 +261,7 @@ fn pool_matches_composer_on_snapshots() {
         let mut session = UpdateSession::prepare(&s.project, Some(&s.home), true)
             .unwrap_or_else(|e| panic!("{fx}: {e}"));
         let pool = session
-            .create_pool()
+            .create_filtered_pool()
             .unwrap_or_else(|e| panic!("{fx}: {e}"));
         let got: Vec<Value> = pool
             .packages

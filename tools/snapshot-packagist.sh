@@ -19,6 +19,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../harness/lib/registry.sh
+. "$ROOT/harness/lib/registry.sh"
 for fx in "$@"; do
   src="$ROOT/fixtures/projects/$fx"
   [ -f "$src/composer.json" ] || { echo "fixture $fx introuvable"; exit 1; }
@@ -33,9 +35,6 @@ for fx in "$@"; do
   # côtés du harness.
   root_version=""
   [ "$fx" = "rector" ] && root_version="dev-main"
-  # Le filtre de sécurité du pool (avis Packagist) n'est pas porté par
-  # vivace : la capture et le rejeu tournent sans, comme `--no-blocking`.
-  export COMPOSER_NO_BLOCKING=1
   # Une fixture volontairement insoluble (cas de test du solveur) est
   # acceptée : le cache est rempli avant l'échec, et le rejeu doit échouer de
   # la même façon ; elle n'a pas de lock de référence.
@@ -61,7 +60,10 @@ for fx in "$@"; do
   # un fichier absent en file://. On rejoue l'instantané jusqu'à ce que
   # Composer n'échoue plus, en écrivant un stub « aucune version » pour
   # chaque nom manquant, et on note ces noms dans SNAPSHOT.
-  printf '{"packages": [], "notify-batch": "https://packagist.org/downloads/", "metadata-url": "file://%s/p2/%%package%%.json"}\n' "$out" > "$out/packages.json"
+  # Le résumé des listes de filtrage de Packagist (liste malware), lu par
+  # `composer install` ; puis packages.json avec les politiques déclarées.
+  curl -fsSL https://repo.packagist.org/lists/all/summary.json -o "$out/summary.json" || { echo "summary.json: capture failed"; exit 1; }
+  write_snapshot_packages_json "$out"
   home="$work/home"; mkdir -p "$home"
   printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$out" > "$home/config.json"
   replay="$work/replay"; mkdir -p "$replay"; cp "$src/composer.json" "$replay/"

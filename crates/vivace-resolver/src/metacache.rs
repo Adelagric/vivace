@@ -116,6 +116,15 @@ impl MetadataCache {
         std::fs::read(self.path(key)).ok()
     }
 
+    /// `Cache::getAge` : âge du fichier en secondes.
+    pub fn age(&self, key: &str) -> Option<u64> {
+        let modified = std::fs::metadata(self.path(key)).ok()?.modified().ok()?;
+        std::time::SystemTime::now()
+            .duration_since(modified)
+            .ok()
+            .map(|d| d.as_secs())
+    }
+
     /// Écriture atomique (temp + rename), comme `Cache::write` ; un échec est
     /// silencieux (Composer continue sans cache).
     pub fn write(&self, key: &str, contents: &[u8]) {

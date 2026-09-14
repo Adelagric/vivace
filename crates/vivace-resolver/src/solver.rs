@@ -169,6 +169,23 @@ impl<'a> Solver<'a> {
         Ok(())
     }
 
+    /// `checkForFilterListRemovedLockedPackages` : un paquet verrouillé
+    /// dont la version a été retirée par une liste de filtrage.
+    fn check_for_filter_list_removed_locked_packages(&mut self, request: &Request) {
+        for idx in request.locked_packages_all() {
+            let p = &self.arena[idx];
+            if !self.pool.is_filter_list_removed(&p.name, &p.version) {
+                continue;
+            }
+            let mut problem = Problem::new();
+            problem.add_detached(Rule::generic(
+                Vec::new(),
+                Reason::LockedFilterListRemoved { package: idx },
+            ));
+            self.problems.push(problem);
+        }
+    }
+
     /// `checkForRootRequireProblems`.
     fn check_for_root_require_problems(
         &mut self,
@@ -215,6 +232,7 @@ impl<'a> Solver<'a> {
             .rules_for(request, filter)
             .map_err(|e| SolveError::Bug(e.0))?;
         self.check_for_root_require_problems(request, filter);
+        self.check_for_filter_list_removed_locked_packages(request);
         self.decisions = Decisions::new(self.pool.len());
         self.watch_graph = RuleWatchGraph::new();
         for id in self.rules.ids_in_iterator_order() {

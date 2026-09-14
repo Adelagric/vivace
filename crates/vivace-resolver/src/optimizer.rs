@@ -89,7 +89,7 @@ impl PoolOptimizer {
             .filter(|id| !self.to_remove.contains(id))
             .map(|id| pool.package_by_id(id))
             .collect();
-        Pool::new(kept, pool.unacceptable_fixed_or_locked.clone(), arena)
+        pool.with_packages(kept, arena)
     }
 
     fn expand_disjunctive(constraint: &Constraint) -> Vec<Constraint> {

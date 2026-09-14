@@ -46,6 +46,13 @@ use Composer\Repository\PlatformRepository;
 use Composer\Repository\RepositorySet;
 use Composer\Repository\RootPackageRepository;
 use Composer\Semver\Constraint\Constraint;
+use Composer\Advisory\Auditor;
+use Composer\DependencyResolver\FilterListPoolFilter;
+use Composer\DependencyResolver\SecurityAdvisoryPoolFilter;
+use Composer\FilterList\FilterListAuditor;
+use Composer\Policy\ListPolicyConfig;
+use Composer\Policy\PolicyConfig;
+use Composer\Util\Platform;
 
 $io = new NullIO();
 $composer = Factory::create($io, null, true);
@@ -113,7 +120,19 @@ if (count($allowList) > 0) {
     $request->setUpdateAllowList(array_values(array_unique(array_map('strtolower', $allowList))), $transitive);
 }
 $policy = new DefaultPolicy($package->getPreferStable(), false, null);
-$pool = $repositorySet->createPool($request, $io, null, $solve ? new PoolOptimizer($policy) : null);
+// Les politiques de blocage comme Installer::doUpdate les crée
+// (BaseCommand::createPolicyConfig : COMPOSER_NO_BLOCKING les désactive).
+$policyConfig = PolicyConfig::fromConfig($config);
+if (Platform::getBoolEnv('COMPOSER_NO_BLOCKING', false) || Platform::getBoolEnv('COMPOSER_NO_SECURITY_BLOCKING', false)) {
+    $policyConfig = $policyConfig->withBlockingDisabled();
+}
+$advisoryFilter = new SecurityAdvisoryPoolFilter(new Auditor(), $policyConfig, $io);
+$hasUpdateLists = count($policyConfig->getActiveBlockFilterLists(ListPolicyConfig::BLOCK_SCOPE_UPDATE)) > 0;
+$hasInstallLists = count($policyConfig->getActiveBlockFilterLists(ListPolicyConfig::BLOCK_SCOPE_INSTALL)) > 0;
+$listFilter = ($hasUpdateLists || $hasInstallLists)
+    ? new FilterListPoolFilter($policyConfig, new FilterListAuditor(), $composer->getRepositoryManager()->getHttpDownloader(), ListPolicyConfig::BLOCK_SCOPE_UPDATE, $composer->getRepositoryManager()->getRepositories(), $io)
+    : null;
+$pool = $repositorySet->createPool($request, $io, null, $solve ? new PoolOptimizer($policy) : null, [], null, $advisoryFilter, $listFilter);
 
 // Indexé par la clé PHP du lien (cible en général, nom nu pour les lib-* de
 // la plateforme, numérique pour les liens self.version d'un alias) : c'est

@@ -1,0 +1,10 @@
+{
+    "name": "vivace/solver-policies",
+    "description": "Solver case: pool policies \u2014 acme/vuln 1.1.0 has a security advisory, acme/bad 1.1.0 is on the malware list, acme/abandoned is abandoned",
+    "require": {
+        "acme/vuln": "^1.0",
+        "acme/bad": "^1.0",
+        "acme/abandoned": "^1.0",
+        "acme/lib": "^2.0 || ^3.0"
+    }
+}

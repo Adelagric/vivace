@@ -61,7 +61,7 @@ resolver_twin() {
       base="${name#semver-}"
       cands="vendor/composer/semver/src/$base vendor/composer/semver/src/Constraint/$base" ;;
     *)
-      cands="src/Composer/DependencyResolver/$name src/Composer/Repository/$name src/Composer/Package/$name src/Composer/Package/Loader/$name src/Composer/Package/Version/$name src/Composer/Filter/PlatformRequirementFilter/$name vendor/composer/metadata-minifier/src/$name" ;;
+      cands="src/Composer/DependencyResolver/$name src/Composer/Repository/$name src/Composer/Package/$name src/Composer/Package/Loader/$name src/Composer/Package/Version/$name src/Composer/Filter/PlatformRequirementFilter/$name vendor/composer/metadata-minifier/src/$name src/Composer/Policy/$name src/Composer/Advisory/$name src/Composer/FilterList/$name src/Composer/FilterList/FilterListProvider/$name" ;;
   esac
   for c in $cands; do
     if php -r 'exit(@file_get_contents("phar://'"$TMP"'/composer.phar/'"$c"'") === false ? 1 : 0);' 2>/dev/null; then
@@ -74,12 +74,13 @@ resolver_twin() {
 version=$(php "$TMP/composer.phar" --version --no-ansi 2>/dev/null | sed -n 's/^Composer version \([^ ]*\).*/\1/p')
 echo "Composer $version vs docs/reference (2.10.3)"
 status=0; checked=0
-for f in "$ROOT"/docs/reference/*.php "$ROOT"/docs/reference/resolver/*.php "$ROOT"/docs/reference/resolver/Operation/*.php; do
+for f in "$ROOT"/docs/reference/*.php "$ROOT"/docs/reference/resolver/*.php "$ROOT"/docs/reference/resolver/Operation/*.php "$ROOT"/docs/reference/policy/*.php; do
   name=$(basename "$f")
   [ -s "$f" ] || continue
   case "$f" in
     */docs/reference/resolver/Operation/*) inner=$(resolver_twin "Operation/$name") ;;
     */docs/reference/resolver/*) inner=$(resolver_twin "$name") ;;
+    */docs/reference/policy/*) inner=$(resolver_twin "$name") ;;
     *) inner=$(twin "$name") ;;
   esac
   [ -n "$inner" ] || { echo "??   $name : pas de jumeau connu (à ajouter dans twin())"; status=1; continue; }

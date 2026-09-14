@@ -83,7 +83,17 @@ Composer computes on the same data (`tools/oracle-pool.php`).
 Repositories: `composer` type only, Packagist v2 protocol and plain
 `packages.json` files, local or over HTTPS. Not yet: `--with`,
 `vcs`/`path` repositories, Composer's explanation when a set is unsolvable,
-`--dry-run`, `--minimal-changes`.
+`--dry-run` for `update`/`require`/`remove`, `--minimal-changes`.
+
+Composer 2.10's dependency policies are applied the same way: versions
+covered by a security advisory or flagged on Packagist's malware list are
+removed from the pool before resolution (`config.policy`, the legacy
+`config.audit` keys, `COMPOSER_POLICY*`, `--no-blocking`), and `install`
+refuses a lock that pins a flagged version. Advisories and list entries
+come from the same metadata files Composer reads, so the frozen snapshots
+carry them and the parity checks run with the policies on. Custom policy
+lists with sources and a repository `filter.api-url` are not supported
+(refused when reached).
 
 `vivace require` and `vivace remove` edit `composer.json` the way Composer
 does — a port of `JsonManipulator`, which rewrites only the affected keys

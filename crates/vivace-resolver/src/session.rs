@@ -13,7 +13,7 @@ use crate::platform_filter::PlatformRequirementFilter;
 use crate::policy::DefaultPolicy;
 use crate::pool::{OrderedMap, Pool, PoolError, Repository, RepositorySet, Request};
 use crate::repository::{
-    locked_repository, ComposerRepository, FileTransport, HttpFetch, HttpFetchMany, HttpTransport,
+    locked_repository, ComposerRepository, FileTransport, HttpTransport, HttpTransports,
 };
 use crate::root::RootPackage;
 use crate::solver::{SolveError, Solver};
@@ -184,6 +184,8 @@ pub struct MergedConfig {
     pub repositories: Vec<RepoConfig>,
     /// `config.platform` (la dernière définition remplace la précédente).
     pub platform: Map<String, Value>,
+    /// `config.policy` et `config.audit` fusionnés (`Config::merge`).
+    pub policy: crate::policy_config::RawPolicyConfig,
 }
 
 impl MergedConfig {
@@ -199,6 +201,7 @@ impl MergedConfig {
                 definition: serde_json::json!({"type": "composer", "url": "https://repo.packagist.org"}),
             }],
             platform: Map::new(),
+            policy: crate::policy_config::RawPolicyConfig::default(),
         };
         if let Some(home) = composer_home {
             let global = home.join("config.json");
@@ -223,6 +226,9 @@ impl MergedConfig {
         if let Some(repos) = config.get("repositories") {
             merge_repositories(&mut self.repositories, repos);
         }
+        if let Some(cfg) = config.get("config").and_then(Value::as_object) {
+            self.policy.merge(cfg);
+        }
     }
 }
 
@@ -244,6 +250,8 @@ pub struct UpdateOptions {
     /// `composer update a/b c/*` : motifs, en minuscules et dédoublonnés.
     pub allow_list: Vec<String>,
     pub transitive: Option<crate::pool::UpdateMode>,
+    /// `--no-blocking` / `--no-security-blocking`.
+    pub no_blocking: bool,
 }
 
 impl UpdateOptions {
@@ -259,6 +267,7 @@ impl UpdateOptions {
         UpdateOptions {
             allow_list,
             transitive: Some(transitive),
+            no_blocking: false,
         }
     }
 }
@@ -282,6 +291,8 @@ pub struct UpdateSession {
     /// `PHP_MAJOR.MINOR.RELEASE` du PHP sondé (règle `ext-*` du
     /// `VersionSelector`).
     pub php_version: String,
+    /// Les politiques de blocage du pool (`createPolicyConfig`).
+    pub policy_config: crate::policy_config::PolicyConfig,
 }
 
 impl UpdateSession {
@@ -298,7 +309,7 @@ impl UpdateSession {
         project_dir: &Path,
         composer_home: Option<&Path>,
         dev_mode: bool,
-        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
+        http: Option<HttpTransports>,
     ) -> Result<UpdateSession, SessionError> {
         Self::prepare_full(project_dir, composer_home, dev_mode, http, None)
     }
@@ -309,7 +320,7 @@ impl UpdateSession {
         project_dir: &Path,
         composer_home: Option<&Path>,
         dev_mode: bool,
-        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
+        http: Option<HttpTransports>,
         cache_repo_dir: Option<&Path>,
     ) -> Result<UpdateSession, SessionError> {
         Self::prepare_update(
@@ -328,7 +339,7 @@ impl UpdateSession {
         project_dir: &Path,
         composer_home: Option<&Path>,
         dev_mode: bool,
-        http: Option<(HttpFetch, Option<HttpFetchMany>)>,
+        http: Option<HttpTransports>,
         cache_repo_dir: Option<&Path>,
         options: &UpdateOptions,
     ) -> Result<UpdateSession, SessionError> {
@@ -339,6 +350,11 @@ impl UpdateSession {
         let manifest: Value = serde_json::from_str(&manifest_text)
             .map_err(|e| SessionError::new(format!("{}: {e}", manifest_path.display())))?;
         let config = MergedConfig::load(&manifest, composer_home)?;
+        let mut policy_config = crate::policy_config::PolicyConfig::from_raw(&config.policy)
+            .map_err(|e| SessionError::new(e.0))?;
+        policy_config
+            .apply_no_blocking(options.no_blocking)
+            .map_err(|e| SessionError::new(e.0))?;
         let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
         let probed = probe().map_err(|e| SessionError::new(e.0))?;
         // `PHP_MAJOR_VERSION.PHP_MINOR_VERSION.PHP_RELEASE_VERSION` du PHP
@@ -508,6 +524,7 @@ impl UpdateSession {
             prefer_stable: false,
             prefer_lowest: false,
             php_version,
+            policy_config,
         })
     }
 
@@ -688,7 +705,7 @@ impl UpdateSession {
             }
         };
         let mut policy = self.policy();
-        let pool = self.create_pool()?;
+        let pool = self.create_filtered_pool()?;
         for w in &pool.warnings {
             eprintln!("Warning: {w}");
         }
@@ -781,11 +798,50 @@ impl UpdateSession {
         &mut self,
         policy: &mut DefaultPolicy,
     ) -> Result<Pool, SessionError> {
-        let pool = self.create_pool()?;
+        let pool = self.create_filtered_pool()?;
         if std::env::var("COMPOSER_POOL_OPTIMIZER").as_deref() == Ok("0") {
             return Ok(pool);
         }
         Ok(PoolOptimizer::new().optimize(&self.request, &pool, &self.arena, policy))
+    }
+
+    /// `buildPool` jusqu'aux filtres de politique (avis, listes), sans
+    /// l'optimiseur ; leurs avertissements vont dans `pool.warnings`.
+    pub fn create_filtered_pool(&mut self) -> Result<Pool, SessionError> {
+        let mut pool = self.create_pool()?;
+        let before = pool.len();
+        let mut warnings = Vec::new();
+        pool = crate::pool_filters::security_advisory_filter(
+            pool,
+            &self.arena,
+            &self.set.repositories,
+            &self.request,
+            &self.policy_config,
+            &mut warnings,
+        )
+        .map_err(|e| SessionError::new(e.0))?;
+        pool = crate::pool_filters::filter_list_filter(
+            pool,
+            &self.arena,
+            &self.set.repositories,
+            &self.request,
+            &self.policy_config,
+            "update",
+            &mut warnings,
+        )
+        .map_err(|e| SessionError::new(e.0))?;
+        pool.warnings.extend(warnings);
+        if std::env::var_os("VIVACE_TRACE").is_some() {
+            eprintln!(
+                "trace: policy filters      {before} → {} package versions ({} removed by lists)",
+                pool.len(),
+                pool.filter_list_removed
+                    .values()
+                    .map(Vec::len)
+                    .sum::<usize>()
+            );
+        }
+        Ok(pool)
     }
 
     /// `Solver::solve` sur ce pool ; rend la transaction et les décisions
@@ -811,11 +867,80 @@ impl UpdateSession {
     }
 }
 
+/// Le passage du pool du lock par le filtre de listes en portée `install`
+/// (`Installer::doInstall` → `createFilterListPoolFilter(BLOCK_SCOPE_INSTALL)`) :
+/// les problèmes de Composer pour les versions verrouillées retirées, dans
+/// l'ordre du lock ; vide quand rien ne bloque. Les avertissements
+/// (dépôts injoignables ignorés) sont rendus à part.
+pub fn install_policy_problems(
+    project_dir: &Path,
+    composer_home: Option<&Path>,
+    http: Option<HttpTransports>,
+    cache_repo_dir: Option<&Path>,
+    with_dev: bool,
+    no_blocking: bool,
+) -> Result<(Vec<String>, Vec<String>), SessionError> {
+    let manifest_text = std::fs::read_to_string(project_dir.join("composer.json"))
+        .map_err(|e| SessionError::new(format!("composer.json: {e}")))?;
+    let manifest: Value = serde_json::from_str(&manifest_text)
+        .map_err(|e| SessionError::new(format!("composer.json: {e}")))?;
+    let config = MergedConfig::load(&manifest, composer_home)?;
+    let mut policy = crate::policy_config::PolicyConfig::from_raw(&config.policy)
+        .map_err(|e| SessionError::new(e.0))?;
+    policy
+        .apply_no_blocking(no_blocking)
+        .map_err(|e| SessionError::new(e.0))?;
+    if !policy.malware_blocks("install") {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let lock_text = std::fs::read_to_string(project_dir.join("composer.lock"))
+        .map_err(|e| SessionError::new(format!("composer.lock: {e}")))?;
+    let lock: Value = serde_json::from_str(&lock_text)
+        .map_err(|e| SessionError::new(format!("composer.lock: {e}")))?;
+    // Seuls les dépôts `composer` portent des listes ; les autres types
+    // (que `install` accepte par ailleurs) sont laissés de côté ici.
+    let mut repositories: Vec<Repository> = Vec::new();
+    for repo in &config.repositories {
+        if repo.definition.get("type").and_then(Value::as_str) != Some("composer") {
+            continue;
+        }
+        // Le constructeur ne fait aucune entrée-sortie : une erreur ici est
+        // une erreur de configuration, fatale comme chez Composer.
+        repositories.push(open_repository(repo, http.as_ref(), cache_repo_dir)?);
+    }
+    let mut arena: Vec<Package> = Vec::new();
+    let locked = crate::repository::locked_repository_with(&lock, &mut arena, with_dev)
+        .map_err(|e| SessionError::new(e.0))?;
+    let mut request = Request::new(Some(locked.clone()));
+    for &idx in &locked {
+        request.fix_locked_package(idx);
+    }
+    let pool = Pool::new(locked.clone(), Vec::new(), &arena);
+    let mut warnings = Vec::new();
+    let pool = crate::pool_filters::filter_list_filter(
+        pool,
+        &arena,
+        &repositories,
+        &request,
+        &policy,
+        "install",
+        &mut warnings,
+    )
+    .map_err(|e| SessionError::new(e.0))?;
+    let problems: Vec<String> = locked
+        .iter()
+        .map(|&idx| &arena[idx])
+        .filter(|p| pool.is_filter_list_removed(&p.name, &p.version))
+        .map(|p| crate::pool_filters::locked_removed_problem_text(&pool, p))
+        .collect();
+    Ok((problems, warnings))
+}
+
 /// `RepositoryManager::createRepository` restreint aux dépôts `composer`
 /// joignables en `file://` (les autres types arrivent avec R3).
 fn open_repository(
     repo: &RepoConfig,
-    http: Option<&(HttpFetch, Option<HttpFetchMany>)>,
+    http: Option<&HttpTransports>,
     cache_repo_dir: Option<&Path>,
 ) -> Result<Repository, SessionError> {
     let def = &repo.definition;
@@ -847,6 +972,7 @@ fn open_repository(
             Some(h) => Box::new(HttpTransport {
                 fetch: h.0.clone(),
                 fetch_many: h.1.clone(),
+                post: h.2.clone(),
             }),
             None => {
                 return Err(SessionError::new(format!(
@@ -863,6 +989,8 @@ fn open_repository(
     if let Some(options) = def.get("options") {
         repo.options = options.clone();
     }
+    repo.set_user_filter(def.get("filter"))
+        .map_err(|e| SessionError::new(e.0))?;
     if let Some(dir) = cache_repo_dir {
         repo.cache = Some(crate::metacache::MetadataCache::new(dir, &repo.url));
     }

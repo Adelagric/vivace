@@ -384,13 +384,13 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     // `requireComposer()` + le dépôt composite [plateforme, dépôts] : la
     // session de résolution fournit les deux, sur le manifeste courant.
     let home = vivace_core::fetch::composer_home();
-    let (http, http_many) = http_transport(&project, args.offline)?;
+    let http = http_transport(&project, args.offline)?;
     let cache_repo_dir = vivace_core::fetch::composer_cache_dir().join("repo");
     let session = UpdateSession::prepare_update(
         &project,
         home.as_deref(),
         true,
-        Some((http, Some(http_many))),
+        Some(http),
         Some(&cache_repo_dir),
         &UpdateOptions::default(),
     );
@@ -592,7 +592,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     if !lock_enabled && !args.no_install {
         anyhow::bail!("config.lock is false: `vivace require` can only install from a written composer.lock (use --no-install)");
     }
-    let options = if !first_require && locked {
+    let mut options = if !first_require && locked {
         UpdateOptions::partial(
             &names,
             transitive.unwrap_or(vivace_resolver::pool::UpdateMode::OnlyListed),
@@ -600,6 +600,7 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     } else {
         UpdateOptions::default()
     };
+    options.no_blocking = args.no_blocking || args.no_security_blocking;
     let update_args = UpdateArgs {
         packages: Vec::new(),
         with_dependencies: false,
@@ -612,6 +613,8 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         no_scripts: args.no_scripts,
         no_plugins: args.no_plugins,
         no_audit: args.no_audit,
+        no_blocking: args.no_blocking,
+        no_security_blocking: args.no_security_blocking,
         prefer_stable: false,
         prefer_lowest: false,
         ignore_platform_reqs: args.ignore_platform_reqs,

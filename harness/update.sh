@@ -11,11 +11,10 @@
 #
 # Usage : harness/update.sh [fixture...]
 set -euo pipefail
-# Le filtre de sécurité du pool n'est pas porté : Composer tourne sans lui
-# (équivalent de --no-blocking), et l'instantané ne contient pas d'avis.
-export COMPOSER_NO_BLOCKING=1
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/registry.sh
+. "$ROOT/harness/lib/registry.sh"
 VIVACE="$ROOT/target/release/vivace"
 WORK="${VIVACE_HARNESS_DIR:-/tmp/vivace-harness}/update"
 FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal)
@@ -37,9 +36,10 @@ for fx in "${FIXTURES[@]}"; do
   [ -f "$archive" ] || { echo "SKIP $fx : pas d'instantané (tools/snapshot-packagist.sh $fx)"; continue; }
   reg="$WORK/registry-$fx"; rm -rf "$reg"; mkdir -p "$reg"
   tar -C "$reg" -xzf "$archive"
-  # packages.json avec l'URL absolue : Composer résout un metadata-url relatif
-  # contre la racine du système de fichiers, pas contre le dépôt.
-  printf '{"packages": [], "notify-batch": "https://packagist.org/downloads/", "metadata-url": "file://%s/p2/%%package%%.json"}\n' "$reg" > "$reg/packages.json"
+  # packages.json avec l'URL absolue (Composer résout un metadata-url
+  # relatif contre la racine du système de fichiers) et les politiques de
+  # blocage déclarées comme sur Packagist.
+  write_snapshot_packages_json "$reg"
   home="$WORK/home-$fx"; rm -rf "$home"; mkdir -p "$home"
   printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$reg" > "$home/config.json"
   root_version=""; [ "$fx" = "rector" ] && root_version="dev-main"

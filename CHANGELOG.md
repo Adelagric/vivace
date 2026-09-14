@@ -7,6 +7,26 @@ byte-identical-output promise are the public API.
 ## [Unreleased]
 
 ### Added
+- **Dependency policies** (Composer 2.10): the pool filters that remove
+  versions covered by a security advisory (`policy.advisories`, default
+  on), versions on a filter list — Packagist's malware list
+  (`policy.malware`, default on, `block-scope`) — and abandoned packages
+  (`policy.abandoned`, default off) are ported, with the legacy
+  `config.audit` keys, the global/project merge, `COMPOSER_POLICY`,
+  `COMPOSER_POLICY_*_BLOCK`, `COMPOSER_NO_BLOCKING` and `--no-blocking`;
+  `ignore`/`ignore-id`/`ignore-severity`/`ignore-source` rules, the
+  `ignore-unreachable` behaviour, and the security-advisories API call
+  when a rule needs complete advisories. A locked version flagged by a
+  list is a resolution problem (exit 2) as in Composer, and `install`
+  refuses a lock that pins one, with Composer's message. Until now vivace
+  behaved as if `--no-blocking` were always set. The snapshots carry the
+  advisories Packagist embeds in its metadata, so the resolver oracle and
+  the harnesses now run with the policies on (5 fixtures, pools reduced by
+  2-23 %, locks unchanged) plus a synthetic `solver-policies` fixture (30
+  cases: advisory, malware, abandoned, every config knob, locked flagged
+  version, install; 54 with the review's additions).
+- `install --dry-run`: the checks (policies, scope, platform) without
+  writing anything; `install --no-install` is refused as in Composer.
 - **`vivace require`**: a port of `RequireCommand` — `vendor/name`,
   `vendor/name:^1.0`, `vendor/name ^1.0`, `--dev`, `--fixed`,
   `--no-update`, `--no-install`, `-w`/`-W`, `--sort-packages`,

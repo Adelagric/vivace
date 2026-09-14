@@ -176,6 +176,15 @@ impl<'a> RuleSetGenerator<'a> {
         filter: &PlatformRequirementFilter,
     ) -> Result<(), RulesError> {
         for &fixed in &request.fixed_packages {
+            // Un verrouillé retiré par une liste de filtrage n'a pas de
+            // règle : le solveur en fera un problème.
+            if request.is_locked_package(fixed)
+                && self
+                    .pool
+                    .is_filter_list_removed(&self.arena[fixed].name, &self.arena[fixed].version)
+            {
+                continue;
+            }
             let Some(id) = self.pool.id_of(fixed) else {
                 if self.pool.is_unacceptable_fixed_or_locked(fixed) {
                     continue;
