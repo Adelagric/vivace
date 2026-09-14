@@ -54,13 +54,60 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<()> {
                 std::fs::copy(&from, &to).map_err(Error::io(&to))?;
             }
         } else {
-            // Hardlink first (free); copy if the FS refuses (other volume).
-            if std::fs::hard_link(&from, &to).is_err() {
-                std::fs::copy(&from, &to).map_err(Error::io(&to))?;
+            // Linux: try a reflink first (FICLONE, a CoW copy like clonefile
+            // on APFS) — independent of the store so safer than a hardlink,
+            // and a single syscall on btrfs/xfs. On ext4 (no reflink) the
+            // ioctl fails cleanly and we fall back to the hardlink.
+            #[cfg(target_os = "linux")]
+            let done = reflink(&from, &to);
+            #[cfg(not(target_os = "linux"))]
+            let done = false;
+            if !done {
+                // Hardlink first (free); copy if the FS refuses (other volume).
+                if std::fs::hard_link(&from, &to).is_err() {
+                    std::fs::copy(&from, &to).map_err(Error::io(&to))?;
+                }
             }
         }
     }
     Ok(())
+}
+
+/// Reflink (copy-on-write) `from` → `to` via the FICLONE ioctl. Creates an
+/// independent inode sharing the extents: modifying the clone does not touch
+/// the store. The new file's mode is re-applied from the source (FICLONE
+/// does not copy permissions), to preserve the executable bit of binaries.
+/// Returns false (without leaving a partial file) if the FS does not support
+/// reflink — the caller then falls back to the hardlink.
+#[cfg(target_os = "linux")]
+fn reflink(from: &Path, to: &Path) -> bool {
+    use std::os::unix::io::AsRawFd as _;
+    // FICLONE = _IOW(0x94, 9, int) = 0x40049409.
+    const FICLONE: libc::c_ulong = 0x4004_9409;
+    let Ok(src) = std::fs::File::open(from) else {
+        return false;
+    };
+    let dst = match std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(to)
+    {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    // SAFETY: FICLONE ioctl on two valid, open descriptors; no shared
+    // memory. The kernel reads src, writes dst.
+    let rc = unsafe { libc::ioctl(dst.as_raw_fd(), FICLONE, src.as_raw_fd()) };
+    if rc != 0 {
+        drop(dst);
+        let _ = std::fs::remove_file(to); // empty file created by the open
+        return false;
+    }
+    if let Ok(meta) = std::fs::metadata(from) {
+        let _ = std::fs::set_permissions(to, meta.permissions());
+    }
+    true
 }
 
 /// Windows: creating symlinks requires a privilege (Developer Mode or

@@ -195,26 +195,43 @@ pub async fn install(
     }
 
     // Layout: remove the old version, then clone from the store.
-    for p in &to_install {
-        let (Some(pkg_root), Some(dest)) = (layout.package_root(p.name()), layout.abs(p.name()))
-        else {
-            continue;
-        };
-        // Always start again from an empty package root (target-dir included).
-        if pkg_root.exists() {
-            std::fs::remove_dir_all(&pkg_root).map_err(Error::io(&pkg_root))?;
-        }
-        let src = store.entry_path(p.name(), p.version(), p.dist_reference());
-        crate::clone::clone_tree(&src, &dest)?;
-        report.installed += 1;
-    }
+    // Packages land in disjoint directories → fan-out on rayon. Each package
+    // stays atomic (remove-before-clone); only the inter-package order
+    // changes, which affects nothing but mtimes.
+    let installed: usize = {
+        use rayon::prelude::*;
+        to_install
+            .par_iter()
+            .map(|p| -> Result<bool> {
+                let (Some(pkg_root), Some(dest)) =
+                    (layout.package_root(p.name()), layout.abs(p.name()))
+                else {
+                    return Ok(false);
+                };
+                // Always start again from an empty package root (target-dir included).
+                if pkg_root.exists() {
+                    std::fs::remove_dir_all(&pkg_root).map_err(Error::io(&pkg_root))?;
+                }
+                let src = store.entry_path(p.name(), p.version(), p.dist_reference());
+                crate::clone::clone_tree(&src, &dest)?;
+                Ok(true)
+            })
+            .collect::<Result<Vec<bool>>>()?
+            .into_iter()
+            .filter(|placed| *placed)
+            .count()
+    };
+    report.installed += installed;
 
-    // Bin proxies: rebuilt for every wanted package, then purge of the
-    // orphaned proxies (removed packages). The `.bat` follows the resolved
-    // bin-compat (`full`, or `auto` on Windows/WSL), like Composer's
-    // BinaryInstaller — a plain Linux/macOS install writes no `.bat`.
+    // Bin proxies: rebuilt for the packages actually (re)placed — the
+    // proxies of unchanged packages are already in place and deterministic,
+    // so rewriting them for all of `wanted` is pure busywork on a no-op
+    // `install`. The purge of orphaned proxies (removed packages) stays on
+    // `wanted`. The `.bat` follows the resolved bin-compat (`full`, or
+    // `auto` on Windows/WSL), like Composer's BinaryInstaller — a plain
+    // Linux/macOS install writes no `.bat`.
     let bin_compat = crate::binproxy::resolve_bin_compat(root_manifest)?;
-    for p in &wanted {
+    for p in &to_install {
         let bins = p.bins();
         if let (false, Some(dir)) = (bins.is_empty(), layout.abs(p.name())) {
             crate::binproxy::install_binaries(&vendor, &dir, &bins, bin_compat)?;

@@ -63,10 +63,29 @@ fn root_strip(archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, dest: &Path
     Ok(usize::from(top.len() == 1 && top.values().all(|d| *d)))
 }
 
+/// Memoized `create_dir_all`: avoids one `create_dir_all` (hence one stat +
+/// N syscalls) per zip entry when hundreds of files share the same parent
+/// directory. Inserts the path and its newly created ancestors.
+fn ensure_dir(p: &Path, made: &mut std::collections::HashSet<PathBuf>) -> Result<()> {
+    if made.contains(p) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(p).map_err(Error::io(p))?;
+    let mut cur = Some(p);
+    while let Some(c) = cur {
+        if !made.insert(c.to_path_buf()) {
+            break; // ancestor already known: so is the rest
+        }
+        cur = c.parent();
+    }
+    Ok(())
+}
+
 pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(Error::zip(dest))?;
-    std::fs::create_dir_all(dest).map_err(Error::io(dest))?;
+    let mut made: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    ensure_dir(dest, &mut made)?;
     let strip = root_strip(&mut archive, dest)?;
 
     let mut total: u64 = 0;
@@ -94,13 +113,13 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
         let is_symlink = mode.is_some_and(|m| m & S_IFMT == S_IFLNK);
 
         if entry.is_dir() {
-            std::fs::create_dir_all(&out).map_err(Error::io(&out))?;
+            ensure_dir(&out, &mut made)?;
         } else if is_symlink {
             let mut target = String::new();
             entry.read_to_string(&mut target).map_err(Error::io(&out))?;
             check_symlink_target(&stripped, &target, dest)?;
             if let Some(p) = out.parent() {
-                std::fs::create_dir_all(p).map_err(Error::io(p))?;
+                ensure_dir(p, &mut made)?;
             }
             let _ = std::fs::remove_file(&out);
             #[cfg(unix)]
@@ -113,7 +132,7 @@ pub fn extract_zip(zip_bytes: &[u8], dest: &Path) -> Result<()> {
             std::fs::write(&out, target.as_bytes()).map_err(Error::io(&out))?;
         } else {
             if let Some(p) = out.parent() {
-                std::fs::create_dir_all(p).map_err(Error::io(p))?;
+                ensure_dir(p, &mut made)?;
             }
             let mut buf = Vec::with_capacity(entry.size().min(MAX_UNCOMPRESSED) as usize);
             entry.read_to_end(&mut buf).map_err(Error::io(&out))?;
