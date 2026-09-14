@@ -60,7 +60,7 @@ mainteneur). Une fois publiés, `cargo install vivace` et l'embarquement
 | v0.3 drupal/core-composer-scaffold natif | publié (v0.3.0, 2026-09-11) | tests/oracle_scaffold.rs (15 cas, arbres entiers), fixture drupal (projet entier 0 diff, boot `vendor/bin/dr`), harness/transitions.sh |
 
 | v0.4 résolveur (option A : port du solveur) | publié (v0.4.0, 2026-09-12) : `vivace update` écrit le lock de Composer à l'octet (pool, séquence de décisions du solveur, opérations, lock) ; cache de métadonnées au format de Composer ; mises à jour partielles | docs/plans/v0.4-resolver.md, tests/oracle_pool.rs, harness/update.sh |
-| v0.5 require/remove | P1 partielles, P2 `JsonManipulator` (12 102 + 725 scénarios vs phar), P3 `remove`, P4 `VersionSelector` (902 noms vs phar), P5 `require`, P7 politiques de blocage (30 cas) faits ; reste P6 (0.5.0) | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
+| v0.5 require/remove/politiques | prêt à publier (0.5.0 dans Cargo.toml et CHANGELOG, 2026-09-14 ; tag et crates.io à la main du mainteneur) : partielles, `JsonManipulator` (12 102 + 725 scénarios vs phar), `remove`, `VersionSelector` (902 noms), `require`, politiques de blocage (54 cas) ; `harness/steps.sh` 128 cas | docs/plans/v0.5-require-remove.md, tests/oracle_json_manipulator.rs, harness/steps.sh |
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
