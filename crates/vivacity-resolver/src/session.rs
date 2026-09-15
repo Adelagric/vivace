@@ -253,6 +253,9 @@ pub struct UpdateOptions {
     pub transitive: Option<crate::pool::UpdateMode>,
     /// `--no-blocking` / `--no-security-blocking`.
     pub no_blocking: bool,
+    /// Dry run of `require`/`remove`: the root package is patched in
+    /// memory, composer.json is not touched.
+    pub root_patch: Option<crate::root::RootPatch>,
 }
 
 impl UpdateOptions {
@@ -268,7 +271,7 @@ impl UpdateOptions {
         UpdateOptions {
             allow_list,
             transitive: Some(transitive),
-            no_blocking: false,
+            ..Default::default()
         }
     }
 }
@@ -364,7 +367,12 @@ impl UpdateSession {
         policy_config
             .apply_no_blocking(options.no_blocking)
             .map_err(|e| SessionError::new(e.0))?;
-        let root = RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
+        let mut root =
+            RootPackage::load(&manifest, project_dir).map_err(|e| SessionError::new(e.0))?;
+        if let Some(patch) = &options.root_patch {
+            root.apply_patch(patch)
+                .map_err(|e| SessionError::new(e.0))?;
+        }
         let probed = probe().map_err(|e| SessionError::new(e.0))?;
         // `PHP_MAJOR_VERSION.PHP_MINOR_VERSION.PHP_RELEASE_VERSION` of the
         // actual PHP (no `config.platform.php` here): the first three

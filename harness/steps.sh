@@ -38,6 +38,9 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @registry-jq:expr       applique l'expression jq au packages.json de l'instantané (le cas seulement)
 #   @repofilter:json        redéclare le dépôt `snapshot` dans le manifeste avec cette option `filter`
 #   @env:NAME=VALUE         variable d'environnement des deux côtés (le cas seulement)
+#   @dry-install            n'ajoute pas --no-install : la phase d'installation
+#                           d'un --dry-run (« Installing dependencies… »,
+#                           « Package operations », « - Installing … ») est comparée
 #   @nostderr               ne compare pas la sortie d'erreur. Par défaut elle
 #                           l'est, de la ligne d'ancrage (« Lock file operations »,
 #                           « Nothing to modify in lock file », « Installing
@@ -178,6 +181,29 @@ STEPS=(
   "rector|require symfony/finder"
   "drupal|require drupal/core-project-message"
   "drupal|require composer/installers"
+  "laravel|update --dry-run"
+  "laravel|update --dry-run @nolock"
+  "laravel|update laravel/pint --dry-run"
+  "laravel|update --dry-run @installed:laravel/tinker"
+  "laravel|remove laravel/tinker --dry-run"
+  "laravel|remove Laravel/Tinker --dry-run"
+  "laravel|remove laravel/tinker --dry-run @installed:laravel/tinker"
+  "laravel|remove laravel/pint --dev --dry-run @require:symfony/console=^99 @stub:symfony/console"
+  "laravel|require symfony/uid --dry-run"
+  "laravel|require symfony/uid:^7 --dry-run --sort-packages"
+  "laravel|require symfony/uid --dry-run @nojson"
+  "laravel|require symfony/uid --dry-run --no-update @nojson @nostderr"
+  "laravel|require symfony/uid --dry-run @emptyjson @nostderr"
+  "laravel|require acme/nope --dry-run @stub:acme/nope @nostderr"
+  "laravel|update --dry-run @dry-install"
+  "laravel|update --dry-run @dry-install @installed:laravel/tinker"
+  "laravel|remove laravel/tinker --dry-run @dry-install @installed:laravel/tinker"
+  "laravel|require symfony/uid --dry-run @dry-install"
+  "solver-policies|update --dry-run @nolock @dry-install"
+  "rector|update --dry-run @require:phpstan/phpstan=^99"
+  "rector|update --dry-run --no-dev"
+  "symfony|require symfony/yaml --dry-run"
+  "solver-conflict|update --dry-run @nolock"
   "solver-conflict|update @nolock @stderr"
   "solver-conflict|update --no-dev @nolock @stderr"
   "solver-conflict|require psr/log:^1.0 @nolock @stderr"
@@ -249,7 +275,7 @@ for fx in "${FIXTURES[@]}"; do
     [ "${spec%%|*}" = "$fx" ] || continue
     n=$((n + 1))
     read -r -a sargs <<< "${spec#*|}"
-    preps=(); stubs=(); envs=(); registry_edited=0; compare_stderr=1
+    preps=(); stubs=(); envs=(); registry_edited=0; compare_stderr=1; dry_install=0
     while [ ${#sargs[@]} -gt 0 ]; do
       last=$(( ${#sargs[@]} - 1 ))
       case "${sargs[$last]}" in
@@ -271,6 +297,7 @@ for fx in "${FIXTURES[@]}"; do
         @env:*) kv="${prep#@env:}"; export "${kv%%=*}=${kv#*=}"; envs+=("${kv%%=*}") ;;
         @stderr) compare_stderr=1 ;;
         @nostderr) compare_stderr=0 ;;
+        @dry-install) dry_install=1 ;;
       esac
     done
     for side in ref viv; do
@@ -279,7 +306,7 @@ for fx in "${FIXTURES[@]}"; do
       [ -f "$ROOT/fixtures/projects/$fx/composer.lock" ] && cp "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
-          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr|@nostderr) ;;
+          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr|@nostderr|@dry-install) ;;
           @repofilter:*) jq --arg u "file://$reg" --argjson f "${prep#@repofilter:}" '.repositories.snapshot = {"type": "composer", "url": $u, "filter": $f}' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @emptyjson) : > "$d/composer.json" ;;
           @nojson) rm -f "$d/composer.json" "$d/composer.lock" ;;
@@ -307,12 +334,14 @@ for fx in "${FIXTURES[@]}"; do
     # (refusé) ; --dry-run vérifie le lock (politiques, plateforme) sans
     # rien télécharger.
     extra=(--no-install --no-audit); [ "${sargs[0]}" = "install" ] && extra=(--dry-run)
+    viv_extra=("${extra[0]}")
+    if [ "$dry_install" = 1 ]; then extra=(--no-audit); viv_extra=(); fi
     quiet=(--quiet); [ "$compare_stderr" = 1 ] && quiet=(--no-ansi)
     (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" COMPOSER_TESTS_ARE_RUNNING=1 \
       composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction "${quiet[@]}" >"$WORK/$fx-$n.composer.log" 2>"$WORK/$fx-$n.composer.err") || ref_code=$?
     viv_code=0
     (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      "$VIVACITY" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
+      "$VIVACITY" "${sargs[@]}" "${viv_extra[@]+"${viv_extra[@]}"}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
     # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
     # packages.json et l'environnement aussi.
     for f in "${stubs[@]+"${stubs[@]}"}"; do rm -f "$f"; [ -f "$f.orig" ] && mv "$f.orig" "$f"; done

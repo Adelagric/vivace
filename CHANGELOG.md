@@ -4,6 +4,30 @@ All notable changes to vivacity (named vivace up to 0.5.0). The format follows [
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Added
+- **`--dry-run` on `update`, `require` and `remove`**: the resolution runs
+  and everything Composer prints is printed, nothing is written — the
+  root package is patched in memory for `require`/`remove` (Composer's
+  `array_merge` order, its mixed-case `remove` quirk included), a
+  `composer.json` created for the run is deleted afterwards, and the
+  install phase lists its operations from the unwritten lock.
+- **Composer's update output**: `  - Locking x (v)` / `Upgrading x (a =>
+  b)` / `Downgrading` / `Removing` lines after the `Lock file operations`
+  summary (removals first, then by name; dev packages show their
+  reference), the `N package suggestions were added by new dependencies`
+  line, `Package x is abandoned …` warnings, the funding line; `install`
+  prints `Installing dependencies from lock file (including
+  require-dev)`, `Verifying lock file contents can be installed on
+  current platform.`, `Package operations: …` / `Nothing to install,
+  update or remove` and, in a dry run, the `  - Installing …` lines in
+  transaction order. Policy warnings lose their `Warning:` prefix.
+- `harness/steps.sh` compares stderr on every case by default (from the
+  first operation or headline to the end; `@nostderr` opts out), and
+  `@dry-install` exercises the install phase of a dry run: 202 cases,
+  180 with stderr byte-identical.
+
 ## [0.7.0] — 2026-09-15
 
 ### Added

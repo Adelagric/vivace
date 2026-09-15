@@ -49,6 +49,17 @@ pub struct RootPackage {
 #[error("{0}")]
 pub struct RootError(pub String);
 
+/// What a dry run changes on the root package in memory instead of in
+/// composer.json.
+#[derive(Debug, Clone, Default)]
+pub struct RootPatch {
+    /// `(name, constraint)` to add (`require` or, with `dev`, `require-dev`).
+    pub requirements: Vec<(String, String)>,
+    pub dev: bool,
+    /// `(from require-dev?, name as typed)` to remove.
+    pub removals: Vec<(bool, String)>,
+}
+
 impl RootPackage {
     /// Loads composer.json (already parsed) with the root version guessed by
     /// vivacity-core (same rules as RootPackageLoader + VersionGuesser).
@@ -153,6 +164,64 @@ impl RootPackage {
 
     /// `require` + `require-dev` links (`array_merge`: dev-requires
     /// overwrite a duplicate target, at its position).
+    /// The in-memory root patch of a dry run (`RequireCommand`,
+    /// `RemoveCommand`): the new links are `array_merge`d onto the key's
+    /// links (a duplicate key keeps its position), removed from the other
+    /// key by their name, and the references / stability flags are
+    /// extended; aliases are not re-extracted (the reference does not).
+    pub fn apply_patch(&mut self, patch: &RootPatch) -> Result<(), RootError> {
+        if !patch.requirements.is_empty() {
+            let map: Map<String, Value> = patch
+                .requirements
+                .iter()
+                .map(|(n, c)| (n.clone(), Value::String(c.clone())))
+                .collect();
+            let (kind, own, other) = if patch.dev {
+                (
+                    crate::package::LinkType::DevRequire,
+                    "require-dev",
+                    "require",
+                )
+            } else {
+                (crate::package::LinkType::Require, "require", "require-dev")
+            };
+            let _ = other;
+            let new_links = loader::parse_links(
+                &self.package.name,
+                &self.package.pretty_version,
+                kind,
+                Some(&Value::Object(map)),
+                false,
+            )
+            .map_err(|e| RootError(e.0))?;
+            let (own_links, other_links) = if kind == crate::package::LinkType::DevRequire {
+                (&mut self.package.dev_requires, &mut self.package.requires)
+            } else {
+                (&mut self.package.requires, &mut self.package.dev_requires)
+            };
+            let _ = own;
+            for l in new_links.iter() {
+                own_links.insert(l.clone());
+            }
+            for (name, _) in &patch.requirements {
+                other_links.remove(name);
+            }
+            let pairs: Vec<(String, String)> = patch.requirements.clone();
+            extract_references(&pairs, &mut self.references);
+            extract_stability_flags(&pairs, &self.minimum_stability, &mut self.stability_flags);
+        }
+        // `RemoveCommand`: `unset($links[$type][$name])` with the name as
+        // typed against lowercase keys.
+        for (dev, name) in &patch.removals {
+            if *dev {
+                self.package.dev_requires.remove(name);
+            } else {
+                self.package.requires.remove(name);
+            }
+        }
+        Ok(())
+    }
+
     pub fn all_requires(&self) -> Links {
         let mut out = self.package.requires.clone();
         for l in self.package.dev_requires.iter() {

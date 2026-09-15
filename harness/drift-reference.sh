@@ -45,6 +45,8 @@ twin() {
     cmg-PhpFileCleaner.php)   echo "vendor/composer/class-map-generator/src/PhpFileCleaner.php" ;;
     cmg-PhpFileParser.php)    echo "vendor/composer/class-map-generator/src/PhpFileParser.php" ;;
     Installer.php)            echo "src/Composer/Installer.php" ;;
+    SuggestedPackagesReporter.php) echo "src/Composer/Installer/SuggestedPackagesReporter.php" ;;
+    UpdateCommand.php)        echo "src/Composer/Command/UpdateCommand.php" ;;
     *) echo "" ;;
   esac
 }

@@ -97,10 +97,19 @@ that text byte for byte with Composer's on 50 unsolvable cases (a
 synthetic registry built by `fixtures/make-solver-problems.py` reaches every
 reason branch the CLI can produce, plus real-registry cases).
 
+What the commands print is Composer's text too: the `Lock file
+operations` summary and its `  - Locking …` / `Upgrading` / `Removing`
+lines, the suggestions count, the abandoned-package warnings, the funding
+line, `install`'s `Package operations`, and `--dry-run` on `update`,
+`require` and `remove` (resolution and listing, nothing written — the
+install phase lists its operations from the unwritten lock). The stderr
+of every `steps.sh` case is compared byte for byte from the first of
+those lines to the end (180 cases).
+
 Repositories: `composer` type only, Packagist v2 protocol and plain
 `packages.json` files, local or over HTTPS. Not yet: `--with`,
-`vcs`/`path` repositories, `--dry-run` for `update`/`require`/`remove`,
-`--minimal-changes`, the `--verbose` form of the explanations.
+`vcs`/`path` repositories, `--minimal-changes`, the audit (`--no-audit`
+is the compared behaviour), the `--verbose` form of the explanations.
 
 Composer 2.10's dependency policies are applied the same way: versions
 covered by a security advisory or flagged on Packagist's malware list are

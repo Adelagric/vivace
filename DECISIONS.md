@@ -412,3 +412,28 @@ matérialisées (le `RuleSet` ne survit pas au solveur), le `Pool` enregistre
 les versions retirées par l'optimiseur (`recordRemovedVersionsForPackage`,
 sauté jusqu'ici « parce que seuls les messages s'en servent ») et par les
 politiques, et la sonde PHP renvoie les fichiers `.ini`.
+
+## 2026-09-15 — Parité de stderr par défaut, et `--dry-run` par un patch du paquet racine (v0.8)
+
+Fait : en portant `--dry-run`, la lecture de `Installer::doUpdate` a montré
+que Composer imprime toujours une ligne par opération de lock (`  - Locking
+…`), puis un compte de suggestions, un avertissement par paquet abandonné
+et la ligne funding — rien de tout ça n'était imprimé par vivacity, et
+aucun harness ne le voyait (seul le lock était comparé). Décision : le
+harness `steps.sh` compare stderr **par défaut** (de la première ligne
+d'opération ou d'en-tête à la fin ; `@nostderr` pour les cas rendus par
+Symfony, `--no-update`, `config.lock: false`, un texte d'erreur réseau),
+et la parité de sortie devient une propriété mesurée, pas une intention.
+Pour `require`/`remove --dry-run`, Composer patche le paquet racine en
+mémoire (`array_merge` des liens, non trié) au lieu d'écrire le fichier ;
+réécrire puis restaurer composer.json aurait donné le même fichier mais un
+ordre de règles différent (`--sort-packages`), donc potentiellement
+d'autres décisions du solveur : `RootPatch` est appliqué au chargement de
+la session (méta, faille 7). La phase d'installation d'un dry run lit le
+lock *non écrit* de la résolution (`Locker::setLockData` le garde en
+mémoire) — sans quoi la liste des opérations montre l'ancien lock (trouvé
+par l'oracle `@dry-install`). Reporté en v0.9 : les dépôts `path`
+(six sous-ports préalables identifiés par la méta : `serialize()`, un
+guesser « comme git », `ArchivableFilesFinder`, glob à accolades,
+`findShortestPath` avec `preferRelative`, dépôts git imbriqués dans les
+fixtures).
