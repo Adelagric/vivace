@@ -169,7 +169,7 @@ fn source_ref(name: &str, key: &str, v: Option<&Value>) -> Result<Option<SourceR
 /// `configureCachedLinks` (`loadPackages`, a repository batch) for one link
 /// type. In batch mode, a link to the package itself is ignored and a
 /// non-string constraint is an error; in single mode, it is ignored.
-fn parse_links(
+pub fn parse_links(
     source: &str,
     source_version: &str,
     kind: LinkType,

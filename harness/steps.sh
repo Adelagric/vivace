@@ -23,6 +23,7 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @stub:a/b               fichier de métadonnées vide pour a/b dans l'instantané
 #   @installed:a/b          vendor/composer/installed.json avec a/b et son répertoire
 #   @installed-nodir:a/b    idem sans le répertoire (purgé par Composer)
+#   @installed-funding:a/b  idem avec une entrée `funding` (ligne « looking for funding »)
 #   @global-allow:a/b       config.allow-plugins {a/b: true} dans le config.json global
 #   @global-sort            config.sort-packages true dans le config.json global
 #   @emptyjson              composer.json vide (0 octet)
@@ -38,13 +39,19 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @registry-jq:expr       applique l'expression jq au packages.json de l'instantané (le cas seulement)
 #   @repofilter:json        redéclare le dépôt `snapshot` dans le manifeste avec cette option `filter`
 #   @env:NAME=VALUE         variable d'environnement des deux côtés (le cas seulement)
-#   @stderr                 compare aussi la sortie d'erreur à partir de la ligne
-#                           « Your requirements could not be resolved… » (ou
-#                           « Unable to find a compatible set… », « Your lock
-#                           file does not contain… ») jusqu'à la fin, à l'octet.
-#                           Composer tourne alors sans --quiet (les explications
-#                           sont au niveau normal) et avec COMPOSER_TESTS_ARE_RUNNING
-#                           (sinon `::error ::…` sur stdout sous GitHub Actions).
+#   @dry-install            n'ajoute pas --no-install : la phase d'installation
+#                           d'un --dry-run (« Installing dependencies… »,
+#                           « Package operations », « - Installing … ») est comparée
+#   @nostderr               ne compare pas la sortie d'erreur. Par défaut elle
+#                           l'est, de la ligne d'ancrage (« Lock file operations »,
+#                           « Nothing to modify in lock file », « Installing
+#                           dependencies from lock file », « Your requirements
+#                           could not be resolved… », « Unable to find a compatible
+#                           set… », « Your lock file does not contain… ») jusqu'à
+#                           la fin, à l'octet. Composer tourne sans --quiet (ces
+#                           lignes sont au niveau normal) et avec
+#                           COMPOSER_TESTS_ARE_RUNNING (sinon `::error ::…` sur
+#                           stdout sous GitHub Actions). `@stderr` est accepté (no-op).
 STEPS=(
   "laravel|remove laravel/tinker"
   "laravel|remove laravel/tinker @nolock"
@@ -57,7 +64,7 @@ STEPS=(
   "laravel|remove laravel/pint --dev @require:symfony/console=^99 @stub:symfony/console @stderr"
   "laravel|remove laravel/tinker -W"
   "laravel|remove laravel/tinker --no-update-with-dependencies"
-  "laravel|remove laravel/tinker --no-update"
+  "laravel|remove laravel/tinker --no-update @nostderr"
   "laravel|remove Laravel/Tinker"
   "laravel|remove laravel/pint --dev"
   "laravel|remove laravel/pint"
@@ -65,14 +72,14 @@ STEPS=(
   "laravel|remove laravel/* --dev"
   "laravel|remove phpunit/phpunit --dev -W"
   "laravel|remove nonexistent/package"
-  "laravel|remove --unused"
+  "laravel|remove --unused @nostderr"
   "symfony|remove symfony/console"
   "symfony|remove symfony/flex"
-  "symfony|remove symfony/runtime --no-update"
+  "symfony|remove symfony/runtime --no-update @nostderr"
   "symfony|remove phpstan/* --dev"
   "symfony|remove symfony/yaml symfony/string -W"
   "symfony|remove twig/* --no-update-with-dependencies"
-  "symfony|remove --unused"
+  "symfony|remove --unused @nostderr"
   "sylius|remove sylius/paypal-plugin"
   "sylius|remove symfony/flex symfony/runtime"
   "sylius|remove phpstan/extension-installer --dev"
@@ -81,7 +88,7 @@ STEPS=(
   "rector|remove symfony/process --dev --no-update-with-dependencies"
   "drupal|remove drupal/core-project-message"
   "laravel|require symfony/uid"
-  "laravel|require symfony/uid --no-update"
+  "laravel|require symfony/uid --no-update @nostderr"
   "laravel|require symfony/uid:^7.0"
   "laravel|require symfony/uid ^7.0 --dev"
   "laravel|require symfony/uid --dev --fixed"
@@ -95,18 +102,18 @@ STEPS=(
   "laravel|require symfony/uid symfony/process:^7"
   "laravel|require symfony/uid --sort-packages @drop:laravel/tinker"
   "laravel|require symfony/uid --dev @require:symfony/console=^99 @stub:symfony/console"
-  "laravel|require symfony/uid @emptyjson"
+  "laravel|require symfony/uid @emptyjson @nostderr"
   "laravel|require symfony/uid @nojson"
-  "laravel|require symfony/uid --no-update @nojson"
-  "laravel|require symfony/uid --fixed @notype"
-  "laravel|require symfony/uid @nolock @lockfalse"
-  "laravel|require laravel/pint @lockfalse"
+  "laravel|require symfony/uid --no-update @nojson @nostderr"
+  "laravel|require symfony/uid --fixed @notype @nostderr"
+  "laravel|require symfony/uid @nolock @lockfalse @nostderr"
+  "laravel|require laravel/pint @lockfalse @nostderr"
   "laravel|require symfony/uid @indent2"
-  "laravel|require symfony/uid @corruptlock"
+  "laravel|require symfony/uid @corruptlock @nostderr"
   "laravel|require ext-json @global-sort"
-  "laravel|require ext-nonexistent"
+  "laravel|require ext-nonexistent @nostderr"
   "laravel|require ext-nonexistent --ignore-platform-req=ext-nonexistent"
-  "laravel|require symfony/clock @platform:php=7.4.0"
+  "laravel|require symfony/clock @platform:php=7.4.0 @nostderr"
   "laravel|require symfony/uid symfony/uid:^7.1"
   "laravel|require symfony/uid:^7.1 symfony/uid"
   "laravel|require SYMFONY/UID"
@@ -141,27 +148,27 @@ STEPS=(
   "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"update\""
   "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware.ignore={\"acme/bad\":{\"constraint\":\"1.1.0\"}}"
   "solver-policies|install"
-  "solver-policies|install @lockfile:composer.lock.malware @jq:.repositories={\"dead\":{\"type\":\"composer\",\"url\":\"https://127.0.0.1:1\"}}"
+  "solver-policies|install @lockfile:composer.lock.malware @jq:.repositories={\"dead\":{\"type\":\"composer\",\"url\":\"https://127.0.0.1:1\"}} @nostderr"
   "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware.ignore={\"acme/bad\":[]}"
   "solver-policies|install @lockfile:composer.lock.malware @jq:.config.policy.malware[\"block-scope\"]=\"install\""
-  "solver-policies|install @lockfile:composer.lock.malware @repofilter:{\"malware\":\"x\"}"
+  "solver-policies|install @lockfile:composer.lock.malware @repofilter:{\"malware\":\"x\"} @nostderr"
   "solver-policies|install @lockfile:composer.lock.malware @repofilter:{\"malware\":false}"
-  "solver-policies|install --no-install @lockfile:composer.lock.malware"
+  "solver-policies|install --no-install @lockfile:composer.lock.malware @nostderr"
   "solver-policies|update @nolock @registry-jq:.filter.metadata=false"
   "solver-policies|update @nolock @require:acme/partial=^1"
-  "solver-policies|update @nolock @require:acme/partial=^1 @jq:.config.policy.advisories.ignore={\"acme/partial\":null}"
+  "solver-policies|update @nolock @require:acme/partial=^1 @jq:.config.policy.advisories.ignore={\"acme/partial\":null} @nostderr"
   "solver-policies|update @nolock @require:acme/partial=^1 @jq:.config.policy.advisories[\"ignore-id\"]=[\"PKSA-test-partial-0001\"]"
   "solver-policies|update @nolock @jq:.config.policy.advisories.ignore={\"acme/vuln\":[]}"
   "solver-policies|update @nolock @jq:.config.audit[\"ignore-severity\"]={\"high\":{\"apply\":\"audit\"}}"
   "solver-policies|update @nolock @jq:.config.audit[\"ignore-severity\"]={\"high\":{\"apply\":\"block\"}}"
   "solver-policies|update @nolock @jq:.config.policy.foo=true"
   "solver-policies|update @nolock @jq:.config.policy.foo=false"
-  "solver-policies|update @nolock @env:COMPOSER_AUDIT_ABANDONED=foo"
+  "solver-policies|update @nolock @env:COMPOSER_AUDIT_ABANDONED=foo @nostderr"
   "solver-policies|update @nolock @env:COMPOSER_POLICY=0"
   "solver-policies|update @nolock @jq:.config.policy=false @env:COMPOSER_POLICY=1"
   "solver-policies|update @nolock @env:COMPOSER_POLICY_ADVISORIES_BLOCK=0"
   "solver-policies|update @nolock @env:COMPOSER_POLICY_MALWARE_BLOCK=off"
-  "solver-policies|update @nolock @env:COMPOSER_NO_BLOCKING=yes"
+  "solver-policies|update @nolock @env:COMPOSER_NO_BLOCKING=yes @nostderr"
   "solver-policies|update @nolock @jq:.config.policy[\"ignore-unreachable\"]=false"
   "solver-policies|update @nolock @require:acme/replacer=^2 @jq:.require[\"acme/vuln\"]=\"1.1.0\""
   "rector|require nette/utils @minstab:dev"
@@ -175,6 +182,36 @@ STEPS=(
   "rector|require symfony/finder"
   "drupal|require drupal/core-project-message"
   "drupal|require composer/installers"
+  "laravel|update --dry-run"
+  "laravel|update --dry-run @nolock"
+  "laravel|update laravel/pint --dry-run"
+  "laravel|update --dry-run @installed:laravel/tinker"
+  "laravel|remove laravel/tinker --dry-run"
+  "laravel|remove Laravel/Tinker --dry-run"
+  "laravel|remove laravel/tinker --dry-run @installed:laravel/tinker"
+  "laravel|remove laravel/pint --dev --dry-run @require:symfony/console=^99 @stub:symfony/console"
+  "laravel|require symfony/uid --dry-run"
+  "laravel|require symfony/uid:^7 --dry-run --sort-packages"
+  "laravel|require symfony/uid --dry-run @nojson"
+  "laravel|require symfony/uid --dry-run --no-update @nojson @nostderr"
+  "laravel|require symfony/uid --dry-run @emptyjson @nostderr"
+  "laravel|require acme/nope --dry-run @stub:acme/nope @nostderr"
+  "laravel|update --dry-run @dry-install"
+  "laravel|update --dry-run @dry-install @installed:laravel/tinker"
+  "laravel|remove laravel/tinker --dry-run @dry-install @installed:laravel/tinker"
+  "laravel|require symfony/uid --dry-run @dry-install"
+  "solver-policies|update --dry-run @nolock @dry-install"
+  "laravel|update --dry-run @dry-install @installed-funding:laravel/tinker"
+  "laravel|install @installed-nodir:laravel/tinker"
+  "laravel|install @installed-funding:laravel/tinker"
+  "laravel|install @require:acme/nope=^1.0 @stub:acme/nope"
+  "laravel|install @require:laravel/tinker=^99"
+  "laravel|install @jq:.[\"require-dev\"][\"acme/nope\"]=\"^1.0\" @stub:acme/nope"
+  "laravel|install --no-dev @jq:.[\"require-dev\"][\"acme/nope\"]=\"^1.0\" @stub:acme/nope"
+  "rector|update --dry-run @require:phpstan/phpstan=^99"
+  "rector|update --dry-run --no-dev"
+  "symfony|require symfony/yaml --dry-run"
+  "solver-conflict|update --dry-run @nolock"
   "solver-conflict|update @nolock @stderr"
   "solver-conflict|update --no-dev @nolock @stderr"
   "solver-conflict|require psr/log:^1.0 @nolock @stderr"
@@ -246,7 +283,7 @@ for fx in "${FIXTURES[@]}"; do
     [ "${spec%%|*}" = "$fx" ] || continue
     n=$((n + 1))
     read -r -a sargs <<< "${spec#*|}"
-    preps=(); stubs=(); envs=(); registry_edited=0; compare_stderr=0
+    preps=(); stubs=(); envs=(); registry_edited=0; compare_stderr=1; dry_install=0
     while [ ${#sargs[@]} -gt 0 ]; do
       last=$(( ${#sargs[@]} - 1 ))
       case "${sargs[$last]}" in
@@ -267,6 +304,8 @@ for fx in "${FIXTURES[@]}"; do
         @registry-jq:*) jq "${prep#@registry-jq:}" "$reg/packages.json" > "$reg/p.tmp" && mv "$reg/p.tmp" "$reg/packages.json"; registry_edited=1 ;;
         @env:*) kv="${prep#@env:}"; export "${kv%%=*}=${kv#*=}"; envs+=("${kv%%=*}") ;;
         @stderr) compare_stderr=1 ;;
+        @nostderr) compare_stderr=0 ;;
+        @dry-install) dry_install=1 ;;
       esac
     done
     for side in ref viv; do
@@ -275,7 +314,7 @@ for fx in "${FIXTURES[@]}"; do
       [ -f "$ROOT/fixtures/projects/$fx/composer.lock" ] && cp "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
-          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr) ;;
+          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr|@nostderr|@dry-install) ;;
           @repofilter:*) jq --arg u "file://$reg" --argjson f "${prep#@repofilter:}" '.repositories.snapshot = {"type": "composer", "url": $u, "filter": $f}' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @emptyjson) : > "$d/composer.json" ;;
           @nojson) rm -f "$d/composer.json" "$d/composer.lock" ;;
@@ -291,8 +330,9 @@ for fx in "${FIXTURES[@]}"; do
           @badlock) printf '{"_readme": [], "content-hash": "x"}\n' > "$d/composer.lock" ;;
           @drop:*) jq --arg p "${prep#@drop:}" 'del(.require[$p])' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @require:*) kv="${prep#@require:}"; jq --arg p "${kv%%=*}" --arg c "${kv#*=}" '.require[$p] = $c' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
-          @installed:*|@installed-nodir:*) p="${prep#*:}"; mkdir -p "$d/vendor/composer"
-            printf '{"packages": [{"name": "%s", "version": "1.0.0", "version_normalized": "1.0.0.0", "type": "library", "install-path": "../%s"}], "dev": true, "dev-package-names": []}\n' "$p" "$p" > "$d/vendor/composer/installed.json"
+          @installed:*|@installed-nodir:*|@installed-funding:*) p="${prep#*:}"; mkdir -p "$d/vendor/composer"
+            funding=""; [ "${prep%%:*}" = "@installed-funding" ] && funding=', "funding": [{"type": "github", "url": "https://github.com/sponsors/x"}]'
+            printf '{"packages": [{"name": "%s", "version": "1.0.0", "version_normalized": "1.0.0.0", "type": "library", "install-path": "../%s"%s}], "dev": true, "dev-package-names": []}\n' "$p" "$p" "$funding" > "$d/vendor/composer/installed.json"
             [ "${prep%%:*}" = "@installed-nodir" ] || mkdir -p "$d/vendor/$p" ;;
           *) echo "prep inconnu : $prep"; exit 1 ;;
         esac
@@ -303,12 +343,17 @@ for fx in "${FIXTURES[@]}"; do
     # (refusé) ; --dry-run vérifie le lock (politiques, plateforme) sans
     # rien télécharger.
     extra=(--no-install --no-audit); [ "${sargs[0]}" = "install" ] && extra=(--dry-run)
+    viv_extra=("${extra[0]}")
+    if [ "$dry_install" = 1 ]; then
+      [ "${sargs[0]}" != "install" ] || { echo "FAIL $fx ${sargs[*]} : @dry-install ne s'applique pas à install"; status=1; continue; }
+      extra=(--no-audit); viv_extra=()
+    fi
     quiet=(--quiet); [ "$compare_stderr" = 1 ] && quiet=(--no-ansi)
     (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" COMPOSER_TESTS_ARE_RUNNING=1 \
       composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction "${quiet[@]}" >"$WORK/$fx-$n.composer.log" 2>"$WORK/$fx-$n.composer.err") || ref_code=$?
     viv_code=0
     (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      "$VIVACITY" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
+      "$VIVACITY" "${sargs[@]}" "${viv_extra[@]+"${viv_extra[@]}"}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
     # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
     # packages.json et l'environnement aussi.
     for f in "${stubs[@]+"${stubs[@]}"}"; do rm -f "$f"; [ -f "$f.orig" ] && mv "$f.orig" "$f"; done
@@ -323,14 +368,14 @@ for fx in "${FIXTURES[@]}"; do
     if [ "$compare_stderr" = 1 ]; then
       # De la ligne d'ancrage à la fin ; les lignes de progression avant
       # (« Loading composer repositories… ») ne sont pas comparées.
-      anchor='^(Your requirements could not be resolved|Unable to find a compatible set|Your lock file does not contain)'
+      anchor='^(Your requirements could not be resolved|Unable to find a compatible set|Your lock file does not contain|Lock file operations|Nothing to modify in lock file|Installing dependencies from lock file)'
       for side in composer vivacity; do
         sed -E -n "/$anchor/,\$p" "$WORK/$fx-$n.$side.err" > "$WORK/$fx-$n.$side.tail"
       done
       if ! [ -s "$WORK/$fx-$n.composer.tail" ]; then
         echo "FAIL $label : pas de ligne d'ancrage dans la sortie de Composer (cas mal choisi)"; ok=0
-      elif ! grep -q '^    - ' "$WORK/$fx-$n.composer.tail"; then
-        echo "FAIL $label : oracle aveugle — Composer n'a écrit aucune raison (\`    - …\`)"; ok=0
+      elif ! grep -q '^ *- \|^Nothing to modify\|^Nothing to install' "$WORK/$fx-$n.composer.tail"; then
+        echo "FAIL $label : oracle aveugle — Composer n'a écrit aucune raison ni opération (\`  - …\`)"; ok=0
       elif ! diff -q "$WORK/$fx-$n.composer.tail" "$WORK/$fx-$n.vivacity.tail" >/dev/null 2>&1; then
         echo "FAIL $label : les explications diffèrent"
         diff "$WORK/$fx-$n.composer.tail" "$WORK/$fx-$n.vivacity.tail" | head -30 || true; ok=0

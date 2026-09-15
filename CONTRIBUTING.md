@@ -20,18 +20,32 @@ to Composer) where you think it shouldn't have to.
 That is enough: the differential harness (`harness/diff-vendor.sh`) turns a
 lock into a permanent regression test. Your bug becomes everyone's test.
 
+The same goes for `update`, `require` and `remove`: a `composer.json` (with
+or without its lock) on which `composer update --no-install` and
+`vivacity update --no-install` write a different `composer.lock`, print a
+different explanation of an unsolvable set, or list different operations,
+is a case for `harness/steps.sh` — it replays a command through both tools
+on a frozen registry snapshot and compares the files, the exit code and
+stderr byte for byte.
+
 ## Bigger pieces, roughly in order of impact
 
+- **`path` repositories** (v0.9): `PathRepository` (`sha1(json .
+  serialize(options))` references, a git-like version guesser adding the
+  feature branch and its parent, brace globs) and `PathDownloader`
+  (symlink or `ArchivableFilesFinder` mirror). The opening cadrage is the
+  meta-analysis in `docs/plans/v0.8-dry-run-path.md`.
+- **`vcs` repositories** — `VcsRepository`, the git/GitHub/GitLab drivers,
+  source checkouts on install.
 - **Plugins to emulate natively** — every install-time plugin proven harmless
-  (or reproduced exactly, like `symfony/runtime`) moves a whole ecosystem off
-  the fallback path. See `scope.rs` for the lists and `runtime_stub.rs` for
-  the pattern; parity is proven with the harness, never assumed.
-- **Windows** — `vendor/bin` `.bat` proxies (`BinaryInstaller::generateWindowsProxyCode`),
-  path handling, no clonefile/hardlink assumptions.
+  (or reproduced exactly, like `symfony/runtime` and `composer/installers`)
+  moves a whole ecosystem off the fallback path. See `scope.rs` for the
+  lists and `runtime_stub.rs` for the pattern; parity is proven with the
+  harness, never assumed. Ports of GPL-licensed plugins are not accepted
+  (NOTICE.md).
 - **Auth** — `gitlab-token`/`gitlab-oauth`; custom CAs (`SSL_CERT_FILE`) with rustls.
-- **The resolver** — `composer update`/`require`. `pubgrub` exists in Rust;
-  `vivacity_core::constraint` is already validated against `composer/semver`
-  (see `tests/oracle_semver.rs`). The judge is a byte-identical `composer.lock`.
+- **Remaining `update` options** — `--with`, `--minimal-changes`,
+  `bump-after-update`, the audit, `--verbose` explanations.
 
 ## Ground rules that keep the project honest
 
@@ -42,8 +56,18 @@ lock into a permanent regression test. Your bug becomes everyone's test.
 - **Never run PHP at install time.** Scripts and plugins are out, by design.
 - **Measure before optimising** (`bench/`), and publish the losing numbers too.
 - Gates before a PR: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-  `cargo test` (needs php + composer), `harness/diff-vendor.sh --with-autoloader`.
-  `harness/linux.sh` runs the whole chain in a Linux container.
+  `cargo test` (needs php + composer 2.10.3 on PATH),
+  `harness/diff-vendor.sh --with-autoloader`, `harness/update.sh`,
+  `harness/steps.sh` (stderr is compared on every case unless `@nostderr`;
+  a case whose reference output has no operation or reason line is
+  reported as blind, not green), `harness/drift-reference.sh` (every
+  vendored file under `docs/reference/` identical to the phar).
+  `harness/linux.sh` runs the whole chain in a Linux container; the
+  Windows parity job runs on `windows-latest` in CI.
+- Every ported function has its reference vendored under `docs/reference/`
+  with its licence, and a row in NOTICE.md when it comes from a new
+  origin. Documentation (README, HANDOVER, DECISIONS, CHANGELOG, the crate
+  READMEs, `docs/`) is updated in the same change as the code.
 
 `DECISIONS.md` records why things are the way they are; `HANDOVER.md` lists
 what is not covered yet. Read both before a large change — and add to them

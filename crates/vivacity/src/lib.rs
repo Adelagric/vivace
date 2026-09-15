@@ -227,6 +227,9 @@ struct UpdateArgs {
     /// Write the lock file without installing.
     #[arg(long)]
     no_install: bool,
+    /// Outputs the operations but will not execute anything.
+    #[arg(long)]
+    dry_run: bool,
     /// Do not install require-dev packages (they are still resolved).
     #[arg(long)]
     no_dev: bool,
@@ -331,8 +334,8 @@ struct InstallArgs {
     /// Rejected, as in Composer (`composer update --no-install`).
     #[arg(long)]
     no_install: bool,
-    /// Checks (policies, scope, platform) without writing anything;
-    /// Composer additionally prints the operations.
+    /// Checks (policies, scope, platform) and prints the operations
+    /// without writing anything.
     #[arg(long)]
     dry_run: bool,
     /// Project directory (default: current directory).
@@ -350,6 +353,16 @@ struct InstallArgs {
     /// `alreadySolved`); the lock pool has already been filtered.
     #[arg(skip)]
     after_update: bool,
+    /// Internal: the lock of a dry-run update, never written — the install
+    /// phase reads it instead of composer.lock (`Locker::setLockData`
+    /// keeps the data in memory; `mockLocalRepositories`).
+    #[arg(skip)]
+    virtual_lock: Option<serde_json::Value>,
+    /// Internal: the manifest as the dry run's patched root package sees
+    /// it (`require`/`require-dev` of `RequireCommand`/`RemoveCommand`
+    /// applied in memory).
+    #[arg(skip)]
+    virtual_manifest: Option<serde_json::Value>,
 }
 
 /// `VIVACITY_TRACE=1`: duration of each phase on stderr (perf diagnostics).
@@ -422,32 +435,58 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
 
     let manifest_text = std::fs::read_to_string(&manifest_path)
         .with_context(|| format!("cannot read {}", manifest_path.display()))?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&manifest_text).context("invalid composer.json")?;
-    if !lock_path.is_file() {
+    let manifest: serde_json::Value = match &args.virtual_manifest {
+        Some(v) => v.clone(),
+        None => serde_json::from_str(&manifest_text).context("invalid composer.json")?,
+    };
+    if args.virtual_lock.is_none() && !lock_path.is_file() {
         anyhow::bail!(
             "no composer.lock in {} — vivacity does not resolve dependencies yet, \
              run `composer update` first",
             project.display()
         );
     }
-    let lock = vivacity_core::lock::Lock::read(&lock_path)?;
+    // A dry-run update installs from its unwritten lock.
+    let lock_text: String = match &args.virtual_lock {
+        Some(v) => {
+            vivacity_core::phpjson::php_json_encode_with(v, vivacity_core::phpjson::FLAGS_JSONFILE)?
+        }
+        None => std::fs::read_to_string(&lock_path)
+            .with_context(|| format!("cannot read {}", lock_path.display()))?,
+    };
+    let lock = vivacity_core::lock::Lock::parse(&lock_text)?;
     trace("read manifests", t0);
 
-    // Lock freshness: same behaviour as Composer, a warning.
-    if let (Ok(actual), Some(expected)) = (
-        vivacity_core::content_hash::content_hash(&manifest_text),
-        lock.content_hash.as_deref(),
-    ) {
-        if actual != expected {
-            eprintln!(
-                "Warning: The lock file is not up to date with the latest changes in composer.json. \
-                 You may be getting outdated dependencies. It is recommended that you run `composer update` or `composer update <package name>`."
-            );
+    let with_dev = !args.no_dev && std::env::var("COMPOSER_NO_DEV").as_deref() != Ok("1");
+    let config_lock = config_lock_enabled(&manifest_text);
+    // `Installer::doInstall`: the headline, then the platform verification
+    // notice (the lock is solved against the platform when not coming
+    // straight from an update), then the freshness warning.
+    if config_lock {
+        eprintln!(
+            "Installing dependencies from lock file{}",
+            if with_dev {
+                " (including require-dev)"
+            } else {
+                ""
+            }
+        );
+    }
+    if !args.after_update {
+        eprintln!("Verifying lock file contents can be installed on current platform.");
+        // Lock freshness: same behaviour as Composer, a warning.
+        if let (Ok(actual), Some(expected)) = (
+            vivacity_core::content_hash::content_hash(&manifest_text),
+            lock.content_hash.as_deref(),
+        ) {
+            if actual != expected {
+                eprintln!(
+                    "Warning: The lock file is not up to date with the latest changes in composer.json. \
+                     You may be getting outdated dependencies. It is recommended that you run `composer update` or `composer update <package name>`."
+                );
+            }
         }
     }
-
-    let with_dev = !args.no_dev && std::env::var("COMPOSER_NO_DEV").as_deref() != Ok("1");
 
     // `Installer::doInstall` runs the lock pool through the list filter in
     // install scope: a flagged locked version (malware list) is not
@@ -465,7 +504,7 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         )
         .map_err(|e| anyhow::anyhow!("{e}"))?;
         for w in &warnings {
-            eprintln!("Warning: {w}");
+            eprintln!("{w}");
         }
         if !problems.is_empty() {
             // `Installer::doInstall`: the headline, then
@@ -486,35 +525,6 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         }
         trace("policy", t0);
     }
-
-    // Out of scope: exec composer as fallback (default) or fail explicitly.
-    let scope =
-        vivacity_core::scope::analyze(&project, &lock, &manifest, with_dev, !args.no_plugins);
-    if !scope.is_native_ok() {
-        return fallback_or_fail(args, &project, &scope);
-    }
-    let Some(layout) = scope.layout.as_ref() else {
-        anyhow::bail!("internal: scope is native but no layout was resolved");
-    };
-    if let Some(tag) = &layout.installers_tag {
-        eprintln!("Note: composer/installers {tag} emulated natively (custom install paths)");
-    }
-    if vivacity_core::runtime_stub::has_custom_runtime_options(&manifest) {
-        let scope = vivacity_core::scope::ScopeReport {
-            issues: vec![vivacity_core::scope::ScopeIssue::UnknownPlugin(
-                "symfony/runtime with custom extra.runtime options".to_owned(),
-            )],
-            skipped_plugins: vec![],
-            layout: None,
-        };
-        return fallback_or_fail(args, &project, &scope);
-    }
-    for plugin in &scope.skipped_plugins {
-        eprintln!(
-            "Note: plugin {plugin} installed as a plain library (vivacity never runs plugins)"
-        );
-    }
-    trace("scope", t0);
 
     // Platform.
     let mut ignored = args.ignore_platform_req.clone();
@@ -557,10 +567,106 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     }
 
     trace("platform check", t0);
+    // `LocalRepoTransaction` (installed.json against the lock): the
+    // `Package operations` summary, and in a dry run the operation lines
+    // in transaction order, then the abandoned warnings of `Installer::run`.
+    let lock_value: serde_json::Value =
+        serde_json::from_str(&lock_text).context("invalid composer.lock")?;
+    let mut arena: Vec<vivacity_resolver::package::Package> = Vec::new();
+    // The local repository: installed.json purged of the packages whose
+    // install path is gone (`Factory::purgePackages`).
+    let as_lock = serde_json::json!({"packages": installed_packages(&project), "packages-dev": []});
+    let present = vivacity_resolver::repository::locked_repository_with(&as_lock, &mut arena, true)
+        .map_err(|e| anyhow::anyhow!("installed.json: {}", e.0))?;
+    let result =
+        vivacity_resolver::repository::locked_repository_with(&lock_value, &mut arena, with_dev)
+            .map_err(|e| anyhow::anyhow!("composer.lock: {}", e.0))?;
+    // `Locker::getMissingRequirementInfo`: a root requirement the lock does
+    // not satisfy (a hand-edited composer.json) stops here with code 4.
+    let missing = missing_requirement_info(&manifest, &lock_value, with_dev)?;
+    if !missing.is_empty() {
+        for line in &missing {
+            eprintln!("{line}");
+        }
+        if !require::truthy(require::config_value(
+            &manifest,
+            "allow-missing-requirements",
+        )) {
+            return Ok(4);
+        }
+    }
+    let transaction = vivacity_resolver::transaction::Transaction::new(&arena, &present, &result);
+    {
+        use vivacity_resolver::transaction::Operation;
+        let ops = &transaction.operations;
+        let installs = ops
+            .iter()
+            .filter(|o| matches!(o, Operation::Install(_)))
+            .count();
+        let updates = ops
+            .iter()
+            .filter(|o| matches!(o, Operation::Update(..)))
+            .count();
+        let removals = ops
+            .iter()
+            .filter(|o| matches!(o, Operation::Uninstall(_)))
+            .count();
+        if installs + updates + removals == 0 {
+            eprintln!("Nothing to install, update or remove");
+        } else {
+            eprintln!(
+                "Package operations: {installs} install{}, {updates} update{}, {removals} removal{}",
+                if installs == 1 { "" } else { "s" },
+                if updates == 1 { "" } else { "s" },
+                if removals == 1 { "" } else { "s" }
+            );
+        }
+    }
     if args.dry_run {
-        eprintln!("Installing dependencies from lock file (dry run)");
+        for op in &transaction.operations {
+            if let Some(line) = op.show(&arena, false) {
+                eprintln!("  - {line}");
+            }
+        }
+        // `Installer::run` after `doInstall` (an update prints its own
+        // report after this phase).
+        if !args.after_update {
+            for line in abandoned_warnings(&lock_value) {
+                eprintln!("{line}");
+            }
+            print_funding(&project);
+        }
         return Ok(0);
     }
+
+    // Out of scope: exec composer as fallback (default) or fail explicitly.
+    let scope =
+        vivacity_core::scope::analyze(&project, &lock, &manifest, with_dev, !args.no_plugins);
+    if !scope.is_native_ok() {
+        return fallback_or_fail(args, &project, &scope);
+    }
+    let Some(layout) = scope.layout.as_ref() else {
+        anyhow::bail!("internal: scope is native but no layout was resolved");
+    };
+    if let Some(tag) = &layout.installers_tag {
+        eprintln!("Note: composer/installers {tag} emulated natively (custom install paths)");
+    }
+    if vivacity_core::runtime_stub::has_custom_runtime_options(&manifest) {
+        let scope = vivacity_core::scope::ScopeReport {
+            issues: vec![vivacity_core::scope::ScopeIssue::UnknownPlugin(
+                "symfony/runtime with custom extra.runtime options".to_owned(),
+            )],
+            skipped_plugins: vec![],
+            layout: None,
+        };
+        return fallback_or_fail(args, &project, &scope);
+    }
+    for plugin in &scope.skipped_plugins {
+        eprintln!(
+            "Note: plugin {plugin} installed as a plain library (vivacity never runs plugins)"
+        );
+    }
+    trace("scope", t0);
 
     // Transaction.
     let store = Arc::new(vivacity_core::store::Store::default_location());
@@ -951,15 +1057,32 @@ fn run_update_resolved(
     prefer_lowest: bool,
 ) -> anyhow::Result<i32> {
     let resolved = resolve_and_lock(args, options, prefer_stable, prefer_lowest)?;
-    if resolved.status != 0 || args.no_install {
+    if resolved.status != 0 {
         return Ok(resolved.status);
     }
-    install_after_update(args)
+    let project = project_dir(args.working_dir.as_deref())?;
+    if !args.no_install {
+        let (virtual_lock, virtual_manifest) = if args.dry_run {
+            (resolved.lock.clone(), Some(resolved.manifest.clone()))
+        } else {
+            (None, None)
+        };
+        let status = install_after_update(args, virtual_lock, virtual_manifest)?;
+        if status != 0 {
+            return Ok(status);
+        }
+    }
+    print_post_update(&resolved, &project);
+    Ok(0)
 }
 
 /// The install that follows the lock write (`Installer::run` with
 /// `setInstall(true)`).
-fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
+fn install_after_update(
+    args: &UpdateArgs,
+    virtual_lock: Option<serde_json::Value>,
+    virtual_manifest: Option<serde_json::Value>,
+) -> anyhow::Result<i32> {
     run_install(&InstallArgs {
         no_dev: args.no_dev,
         no_autoloader: args.no_autoloader,
@@ -974,10 +1097,12 @@ fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
         no_blocking: args.no_blocking,
         no_security_blocking: args.no_security_blocking,
         no_install: false,
-        dry_run: false,
+        dry_run: args.dry_run,
         working_dir: args.working_dir.clone(),
         spawn_fallback: args.spawn_fallback,
         after_update: true,
+        virtual_lock,
+        virtual_manifest,
     })
 }
 
@@ -985,9 +1110,87 @@ fn install_after_update(args: &UpdateArgs) -> anyhow::Result<i32> {
 /// The outcome of the resolution: the status (0, or 2 on an unsolvable
 /// set) and the lock data, written or not (`config.lock: false` resolves
 /// without writing; Composer then keeps a "virtual" lock).
-struct Resolved {
-    status: i32,
-    lock: Option<serde_json::Value>,
+pub(crate) struct Resolved {
+    pub(crate) status: i32,
+    pub(crate) lock: Option<serde_json::Value>,
+    /// What `Installer::run` prints after the install phase (suggestions,
+    /// abandoned packages), ready to print; the funding count is read
+    /// from installed.json at that time (`print_post_update`).
+    pub(crate) post: Vec<String>,
+    /// The manifest as the (possibly patched) root package sees it.
+    pub(crate) manifest: serde_json::Value,
+}
+
+/// Prints the post-update report of `Installer::run` once the install
+/// phase (if any) is done: the precomputed lines, then the funding count
+/// of the packages installed now — unless `dumpAutoloader` is off (dry
+/// run).
+pub(crate) fn print_post_update(resolved: &Resolved, project: &std::path::Path) {
+    for line in &resolved.post {
+        eprintln!("{line}");
+    }
+    print_funding(project);
+}
+
+/// The packages of vendor/composer/installed.json (list form of old
+/// Composers accepted), minus those whose install path is gone
+/// (`Factory::purgePackages` through `LibraryInstaller::isInstalled`; a
+/// metapackage is always installed).
+fn installed_packages(project: &std::path::Path) -> Vec<serde_json::Value> {
+    let composer_dir = project.join("vendor/composer");
+    let Some(installed) = std::fs::read_to_string(composer_dir.join("installed.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    else {
+        return Vec::new();
+    };
+    let list = installed
+        .get("packages")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .or_else(|| installed.as_array().cloned())
+        .unwrap_or_default();
+    list.into_iter()
+        .filter(|p| {
+            if p.get("type").and_then(|t| t.as_str()) == Some("metapackage") {
+                return true;
+            }
+            match p.get("install-path").and_then(|v| v.as_str()) {
+                Some(rel) => composer_dir.join(rel).exists(),
+                None => true,
+            }
+        })
+        .collect()
+}
+
+/// `Installer::run`: the funding count of the local repository's packages
+/// (never an alias), unless `COMPOSER_FUND` is a number equal to 0. Printed
+/// in every mode, dry run included (`$localRepo` is then the mocked
+/// repository of the same packages).
+fn print_funding(project: &std::path::Path) {
+    if let Ok(env) = std::env::var("COMPOSER_FUND") {
+        let t = env.trim();
+        if let Ok(n) = t.parse::<f64>() {
+            if n == 0.0 {
+                return;
+            }
+        }
+    }
+    let funding = installed_packages(project)
+        .iter()
+        .filter(|p| {
+            p.get("funding")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|f| !f.is_empty())
+        })
+        .count();
+    if funding > 0 {
+        eprintln!(
+            "{funding} package{} you are using {} looking for funding.\nUse the `composer fund` command to find out more!",
+            if funding == 1 { "" } else { "s" },
+            if funding == 1 { "is" } else { "are" }
+        );
+    }
 }
 
 fn resolve_and_lock(
@@ -1055,6 +1258,8 @@ fn resolve_and_lock(
             return Ok(Resolved {
                 status: 2,
                 lock: None,
+                post: Vec::new(),
+                manifest: serde_json::Value::Null,
             });
         }
         Err(e) => return Err(anyhow::anyhow!("{e}")),
@@ -1085,10 +1290,10 @@ fn resolve_and_lock(
     let unchanged = old_text.as_deref() == Some(text.as_str());
     // `config.lock: false`: Composer resolves without writing a lock.
     let write_lock = config_lock_enabled(&manifest_text);
-    if report.transaction.transaction.operations.is_empty() {
+    let ops = &report.transaction.transaction.operations;
+    if ops.is_empty() {
         eprintln!("Nothing to modify in lock file");
-    } else {
-        let ops = &report.transaction.transaction.operations;
+    } else if write_lock {
         let count = |f: &dyn Fn(&vivacity_resolver::transaction::Operation) -> bool| {
             ops.iter().filter(|o| f(o)).count()
         };
@@ -1102,8 +1307,14 @@ fn resolve_and_lock(
             if updates == 1 { "" } else { "s" },
             if removals == 1 { "" } else { "s" }
         );
+        // `  - Locking …` / `Upgrading` / `Removing`, removals first, by name.
+        for line in vivacity_resolver::transaction::lock_operation_lines(&session.arena, ops) {
+            eprintln!("{line}");
+        }
     }
-    if write_lock {
+    // `$updatedLock && $this->writeLock && $this->executeOperations`: a dry
+    // run neither writes nor says so.
+    if write_lock && !args.dry_run {
         eprintln!("Writing lock file");
         if !unchanged {
             std::fs::write(&lock_path, &text)
@@ -1111,10 +1322,194 @@ fn resolve_and_lock(
         }
     }
     trace("write lock", t0);
+    // `Installer::run` after `doUpdate` (and after the install phase): the
+    // suggestions of the newly installed packages (and of the root on a
+    // fresh install), the abandoned packages of the new lock.
+    let fresh_install = !project.join("vendor/composer/installed.json").is_file();
+    let post = post_update_report(&session, ops, &lock, &manifest_text, fresh_install);
+    let manifest = patched_manifest(&session, &manifest_text);
     Ok(Resolved {
         status: 0,
         lock: Some(lock),
+        post,
+        manifest,
     })
+}
+
+/// composer.json with the session root's `require`/`require-dev` (the
+/// in-memory patch of a dry run applied; identical otherwise).
+fn patched_manifest(
+    session: &vivacity_resolver::session::UpdateSession,
+    manifest_text: &str,
+) -> serde_json::Value {
+    let mut manifest: serde_json::Value = serde_json::from_str(manifest_text).unwrap_or_default();
+    let links_to_object = |links: &vivacity_resolver::package::Links| -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        for l in links.iter() {
+            map.insert(
+                l.target.clone(),
+                serde_json::Value::String(l.pretty_constraint.clone()),
+            );
+        }
+        serde_json::Value::Object(map)
+    };
+    if let Some(obj) = manifest.as_object_mut() {
+        for (key, links) in [
+            ("require", &session.root.package.requires),
+            ("require-dev", &session.root.package.dev_requires),
+        ] {
+            if links.is_empty() {
+                obj.remove(key);
+            } else {
+                obj.insert(key.to_owned(), links_to_object(links));
+            }
+        }
+    }
+    manifest
+}
+
+/// The lines of `Installer::run` after a successful update:
+/// `SuggestedPackagesReporter::outputMinimalistic` (suggestions of the
+/// packages installed by this update, plus the root's own on a fresh
+/// install, minus the targets some other package provides), one warning
+/// per abandoned package of the new lock. The funding count is added by
+/// `print_post_update`.
+fn post_update_report(
+    session: &vivacity_resolver::session::UpdateSession,
+    ops: &[vivacity_resolver::transaction::Operation],
+    lock: &serde_json::Value,
+    manifest_text: &str,
+    fresh_install: bool,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    use vivacity_resolver::transaction::Operation;
+    let manifest: serde_json::Value = serde_json::from_str(manifest_text).unwrap_or_default();
+    // (source pretty name, target)
+    let mut suggestions: Vec<(String, String)> = Vec::new();
+    let add_from =
+        |suggestions: &mut Vec<(String, String)>, source: &str, raw: &serde_json::Value| {
+            if let Some(map) = raw.get("suggest").and_then(serde_json::Value::as_object) {
+                for target in map.keys() {
+                    suggestions.push((source.to_owned(), target.clone()));
+                }
+            }
+        };
+    for op in ops {
+        if let Operation::Install(idx) = op {
+            let p = &session.arena[*idx];
+            add_from(&mut suggestions, &p.pretty_name, &p.raw);
+        }
+    }
+    if fresh_install {
+        let root_name = manifest
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("__root__");
+        add_from(&mut suggestions, root_name, &manifest);
+    }
+    if !suggestions.is_empty() {
+        // `InstalledRepository([locked repo (dev mode), platform repo, root])`:
+        // `getNames()` of each package -> the packages providing that name.
+        let mut installed_names: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut add_names = |name: &str, names: Vec<String>| {
+            for n in names {
+                installed_names.entry(n).or_default().push(name.to_owned());
+            }
+        };
+        let mut lock_sections = vec!["packages"];
+        if session.installer_dev_mode {
+            lock_sections.push("packages-dev");
+        }
+        for section in lock_sections {
+            for p in lock
+                .get(section)
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let Some(name) = p.get("name").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                let name = name.to_lowercase();
+                let mut names = vec![name.clone()];
+                for key in ["provide", "replace"] {
+                    for target in p
+                        .get(key)
+                        .and_then(serde_json::Value::as_object)
+                        .into_iter()
+                        .flat_map(|m| m.keys())
+                    {
+                        if !names.contains(target) {
+                            names.push(target.clone());
+                        }
+                    }
+                }
+                add_names(&name, names);
+            }
+        }
+        for &idx in &session.platform {
+            let p = &session.arena[idx];
+            add_names(&p.name, p.names(true));
+        }
+        let root = &session.root.package;
+        add_names(&root.name, root.names(true));
+        let count = suggestions
+            .iter()
+            .filter(|(source, target)| {
+                let source_lower = source.to_lowercase();
+                !installed_names
+                    .get(target)
+                    .is_some_and(|providers| providers.iter().any(|p| *p != source_lower))
+            })
+            .count();
+        if count > 0 {
+            out.push(format!(
+                "{count} package suggestions were added by new dependencies, use `composer suggest` to see details."
+            ));
+        }
+    }
+    out.extend(abandoned_warnings(lock));
+    out
+}
+
+/// `Installer::run`: one warning per abandoned package of the lock (dev
+/// included), in lock order.
+fn abandoned_warnings(lock: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for section in ["packages", "packages-dev"] {
+        for p in lock
+            .get(section)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            // `CompletePackage::isAbandoned` = `(bool) $abandoned`,
+            // `getReplacementPackage` = the string, else null.
+            let abandoned = match p.get("abandoned") {
+                None | Some(serde_json::Value::Null) | Some(serde_json::Value::Bool(false)) => {
+                    continue
+                }
+                Some(serde_json::Value::String(s)) if s.is_empty() || s == "0" => continue,
+                Some(serde_json::Value::Number(n)) if n.as_f64() == Some(0.0) => continue,
+                Some(serde_json::Value::Array(a)) if a.is_empty() => continue,
+                Some(serde_json::Value::Object(o)) if o.is_empty() => continue,
+                Some(serde_json::Value::String(replacement)) => Some(replacement.clone()),
+                Some(_) => None,
+            };
+            let replacement = match abandoned {
+                Some(r) => format!("Use {r} instead"),
+                None => "No replacement was suggested".to_owned(),
+            };
+            out.push(format!(
+                "Package {} is abandoned, you should avoid using it. {replacement}.",
+                p.get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+            ));
+        }
+    }
+    out
 }
 
 /// `Config::get('lock')`: project then global config; `"false"` and PHP's
@@ -1153,12 +1548,13 @@ where
 fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     use vivacity_resolver::config_source::{composer_file, JsonConfigSource};
     let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
-    if args.dry_run {
-        anyhow::bail!("`remove --dry-run` is not supported yet");
-    }
     if args.minimal_changes || env_flag("COMPOSER_MINIMAL_CHANGES") {
         anyhow::bail!("`--minimal-changes` (update-with-minimal-changes) is not supported yet");
     }
+    // `--dry-run`: the links are collected instead of removed from the
+    // file, and the root package is patched in memory (`$toRemove`).
+    let dry_run = args.dry_run;
+    let mut to_remove: Vec<(bool, String)> = Vec::new();
     if args.packages.is_empty() && !args.unused {
         eprintln!("Not enough arguments (missing: \"packages\").");
         return Ok(1);
@@ -1261,16 +1657,25 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
             .unwrap_or_default()
     };
     let has_section = |section: &str| manifest.get(section).is_some_and(|v| !v.is_null());
+    let dev_key = link_type == "require-dev";
     for package in &packages {
         if let Some(name) = lookup(link_type, package) {
-            json.remove_link(link_type, &name)
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            if dry_run {
+                to_remove.push((dev_key, name));
+            } else {
+                json.remove_link(link_type, &name)
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+            }
         } else if let Some(name) = lookup(alt_type, package) {
             eprintln!("{name} could not be found in {link_type} but it is present in {alt_type}");
         } else if has_section(link_type) && !grep(link_type, package).is_empty() {
             for matched in grep(link_type, package) {
-                json.remove_link(link_type, &matched)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+                if dry_run {
+                    to_remove.push((dev_key, matched));
+                } else {
+                    json.remove_link(link_type, &matched)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?;
+                }
             }
         } else if has_section(alt_type) && !grep(alt_type, package).is_empty() {
             for matched in grep(alt_type, package) {
@@ -1293,9 +1698,12 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or(serde_json::Value::Null);
-    if let Some(serde_json::Value::Object(allow)) = vivacity_core::layout::merged_allow_plugins(
-        updated.get("config").and_then(|c| c.get("allow-plugins")),
-        vivacity_core::layout::global_allow_plugins().as_ref(),
+    if let (false, Some(serde_json::Value::Object(allow))) = (
+        dry_run,
+        vivacity_core::layout::merged_allow_plugins(
+            updated.get("config").and_then(|c| c.get("allow-plugins")),
+            vivacity_core::layout::global_allow_plugins().as_ref(),
+        ),
     ) {
         let removed: Vec<&String> = allow.keys().filter(|k| packages.contains(k)).collect();
         if !removed.is_empty() {
@@ -1338,11 +1746,18 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
         vivacity_resolver::session::UpdateOptions::default()
     };
     options.no_blocking = args.no_blocking || args.no_security_blocking;
+    if dry_run {
+        options.root_patch = Some(vivacity_resolver::root::RootPatch {
+            removals: to_remove,
+            ..Default::default()
+        });
+    }
     let update_args = UpdateArgs {
         packages: Vec::new(),
         with_dependencies: false,
         with_all_dependencies: false,
         no_install: args.no_install,
+        dry_run: args.dry_run,
         no_dev: args.update_no_dev || env_flag("COMPOSER_NO_DEV"),
         no_autoloader: args.no_autoloader,
         optimize_autoloader: args.optimize_autoloader,
@@ -1376,7 +1791,11 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
     // Is the package still in the local repository? That repository is
     // vendor/composer/installed.json minus the packages whose install path
     // no longer exists (`Factory::purgePackages` via
-    // `LibraryInstaller::isInstalled`); a metapackage always counts.
+    // `LibraryInstaller::isInstalled`); a metapackage always counts. Not
+    // checked on a dry run.
+    if dry_run {
+        return Ok(status);
+    }
     for package in &packages {
         if locally_installed(&project, package) {
             eprintln!("Removal failed, {package} is still present, it may be required by another package. See `composer why {package}`.");
@@ -1389,31 +1808,111 @@ fn run_remove(args: &RemoveArgs) -> anyhow::Result<i32> {
 /// `$composer->getRepositoryManager()->getLocalRepository()->findPackages($name)`
 /// is non-empty.
 fn locally_installed(project: &std::path::Path, name: &str) -> bool {
-    let composer_dir = project.join("vendor/composer");
-    let Some(installed) = std::fs::read_to_string(composer_dir.join("installed.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
-        return false;
-    };
-    let list = installed
-        .get("packages")
-        .and_then(|p| p.as_array())
-        .cloned()
-        .or_else(|| installed.as_array().cloned())
-        .unwrap_or_default();
-    list.iter().any(|p| {
-        if p.get("name").and_then(|n| n.as_str()) != Some(name) {
-            return false;
+    installed_packages(project)
+        .iter()
+        .any(|p| p.get("name").and_then(|n| n.as_str()) == Some(name))
+}
+
+/// `Locker::getMissingRequirementInfo`: the root requirements the lock
+/// does not satisfy — `require` against the non-dev lock, `require-dev`
+/// against the whole lock — with replacers and providers counting, and
+/// the three fixed lines when anything is missing.
+fn missing_requirement_info(
+    manifest: &serde_json::Value,
+    lock: &serde_json::Value,
+    include_dev: bool,
+) -> anyhow::Result<Vec<String>> {
+    use vivacity_resolver::constraint::{parse_constraints, Constraint, Op};
+    use vivacity_resolver::package::{Origin, Package};
+    let mut out = Vec::new();
+    let mut missing = false;
+    let root_name = manifest
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("__root__");
+    let mut sets: Vec<(bool, &str, &str)> = vec![(false, "require", "Required")];
+    if include_dev {
+        sets.push((true, "require-dev", "Required (in require-dev)"));
+    }
+    for (with_dev, key, description) in sets {
+        let mut arena: Vec<Package> = Vec::new();
+        let repo =
+            vivacity_resolver::repository::locked_repository_with(lock, &mut arena, with_dev)
+                .map_err(|e| anyhow::anyhow!("composer.lock: {}", e.0))?;
+        let Some(links) = manifest.get(key).and_then(serde_json::Value::as_object) else {
+            continue;
+        };
+        for (target, pretty) in links {
+            let target = target.to_lowercase();
+            let Some(pretty) = pretty.as_str() else {
+                continue;
+            };
+            if vivacity_resolver::platform::is_platform_package(&target) || pretty == "self.version"
+            {
+                continue;
+            }
+            let Ok(parsed) = parse_constraints(pretty) else {
+                continue;
+            };
+            // `findPackagesWithReplacersAndProviders($target, $constraint)`
+            // over [lock repo, root repo]: a package of that name, or a
+            // replacer/provider whose link matches the constraint.
+            let matches = |idx: usize, constraint: Option<&Constraint>| -> bool {
+                let p = &arena[idx];
+                if p.name == target {
+                    return constraint
+                        .is_none_or(|c| c.matches(&Constraint::new(Op::Eq, p.version.clone())));
+                }
+                p.replaces.iter().chain(p.provides.iter()).any(|l| {
+                    l.target == target && constraint.is_none_or(|c| c.matches(&l.constraint))
+                })
+            };
+            let root_matches = |constraint: Option<&Constraint>| -> bool {
+                root_name.to_lowercase() == target && constraint.is_none()
+            };
+            if repo.iter().any(|&i| matches(i, Some(&parsed.constraint)))
+                || root_matches(Some(&parsed.constraint))
+            {
+                continue;
+            }
+            let any: Option<usize> = repo.iter().copied().find(|&i| matches(i, None));
+            let line = match any {
+                Some(idx) => {
+                    let p = &arena[idx];
+                    let mut description_text = p.pretty_version.clone();
+                    if p.name != target {
+                        for (links, text) in [
+                            (&p.replaces, "replaced as {} by {}"),
+                            (&p.provides, "provided as {} by {}"),
+                        ] {
+                            if let Some(l) = links.iter().find(|l| l.target == target) {
+                                description_text =
+                                    text.replacen("{}", &l.pretty_constraint, 1).replacen(
+                                        "{}",
+                                        &format!("{} {}", p.pretty_name, p.pretty_version),
+                                        1,
+                                    );
+                                break;
+                            }
+                        }
+                    }
+                    format!("- {description} package \"{target}\" is in the lock file as \"{description_text}\" but that does not satisfy your constraint \"{pretty}\".")
+                }
+                None => {
+                    format!("- {description} package \"{target}\" is not present in the lock file.")
+                }
+            };
+            out.push(line);
+            missing = true;
         }
-        if p.get("type").and_then(|t| t.as_str()) == Some("metapackage") {
-            return true;
-        }
-        match p.get("install-path").and_then(|v| v.as_str()) {
-            Some(rel) => composer_dir.join(rel).exists(),
-            None => true,
-        }
-    })
+        let _ = Origin::Locked;
+    }
+    if missing {
+        out.push("This usually happens when composer files are incorrectly merged or the composer.json file is manually edited.".to_owned());
+        out.push("Read more about correctly resolving merge conflicts https://getcomposer.org/doc/articles/resolving-merge-conflicts.md".to_owned());
+        out.push("and prefer using the \"require\" command over editing the composer.json file directly https://getcomposer.org/doc/03-cli.md#require-r".to_owned());
+    }
+    Ok(out)
 }
 
 /// `remove --unused`: the lock's packages (non-dev) required neither by

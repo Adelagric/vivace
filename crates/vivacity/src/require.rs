@@ -80,7 +80,7 @@ pub fn config_value(manifest: &Value, key: &str) -> Option<Value> {
     v.get("config")?.get(key).cloned()
 }
 
-fn truthy(v: Option<Value>) -> bool {
+pub(crate) fn truthy(v: Option<Value>) -> bool {
     match v {
         Some(Value::Bool(b)) => b,
         Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
@@ -321,9 +321,6 @@ fn find_best_version_and_name(
 
 pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     let env_flag = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0");
-    if args.dry_run {
-        anyhow::bail!("`require --dry-run` is not supported yet");
-    }
     if args.minimal_changes || env_flag("COMPOSER_MINIMAL_CHANGES") {
         anyhow::bail!("`--minimal-changes` (update-with-minimal-changes) is not supported yet");
     }
@@ -537,7 +534,11 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
     let first_require =
         newly_created || (by_key("require").is_empty() && by_key("require-dev").is_empty());
 
-    update_file(&json, &requirements, require_key, remove_key, sort_packages)?;
+    // `--dry-run`: the file is not written (a newly created one is deleted
+    // after the update); the root package is patched in memory instead.
+    if !args.dry_run {
+        update_file(&json, &requirements, require_key, remove_key, sort_packages)?;
+    }
     eprintln!(
         "{file_label} has been {}",
         if newly_created { "created" } else { "updated" }
@@ -600,11 +601,19 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         UpdateOptions::default()
     };
     options.no_blocking = args.no_blocking || args.no_security_blocking;
+    if args.dry_run {
+        options.root_patch = Some(vivacity_resolver::root::RootPatch {
+            requirements: requirements.clone(),
+            dev: args.dev,
+            removals: Vec::new(),
+        });
+    }
     let update_args = UpdateArgs {
         packages: Vec::new(),
         with_dependencies: false,
         with_all_dependencies: false,
         no_install: args.no_install,
+        dry_run: args.dry_run,
         no_dev: args.update_no_dev || env_flag("COMPOSER_NO_DEV"),
         no_autoloader: args.no_autoloader,
         optimize_autoloader: args.optimize_autoloader,
@@ -647,16 +656,32 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         files.revert()?;
         return Ok(status);
     }
-    // After the resolution, a failing install restores nothing
-    // (`dependencyResolutionCompleted`).
+    // `$status = $install->run(); if ($status !== 0) revertComposerFile()`:
+    // a failing install phase restores the files too (an EXCEPTION after
+    // the resolution would not, `dependencyResolutionCompleted`).
     if !args.no_install {
-        let status = install_after_update(&update_args)?;
+        let virtual_lock = if args.dry_run {
+            resolved.lock.clone()
+        } else {
+            None
+        };
+        let virtual_manifest = if args.dry_run {
+            Some(resolved.manifest.clone())
+        } else {
+            None
+        };
+        let status = install_after_update(&update_args, virtual_lock, virtual_manifest)?;
         if status != 0 {
+            files.revert()?;
+            if args.dry_run && newly_created {
+                let _ = std::fs::remove_file(&json);
+            }
             return Ok(status);
         }
     }
-    if !to_guess.is_empty() {
-        return update_requirements_after_resolution(
+    crate::print_post_update(&resolved, &project);
+    let status = if !to_guess.is_empty() {
+        update_requirements_after_resolution(
             &project,
             &json,
             &lock,
@@ -669,9 +694,16 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
             remove_key,
             sort_packages,
             args.fixed,
-        );
+            args.dry_run,
+        )?
+    } else {
+        0
+    };
+    // `finally`: a json created for a dry run does not survive it.
+    if args.dry_run && newly_created {
+        let _ = std::fs::remove_file(&json);
     }
-    Ok(0)
+    Ok(status)
 }
 
 /// `updateRequirementsAfterResolution`: the final constraint of the
@@ -691,6 +723,7 @@ fn update_requirements_after_resolution(
     remove_key: &str,
     sort_packages: bool,
     fixed: bool,
+    dry_run: bool,
 ) -> anyhow::Result<i32> {
     use vivacity_resolver::package::Origin;
     // `$locker->isLocked()`: the lock the resolution just produced
@@ -745,6 +778,9 @@ fn update_requirements_after_resolution(
             eprintln!("Version {constraint} looks like it may be a feature branch which is unlikely to keep working in the long run and may be in an unstable state");
         }
         requirements.push((package_name.clone(), constraint));
+    }
+    if dry_run {
+        return Ok(0);
     }
     update_file(json, &requirements, require_key, remove_key, sort_packages)?;
     // `$locker->isLocked() && config.lock`: the freshly written lock gets

@@ -382,3 +382,147 @@ impl LockTransaction {
         used
     }
 }
+
+/// `PackageInterface::DISPLAY_*` of `getFullPrettyVersion`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DisplayRef {
+    SourceRefIfDev,
+    SourceRef,
+    DistRef,
+}
+
+/// `BasePackage::getFullPrettyVersion($truncate, $displayMode)`.
+pub fn full_pretty_version(p: &Package, truncate: bool, mode: DisplayRef) -> String {
+    let source_type = p.source.as_ref().map(|s| s.kind.as_str()).unwrap_or("");
+    let dist_ref = p
+        .dist
+        .as_ref()
+        .and_then(|d| d.reference.as_deref())
+        .unwrap_or("");
+    if mode == DisplayRef::SourceRefIfDev
+        && (!p.is_dev()
+            || (!matches!(source_type, "hg" | "git")
+                && (!source_type.is_empty() || dist_ref.is_empty())))
+    {
+        return p.pretty_version.clone();
+    }
+    let source_ref = p.source.as_ref().and_then(|s| s.reference.as_deref());
+    let reference: Option<&str> = match mode {
+        DisplayRef::SourceRefIfDev => match source_ref {
+            Some(r) if !r.is_empty() => Some(r),
+            _ => p.dist.as_ref().and_then(|d| d.reference.as_deref()),
+        },
+        DisplayRef::SourceRef => source_ref,
+        DisplayRef::DistRef => p.dist.as_ref().and_then(|d| d.reference.as_deref()),
+    };
+    let Some(reference) = reference else {
+        return p.pretty_version.clone();
+    };
+    if truncate && reference.len() == 40 && source_type != "svn" {
+        let short = String::from_utf8_lossy(&reference.as_bytes()[..7]);
+        return format!("{} {}", p.pretty_version, short);
+    }
+    format!("{} {}", p.pretty_version, reference)
+}
+
+/// `VersionParser::isUpgrade`.
+pub fn is_upgrade(from: &str, to: &str) -> bool {
+    if from == to {
+        return true;
+    }
+    let norm = |v: &str| -> String {
+        if matches!(v, "dev-master" | "dev-trunk" | "dev-default") {
+            "9999999-dev".to_owned()
+        } else {
+            v.to_owned()
+        }
+    };
+    let from = norm(from);
+    let to = norm(to);
+    if from.starts_with("dev-") || to.starts_with("dev-") {
+        return true;
+    }
+    // `Semver::sort([$to, $from])[0] === $from`: from sorts first unless
+    // it is strictly greater (a stable sort keeps `to` first on a tie).
+    !crate::phpver::version_compare_op(&to, &from, "<")
+}
+
+impl Operation {
+    /// `OperationInterface::show($lock)` without the output styles;
+    /// `None` for the alias operations (only shown in debug mode).
+    pub fn show(&self, arena: &[Package], lock: bool) -> Option<String> {
+        let full = |idx: usize| full_pretty_version(&arena[idx], true, DisplayRef::SourceRefIfDev);
+        match *self {
+            Operation::Install(p) => Some(format!(
+                "{} {} ({})",
+                if lock { "Locking" } else { "Installing" },
+                arena[p].pretty_name,
+                full(p)
+            )),
+            Operation::Uninstall(p) => {
+                Some(format!("Removing {} ({})", arena[p].pretty_name, full(p)))
+            }
+            Operation::Update(initial, target) => {
+                // `UpdateOperation::format`.
+                let (i, t) = (&arena[initial], &arena[target]);
+                let mut from = full(initial);
+                let mut to = full(target);
+                let source_ref = |p: &Package| p.source.as_ref().and_then(|s| s.reference.clone());
+                let dist_ref = |p: &Package| p.dist.as_ref().and_then(|d| d.reference.clone());
+                if from == to && source_ref(i) != source_ref(t) {
+                    from = full_pretty_version(i, true, DisplayRef::SourceRef);
+                    to = full_pretty_version(t, true, DisplayRef::SourceRef);
+                } else if from == to && dist_ref(i) != dist_ref(t) {
+                    from = full_pretty_version(i, true, DisplayRef::DistRef);
+                    to = full_pretty_version(t, true, DisplayRef::DistRef);
+                }
+                let action = if is_upgrade(&i.version, &t.version) {
+                    "Upgrading"
+                } else {
+                    "Downgrading"
+                };
+                Some(format!("{action} {} ({from} => {to})", i.pretty_name))
+            }
+            Operation::MarkAliasInstalled(_) | Operation::MarkAliasUninstalled(_) => None,
+        }
+    }
+
+    /// The package the `usort` of `Installer::doUpdate` sorts on.
+    pub fn sort_package(&self) -> usize {
+        match *self {
+            Operation::Install(p)
+            | Operation::Uninstall(p)
+            | Operation::MarkAliasInstalled(p)
+            | Operation::MarkAliasUninstalled(p) => p,
+            Operation::Update(_, t) => t,
+        }
+    }
+}
+
+/// The `  - …` lines of `Installer::doUpdate` (`show(true)`): removals
+/// first, then installs and updates, each group sorted by name
+/// (`strcmp`), alias operations left out.
+pub fn lock_operation_lines(arena: &[Package], operations: &[Operation]) -> Vec<String> {
+    let mut uninstalls: Vec<&Operation> = Vec::new();
+    let mut installs_updates: Vec<&Operation> = Vec::new();
+    for op in operations {
+        match op {
+            Operation::Uninstall(_) => uninstalls.push(op),
+            Operation::Install(_) | Operation::Update(..) => installs_updates.push(op),
+            Operation::MarkAliasInstalled(_) | Operation::MarkAliasUninstalled(_) => {}
+        }
+    }
+    let by_name = |a: &&Operation, b: &&Operation| {
+        arena[a.sort_package()]
+            .name
+            .as_bytes()
+            .cmp(arena[b.sort_package()].name.as_bytes())
+    };
+    uninstalls.sort_by(by_name);
+    installs_updates.sort_by(by_name);
+    uninstalls
+        .into_iter()
+        .chain(installs_updates)
+        .filter_map(|op| op.show(arena, true).map(|s| format!("  - {s}")))
+        .collect()
+}

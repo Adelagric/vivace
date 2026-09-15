@@ -92,6 +92,11 @@ impl Links {
         self.0.push(link);
     }
     /// `isset($links[$key])` / `$links[$key]`.
+    /// `unset($links[$name])`: removes the entry with that key, if any.
+    pub fn remove(&mut self, key: &str) {
+        self.0.retain(|l| l.key.as_deref() != Some(key));
+    }
+
     pub fn get(&self, key: &str) -> Option<&Link> {
         self.0.iter().find(|l| l.key.as_deref() == Some(key))
     }
