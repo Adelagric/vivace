@@ -104,7 +104,7 @@ line, `install`'s `Package operations`, and `--dry-run` on `update`,
 `require` and `remove` (resolution and listing, nothing written — the
 install phase lists its operations from the unwritten lock). The stderr
 of every `steps.sh` case is compared byte for byte from the first of
-those lines to the end (180 cases).
+those lines to the end (187 cases).
 
 Repositories: `composer` type only, Packagist v2 protocol and plain
 `packages.json` files, local or over HTTPS. Not yet: `--with`,
