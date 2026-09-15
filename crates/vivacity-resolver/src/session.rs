@@ -744,7 +744,7 @@ impl UpdateSession {
         let mut policy = self.policy();
         let pool = self.create_filtered_pool()?;
         for w in &pool.warnings {
-            eprintln!("Warning: {w}");
+            eprintln!("{w}");
         }
         lap("pool", &t);
         let pool = if std::env::var("COMPOSER_POOL_OPTIMIZER").as_deref() == Ok("0") {
