@@ -468,10 +468,20 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             eprintln!("Warning: {w}");
         }
         if !problems.is_empty() {
+            // `Installer::doInstall`: the headline, then
+            // `SolverProblemsException::getPrettyString` (problems
+            // deduplicated and numbered, each ending with a newline).
             eprintln!("Your lock file does not contain a compatible set of packages. Please run composer update.");
-            for (i, p) in problems.iter().enumerate() {
-                eprintln!("\n  Problem {}\n    {p}", i + 1);
+            let mut text = String::from("\n");
+            let mut seen: Vec<&String> = Vec::new();
+            for p in &problems {
+                if seen.contains(&p) {
+                    continue;
+                }
+                seen.push(p);
+                text.push_str(&format!("  Problem {}\n    {p}\n", seen.len()));
             }
+            eprintln!("{text}");
             return Ok(2);
         }
         trace("policy", t0);
@@ -1008,6 +1018,7 @@ fn resolve_and_lock(
     trace("prepare", t0);
     session.prefer_stable = prefer_stable;
     session.prefer_lowest = prefer_lowest;
+    session.installer_dev_mode = !args.no_dev;
     // BaseCommand: COMPOSER_IGNORE_PLATFORM_REQS counts as the option,
     // COMPOSER_IGNORE_PLATFORM_REQ (comma-separated list) counts as the
     // list when it is empty.

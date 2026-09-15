@@ -59,6 +59,8 @@ pub struct PoolOptimizer {
     to_remove: HashSet<usize>,
     /// base id -> alias ids.
     aliases_per_package: HashMap<usize, Vec<usize>>,
+    /// `removedVersionsByPackage`, keyed by arena index (PHP: object id).
+    removed_versions_by_package: BTreeMap<usize, BTreeMap<String, String>>,
 }
 
 impl PoolOptimizer {
@@ -70,6 +72,7 @@ impl PoolOptimizer {
             conflict_constraints: HashMap::new(),
             to_remove: HashSet::new(),
             aliases_per_package: HashMap::new(),
+            removed_versions_by_package: BTreeMap::new(),
         }
     }
 
@@ -85,11 +88,26 @@ impl PoolOptimizer {
         self.prepare(request, pool, arena);
         self.optimize_by_identical_dependencies(pool, arena, policy);
         self.optimize_impossible_packages_away(request, pool, arena);
-        let kept: Vec<usize> = (1..=pool.len())
-            .filter(|id| !self.to_remove.contains(id))
-            .map(|id| pool.package_by_id(id))
-            .collect();
-        pool.with_packages(kept, arena)
+        // `applyRemovalsToPool`: the dropped versions are remembered for the
+        // messages, per name and per kept package.
+        let mut kept: Vec<usize> = Vec::new();
+        let mut removed_versions: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        for id in 1..=pool.len() {
+            let idx = pool.package_by_id(id);
+            if self.to_remove.contains(&id) {
+                let p = &arena[idx];
+                removed_versions
+                    .entry(p.name.clone())
+                    .or_default()
+                    .insert(p.version.clone(), p.pretty_version.clone());
+            } else {
+                kept.push(idx);
+            }
+        }
+        let mut optimized = pool.with_packages(kept, arena);
+        optimized.removed_versions = removed_versions;
+        optimized.removed_versions_by_package = self.removed_versions_by_package;
+        optimized
     }
 
     fn expand_disjunctive(constraint: &Constraint) -> Vec<Constraint> {
@@ -325,34 +343,73 @@ impl PoolOptimizer {
         }
     }
 
-    /// `keepPackageInGroup` (without `recordRemovedVersionsForPackage`, which
-    /// only serves the messages).
+    /// `keepPackageInGroup`, with `recordRemovedVersionsForPackage` at the
+    /// reference's exact points (the group's versions are recorded on the
+    /// kept package BEFORE the early return, then on its alias/aliased
+    /// packages).
     fn keep_package_in_group(
         &mut self,
         id: usize,
         pool: &Pool,
         arena: &[Package],
-        _name: &str,
-        _ids: &[usize],
+        name: &str,
+        ids: &[usize],
     ) {
+        let mut versions: BTreeMap<String, String> = BTreeMap::new();
+        for &gid in ids {
+            let mut idx = pool.package_by_id(gid);
+            let gp = &arena[idx];
+            if let Some(base) = gp.alias_of.filter(|_| gp.pretty_version == "9999999-dev") {
+                idx = base;
+            }
+            versions.insert(
+                arena[idx].version.clone(),
+                arena[idx].pretty_version.clone(),
+            );
+        }
+        let idx = pool.package_by_id(id);
+        self.record_removed_versions(idx, arena, name, &versions);
         if !self.to_remove.contains(&id) {
             return;
         }
         self.to_remove.remove(&id);
-        let p = &arena[pool.package_by_id(id)];
-        if let Some(base) = p.alias_of.and_then(|b| pool.id_of(b)) {
-            self.to_remove.remove(&base);
-            if let Some(aliases) = self.aliases_per_package.get(&base) {
-                for a in aliases {
-                    self.to_remove.remove(a);
+        let p = &arena[idx];
+        if let Some(base_idx) = p.alias_of {
+            if let Some(base) = pool.id_of(base_idx) {
+                self.to_remove.remove(&base);
+                self.record_removed_versions(base_idx, arena, name, &versions);
+                if let Some(aliases) = self.aliases_per_package.get(&base).cloned() {
+                    for a in aliases {
+                        self.to_remove.remove(&a);
+                        self.record_removed_versions(pool.package_by_id(a), arena, name, &versions);
+                    }
                 }
             }
             return;
         }
-        if let Some(aliases) = self.aliases_per_package.get(&id) {
+        if let Some(aliases) = self.aliases_per_package.get(&id).cloned() {
             for a in aliases {
-                self.to_remove.remove(a);
+                self.to_remove.remove(&a);
+                self.record_removed_versions(pool.package_by_id(a), arena, name, &versions);
             }
+        }
+    }
+
+    /// `recordRemovedVersionsForPackage`: only when the package carries
+    /// `name` itself (`getNames(false)`: name + replaces).
+    fn record_removed_versions(
+        &mut self,
+        idx: usize,
+        arena: &[Package],
+        name: &str,
+        versions: &BTreeMap<String, String>,
+    ) {
+        if !arena[idx].names(false).iter().any(|n| n == name) {
+            return;
+        }
+        let entry = self.removed_versions_by_package.entry(idx).or_default();
+        for (v, p) in versions {
+            entry.insert(v.clone(), p.clone());
         }
     }
 

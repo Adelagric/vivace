@@ -50,7 +50,10 @@ fn matches_regex(re: &Option<Regex>, name: &str) -> bool {
 /// `name -> MultiConstraint(= v1, = v2, ...)` of the given packages (root
 /// aliases excluded), as `getMatchingSecurityAdvisories` and
 /// `getMatchingFilterLists` build it.
-fn constraints_by_name(packages: &[usize], arena: &[Package]) -> Vec<(String, Constraint)> {
+pub(crate) fn constraints_by_name(
+    packages: &[usize],
+    arena: &[Package],
+) -> Vec<(String, Constraint)> {
     let mut by_name: Vec<(String, Vec<Constraint>)> = Vec::new();
     for &idx in packages {
         let p = &arena[idx];
@@ -87,7 +90,7 @@ fn composer_repos(repositories: &[Repository]) -> Vec<&ComposerRepository> {
 /// `RepositorySet::getSecurityAdvisoriesForConstraints`: the advisories of
 /// all repositories, merged by name; an unreachable repository is ignored
 /// (and reported) or fatal.
-fn security_advisories_for_constraints(
+pub(crate) fn security_advisories_for_constraints(
     repositories: &[Repository],
     map: &[(String, Constraint)],
     allow_partial: bool,
@@ -254,12 +257,28 @@ pub fn security_advisory_filter(
         .collect();
     let abandoned_re = package_names_regexp(&abandoned_ignore);
     let mut kept: Vec<usize> = Vec::with_capacity(pool.packages.len());
+    let mut security_removed: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+    let mut abandoned_removed: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for &idx in &pool.packages {
         let p = &arena[idx];
         if policy.abandoned.block && is_abandoned(p) && !matches_regex(&abandoned_re, &p.name) {
+            for name in p.names(false) {
+                abandoned_removed
+                    .entry(name)
+                    .or_default()
+                    .insert(p.version.clone(), p.pretty_version.clone());
+            }
             continue;
         }
-        if !matching_advisories(p, &advisory_map).is_empty() {
+        let matching = matching_advisories(p, &advisory_map);
+        if !matching.is_empty() {
+            let ids: Vec<String> = matching.iter().map(|a| a.advisory_id.clone()).collect();
+            for name in p.names(false) {
+                security_removed
+                    .entry(name)
+                    .or_default()
+                    .insert(p.version.clone(), ids.clone());
+            }
             continue;
         }
         kept.push(idx);
@@ -267,7 +286,10 @@ pub fn security_advisory_filter(
     if kept.len() == pool.packages.len() {
         return Ok(pool);
     }
-    Ok(pool.with_packages(kept, arena))
+    let mut out = pool.with_packages(kept, arena);
+    out.security_removed = security_removed;
+    out.abandoned_removed = abandoned_removed;
+    Ok(out)
 }
 
 /// `getMatchingAdvisories`: never for a dev version; on each of the

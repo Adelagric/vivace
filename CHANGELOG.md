@@ -7,6 +7,24 @@ byte-identical-output promise are the public API.
 ## [Unreleased]
 
 ### Added
+- **Composer's explanation of an unsolvable set.** `vivacity update`,
+  `require` and `remove` now print what Composer prints when no set of
+  packages satisfies the requirements: the numbered problems with their
+  reasons (`Root composer.json requires … -> satisfiable by …`, `… conflicts
+  with …`, `… could not be found in any version`, `… does not match your
+  minimum-stability`, locked-package and platform-package variants, the
+  providers of a missing extension or library), the hints (`Potential
+  causes`, the php.ini list and `--ignore-platform-req` advice for a
+  missing extension, the `-W` advice when the lock is the cause), the
+  `--no-dev` warning and the dev-extraction failure. `Problem`,
+  `Rule::getPrettyString` and `SolverProblemsException` are ported, with
+  `RepositorySet::findPackages`/`getProviders`, `IniHelper::getAll`, and
+  the pool's bookkeeping of the versions removed by the optimizer and the
+  policies. `harness/steps.sh` gains `@stderr`: Composer's stderr from
+  the headline to the end is compared byte for byte, on 50 cases
+  (`fixtures/make-solver-problems.py` builds a registry that reaches every
+  reason branch the CLI can produce). `install` on a lock blocked by a
+  policy prints the same structure.
 - **Windows binaries and installers**: the release ships
   `vivacity-<tag>-x86_64-pc-windows-msvc.tar.gz` (with `vivacity.exe`),
   `install.sh` handles Git Bash/MSYS2, a new `install.ps1` handles

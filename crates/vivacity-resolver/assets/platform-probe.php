@@ -386,4 +386,8 @@ foreach ($loaded as $name) {
 if (defined('HHVM_VERSION')) {
     $out[] = ['kind' => 'php', 'name' => 'hhvm', 'version' => HHVM_VERSION, 'description' => 'The HHVM Runtime (64bit)'];
 }
+// XdebugHandler::getAllIniFiles() (the extension hint of an unsolvable
+// set): the loaded php.ini ('' if none) and the scanned files.
+$scanned = php_ini_scanned_files();
+$out[] = ['kind' => 'ini', 'name' => 'ini', 'version' => '', 'loaded' => (string) php_ini_loaded_file(), 'scanned' => $scanned === false ? null : $scanned];
 echo json_encode($out);

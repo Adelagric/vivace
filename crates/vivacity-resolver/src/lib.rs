@@ -20,6 +20,7 @@ pub mod policy;
 pub mod policy_config;
 pub mod pool;
 pub mod pool_filters;
+pub mod problem;
 pub mod repository;
 pub mod root;
 pub mod rule;

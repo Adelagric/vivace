@@ -13,6 +13,8 @@ pub enum Reason {
     RootRequire {
         package_name: String,
         constraint: Constraint,
+        /// `$constraint->getPrettyString()`.
+        pretty: String,
     },
     /// `RULE_FIXED`: `['package' => ...]` (arena index).
     Fixed { package: usize },

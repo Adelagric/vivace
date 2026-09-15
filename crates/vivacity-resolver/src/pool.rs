@@ -3,7 +3,7 @@
 //! is the ordered list of packages the solver will see: the order is
 //! Composer's, index by index, because the literal ids depend on it.
 
-use crate::constraint::Constraint;
+use crate::constraint::{Constraint, Op};
 use crate::intervals;
 use crate::package::{Origin, Package};
 use crate::platform::is_platform_package;
@@ -81,6 +81,8 @@ pub enum UpdateMode {
 pub struct Request {
     pub locked_repository: Option<Vec<usize>>,
     pub requires: OrderedMap<Constraint>,
+    /// `getPrettyString()` of each required constraint (the messages).
+    pub pretty_requires: OrderedMap<String>,
     pub fixed_packages: Vec<usize>,
     pub locked_packages: Vec<usize>,
     pub fixed_locked_packages: Vec<usize>,
@@ -108,6 +110,20 @@ impl Request {
         name: &str,
         constraint: Option<Constraint>,
     ) -> Result<(), PoolError> {
+        let pretty = constraint
+            .as_ref()
+            .map_or_else(|| "*".to_owned(), |c| c.to_string());
+        self.require_name_pretty(name, constraint, &pretty)
+    }
+
+    /// `requireName` with the constraint's pretty string (`^1.0`, as
+    /// written in composer.json), which only the messages show.
+    pub fn require_name_pretty(
+        &mut self,
+        name: &str,
+        constraint: Option<Constraint>,
+        pretty: &str,
+    ) -> Result<(), PoolError> {
         let name = name.to_lowercase();
         let constraint = constraint.unwrap_or(Constraint::MatchAll);
         if let Some(existing) = self.requires.get(&name) {
@@ -116,7 +132,19 @@ impl Request {
             )));
         }
         self.requires.insert(&name, constraint);
+        self.pretty_requires.insert(&name, pretty.to_owned());
         Ok(())
+    }
+
+    /// The pretty string of a root require after the platform filter:
+    /// the original text when the filter kept the constraint, otherwise
+    /// the constraint's own `__toString` (a filtered constraint has no
+    /// pretty string in Composer either).
+    pub fn pretty_require(&self, name: &str, filtered: &Constraint) -> String {
+        match (self.requires.get(name), self.pretty_requires.get(name)) {
+            (Some(original), Some(pretty)) if original == filtered => pretty.clone(),
+            _ => filtered.to_string(),
+        }
     }
 
     pub fn fix_package(&mut self, idx: usize) {
@@ -271,6 +299,17 @@ pub struct Pool {
     /// `filterListRemovedVersions`: what a filter list removed (the rule
     /// generator and the solver consult it).
     pub filter_list_removed: FilterListRemoved,
+    /// `securityRemovedVersions`: name (own name and replaced names) ->
+    /// normalized version -> advisory ids (messages only).
+    pub security_removed: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    /// `abandonedRemovedVersions`: name -> normalized version -> pretty.
+    pub abandoned_removed: BTreeMap<String, BTreeMap<String, String>>,
+    /// `removedVersions`: name -> normalized version -> pretty version of
+    /// the packages the PoolOptimizer dropped (messages only).
+    pub removed_versions: BTreeMap<String, BTreeMap<String, String>>,
+    /// `removedVersionsByPackage`: arena index of a kept package -> the
+    /// versions it stands for (`recordRemovedVersionsForPackage`).
+    pub removed_versions_by_package: BTreeMap<usize, BTreeMap<String, String>>,
 }
 
 impl Pool {
@@ -284,6 +323,10 @@ impl Pool {
             unacceptable_fixed_or_locked: unacceptable,
             warnings: Vec::new(),
             filter_list_removed: BTreeMap::new(),
+            security_removed: BTreeMap::new(),
+            abandoned_removed: BTreeMap::new(),
+            removed_versions: BTreeMap::new(),
+            removed_versions_by_package: BTreeMap::new(),
         };
         for idx in packages {
             pool.packages.push(idx);
@@ -382,11 +425,124 @@ impl Pool {
         let mut pool = Pool::new(kept, self.unacceptable_fixed_or_locked.clone(), arena);
         pool.warnings = self.warnings.clone();
         pool.filter_list_removed = self.filter_list_removed.clone();
+        pool.security_removed = self.security_removed.clone();
+        pool.abandoned_removed = self.abandoned_removed.clone();
+        pool.removed_versions = self.removed_versions.clone();
+        pool.removed_versions_by_package = self.removed_versions_by_package.clone();
         pool
+    }
+
+    /// `isSecurityRemovedPackageVersion`.
+    pub fn is_security_removed(&self, name: &str, constraint: &Constraint) -> bool {
+        !self.security_advisory_ids(name, constraint).is_empty()
+    }
+
+    /// `getSecurityAdvisoryIdentifiersForPackageVersion`: the ids of the
+    /// first removed version matching the constraint.
+    pub fn security_advisory_ids(&self, name: &str, constraint: &Constraint) -> Vec<String> {
+        self.security_removed
+            .get(name)
+            .and_then(|m| {
+                m.iter()
+                    .find(|(v, _)| constraint.matches(&Constraint::new(Op::Eq, (*v).clone())))
+                    .map(|(_, ids)| ids.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    /// `isAbandonedRemovedPackageVersion`.
+    pub fn is_abandoned_removed(&self, name: &str, constraint: &Constraint) -> bool {
+        self.abandoned_removed.get(name).is_some_and(|m| {
+            m.keys()
+                .any(|v| constraint.matches(&Constraint::new(Op::Eq, v.clone())))
+        })
+    }
+
+    /// `isFilterListRemovedPackageVersion`.
+    pub fn is_filter_list_removed_version(&self, name: &str, constraint: &Constraint) -> bool {
+        self.filter_list_removed.get(name).is_some_and(|versions| {
+            versions
+                .iter()
+                .any(|(v, _)| constraint.matches(&Constraint::new(Op::Eq, v.clone())))
+        })
+    }
+
+    /// `getFilterListEntryForPackageVersion`: list name -> text
+    /// ("flagged as malware reported by … (see …) reason: …").
+    pub fn filter_list_entries_text(
+        &self,
+        name: &str,
+        constraint: &Constraint,
+    ) -> Vec<(String, String)> {
+        let mut lists: Vec<(String, Vec<String>)> = Vec::new();
+        if let Some(versions) = self.filter_list_removed.get(name) {
+            for (v, entries) in versions {
+                if !constraint.matches(&Constraint::new(Op::Eq, v.clone())) {
+                    continue;
+                }
+                for e in entries {
+                    let source = e
+                        .source
+                        .as_deref()
+                        .filter(|s| !s.is_empty() && *s != "0")
+                        .map(|s| format!(" reported by {s}"))
+                        .unwrap_or_default();
+                    let url = e
+                        .url
+                        .as_deref()
+                        .filter(|s| !s.is_empty() && *s != "0")
+                        .map(|s| format!(" (see {s})"))
+                        .unwrap_or_default();
+                    let reason = e
+                        .reason
+                        .as_deref()
+                        .filter(|s| !s.is_empty() && *s != "0")
+                        .map(|s| format!(" reason: {s}"))
+                        .unwrap_or_default();
+                    let text = format!("{source}{url}{reason}");
+                    match lists.iter_mut().find(|(l, _)| *l == e.list_name) {
+                        Some((_, texts)) => texts.push(text),
+                        None => lists.push((e.list_name.clone(), vec![text])),
+                    }
+                }
+            }
+        }
+        lists
+            .into_iter()
+            .map(|(list, texts)| {
+                let action = if list == "malware" {
+                    "flagged as "
+                } else {
+                    "filtered by "
+                };
+                (list.clone(), format!("{action}{list}{}", texts.join(", ")))
+            })
+            .collect()
     }
 
     pub fn is_unacceptable_fixed_or_locked(&self, arena_idx: usize) -> bool {
         self.unacceptable_fixed_or_locked.contains(&arena_idx)
+    }
+
+    /// `getRemovedVersions`: the removed versions of `name` matching the
+    /// constraint, in recording order.
+    pub fn removed_versions(&self, name: &str, constraint: &Constraint) -> Vec<(String, String)> {
+        let Some(versions) = self.removed_versions.get(name) else {
+            return Vec::new();
+        };
+        versions
+            .iter()
+            .filter(|(v, _)| constraint.matches(&Constraint::new(Op::Eq, (*v).clone())))
+            .map(|(v, p)| (v.clone(), p.clone()))
+            .collect()
+    }
+
+    /// `getRemovedVersionsByPackage`.
+    pub fn removed_versions_by_package(&self, arena_idx: usize) -> Vec<(String, String)> {
+        self.removed_versions_by_package
+            .get(&arena_idx)
+            .map(|m| m.iter().map(|(v, p)| (v.clone(), p.clone())).collect())
+            .unwrap_or_default()
     }
 }
 

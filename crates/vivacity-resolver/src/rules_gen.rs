@@ -208,11 +208,13 @@ impl<'a> RuleSetGenerator<'a> {
                 for &p in &packages {
                     self.add_rules_for_package(p, filter);
                 }
+                let pretty = request.pretty_require(name, &constraint);
                 let rule = Rule::generic(
                     packages.iter().map(|&p| p as i64).collect(),
                     Reason::RootRequire {
                         package_name: name.clone(),
                         constraint,
+                        pretty,
                     },
                 );
                 let _ = self.rules.add(rule, RuleType::Request);

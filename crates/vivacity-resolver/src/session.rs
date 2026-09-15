@@ -21,7 +21,7 @@ use crate::transaction::LockTransaction;
 use crate::version::{parse_stability, regex, stability_rank};
 use pcre2::bytes::Regex;
 use serde_json::{Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -294,6 +294,14 @@ pub struct UpdateSession {
     pub php_version: String,
     /// The pool blocking policies (`createPolicyConfig`).
     pub policy_config: crate::policy_config::PolicyConfig,
+    /// `XdebugHandler::getAllIniFiles()` of the probed PHP (extension hint
+    /// of an unsolvable set).
+    pub ini_files: Vec<String>,
+    /// `ext-*` loaded by the probed PHP, before `config.platform`.
+    pub loaded_extensions: BTreeSet<String>,
+    /// `Installer::$devMode` (`--no-dev` / `--update-no-dev` clear it):
+    /// only the `--no-dev` warning of an unsolvable set reads it.
+    pub installer_dev_mode: bool,
 }
 
 impl UpdateSession {
@@ -508,7 +516,11 @@ impl UpdateSession {
             }
         }
         for link in requires.iter() {
-            request.require_name(&link.target, Some(link.constraint.clone()))?;
+            request.require_name_pretty(
+                &link.target,
+                Some(link.constraint.clone()),
+                &link.pretty_constraint,
+            )?;
         }
 
         Ok(UpdateSession {
@@ -526,6 +538,9 @@ impl UpdateSession {
             prefer_lowest: false,
             php_version,
             policy_config,
+            ini_files: crate::platform::ini_files(&probed),
+            loaded_extensions: crate::platform::loaded_extensions(&probed),
+            installer_dev_mode: true,
         })
     }
 
@@ -619,16 +634,38 @@ impl UpdateSession {
             None => self.root.package.requires.clone(),
         };
         for link in requires.iter() {
-            request.require_name(&link.target, Some(link.constraint.clone()))?;
+            request.require_name_pretty(
+                &link.target,
+                Some(link.constraint.clone()),
+                &link.pretty_constraint,
+            )?;
         }
         let mut solver = Solver::new(&pool, &self.arena);
-        let non_dev = solver.solve(&request, policy, filter).map_err(|e| match e {
-            SolveError::Problems(_) => SessionError {
-                message: "Unable to find a compatible set of packages based on your non-dev requirements alone.\nYour requirements can be resolved successfully when require-dev packages are present.\nYou may need to move packages from require-dev or some of their dependencies to require.".into(),
-                kind: SessionErrorKind::Unsolvable,
-            },
-            SolveError::Bug(b) => SessionError::new(b),
-        })?;
+        let non_dev = match solver.solve(&request, policy, filter) {
+            Ok(t) => t,
+            Err(SolveError::Problems(problems)) => {
+                drop(solver);
+                // `Installer::extractDevPackages`: `$isDevExtraction`, on a
+                // request without lock built for this solve.
+                let pretty = {
+                    let mut ctx = crate::problem::MessageContext {
+                        arena: &mut self.arena,
+                        set: &self.set,
+                        pool: &pool,
+                        request: &request,
+                        is_verbose: false,
+                        ini_files: &self.ini_files,
+                        loaded_extensions: &self.loaded_extensions,
+                    };
+                    crate::problem::pretty_string(&mut ctx, &problems, true)
+                };
+                return Err(SessionError {
+                    message: format!("Unable to find a compatible set of packages based on your non-dev requirements alone.\nYour requirements can be resolved successfully when require-dev packages are present.\nYou may need to move packages from require-dev or some of their dependencies to require.\n{pretty}"),
+                    kind: SessionErrorKind::Unsolvable,
+                });
+            }
+            Err(SolveError::Bug(b)) => return Err(SessionError::new(b)),
+        };
         transaction.set_non_dev_packages(&self.arena, &non_dev);
         Ok(())
     }
@@ -716,16 +753,25 @@ impl UpdateSession {
             PoolOptimizer::new().optimize(&self.request, &pool, &self.arena, &mut policy)
         };
         lap("optimize", &t);
-        let mut report = self.solve(&pool, &mut policy, filter).map_err(|e| match e {
-            SolveError::Problems(p) => SessionError {
-                message: format!(
-                    "Your requirements could not be resolved to an installable set of packages ({} problem(s)).",
-                    p.len()
-                ),
-                kind: SessionErrorKind::Unsolvable,
-            },
-            SolveError::Bug(b) => SessionError::new(b),
-        })?;
+        let mut report = match self.solve(&pool, &mut policy, filter) {
+            Ok(r) => r,
+            Err(SolveError::Problems(problems)) => {
+                // `Installer::doUpdate`: the headline, the pretty problems,
+                // the `--no-dev` warning.
+                let pretty = self.pretty_problems(&pool, &problems, false);
+                let mut message = format!(
+                    "Your requirements could not be resolved to an installable set of packages.\n{pretty}"
+                );
+                if !self.installer_dev_mode {
+                    message.push_str("\nRunning update with --no-dev does not mean require-dev is ignored, it just means the packages will not be installed. If dev requirements are blocking the update you have to resolve those problems.");
+                }
+                return Err(SessionError {
+                    message,
+                    kind: SessionErrorKind::Unsolvable,
+                });
+            }
+            Err(SolveError::Bug(b)) => return Err(SessionError::new(b)),
+        };
         lap("solve", &t);
         // `ValidatingArrayLoader::validatePackage` on every kept package
         // (`LockTransaction::setResultPackages`): a SecurityException stops
@@ -741,6 +787,26 @@ impl UpdateSession {
         lap("lock data", &t);
         report.transaction = transaction;
         Ok((lock, report))
+    }
+
+    /// `SolverProblemsException::getPrettyString` for problems found on
+    /// `pool` with this session's request.
+    pub fn pretty_problems(
+        &mut self,
+        pool: &Pool,
+        problems: &[crate::solver::SolvedProblem],
+        is_dev_extraction: bool,
+    ) -> String {
+        let mut ctx = crate::problem::MessageContext {
+            arena: &mut self.arena,
+            set: &self.set,
+            pool,
+            request: &self.request,
+            is_verbose: false,
+            ini_files: &self.ini_files,
+            loaded_extensions: &self.loaded_extensions,
+        };
+        crate::problem::pretty_string(&mut ctx, problems, is_dev_extraction)
     }
 
     /// `createPool` with the PoolOptimizer (unless `COMPOSER_POOL_OPTIMIZER=0`),

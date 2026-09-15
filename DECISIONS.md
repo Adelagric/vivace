@@ -390,3 +390,25 @@ sous `docs/plans/` et les entrées datées de ce fichier gardent l'ancien
 nom. Alternative écartée : garder le nom et compter sur la différence
 d'approche (oracles différentiels, port du solveur) — invisible depuis un
 nom de crate.
+
+## 2026-09-15 — Explications d'un ensemble insoluble : l'oracle est stderr (v0.7)
+
+Fait : `steps.sh` faisait tourner Composer avec `--quiet`, or `Installer`
+écrit l'en-tête au niveau QUIET et les explications au niveau normal — un
+oracle « comparer stderr » bâti sur la commande existante n'aurait vu que
+l'en-tête (méta-analyse, faille 1). Décision : pour les cas `@stderr`, la
+référence tourne sans `--quiet`, stderr capturé à part (sous GitHub Actions
+`GithubActionError` écrit `::error ::…` sur stdout, neutralisé par
+`COMPOSER_TESTS_ARE_RUNNING`), et le harness refuse un cas dont la sortie de
+référence ne contient aucune ligne `    - …` (oracle aveugle). La
+comparaison va de la ligne d'ancrage à la fin, à l'octet, rendu `--no-ansi`
+(styles `<error>`/`<warning>`/`<info>`/`<href>` retirés, `<https://…>`
+conservé). Alternatives écartées : un format « maison » (deux vocabulaires
+pour un solveur, rien de vérifiable) ; déléguer les cas insolubles à
+`composer update` (le port existe pour ne pas dépendre de PHP, et `require`
+restaure les fichiers — un sous-processus ne le coordonne pas).
+Conséquence structurelle : `SolveError::Problems` porte désormais les règles
+matérialisées (le `RuleSet` ne survit pas au solveur), le `Pool` enregistre
+les versions retirées par l'optimiseur (`recordRemovedVersionsForPackage`,
+sauté jusqu'ici « parce que seuls les messages s'en servent ») et par les
+politiques, et la sonde PHP renvoie les fichiers `.ini`.

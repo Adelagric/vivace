@@ -60,8 +60,10 @@ resolver_twin() {
     semver-*)
       base="${name#semver-}"
       cands="vendor/composer/semver/src/$base vendor/composer/semver/src/Constraint/$base" ;;
+    xdebug-handler-*)
+      cands="vendor/composer/xdebug-handler/src/${name#xdebug-handler-}" ;;
     *)
-      cands="src/Composer/DependencyResolver/$name src/Composer/Repository/$name src/Composer/Package/$name src/Composer/Package/Loader/$name src/Composer/Package/Version/$name src/Composer/Filter/PlatformRequirementFilter/$name vendor/composer/metadata-minifier/src/$name src/Composer/Policy/$name src/Composer/Advisory/$name src/Composer/FilterList/$name src/Composer/FilterList/FilterListProvider/$name" ;;
+      cands="src/Composer/DependencyResolver/$name src/Composer/Repository/$name src/Composer/Package/$name src/Composer/Package/Loader/$name src/Composer/Package/Version/$name src/Composer/Filter/PlatformRequirementFilter/$name vendor/composer/metadata-minifier/src/$name src/Composer/Policy/$name src/Composer/Advisory/$name src/Composer/FilterList/$name src/Composer/FilterList/FilterListProvider/$name src/Composer/Util/$name" ;;
   esac
   for c in $cands; do
     if php -r 'exit(@file_get_contents("phar://'"$TMP"'/composer.phar/'"$c"'") === false ? 1 : 0);' 2>/dev/null; then

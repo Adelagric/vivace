@@ -88,10 +88,19 @@ with Composer's. The port is checked on frozen snapshots by comparing the
 candidate pool, then the solver's complete decision sequence, with what
 Composer computes on the same data (`tools/oracle-pool.php`).
 
+When no set satisfies the requirements, vivacity prints Composer's
+explanation — the numbered problems with their reasons, the hints
+(`Potential causes`, the php.ini list for a missing extension, the `-W`
+advice) — word for word: `Problem::getPrettyString`, `Rule::getPrettyString`
+and `SolverProblemsException` are ported, and `harness/steps.sh` compares
+that text byte for byte with Composer's on 50 unsolvable cases (a
+synthetic registry built by `fixtures/make-solver-problems.py` reaches every
+reason branch the CLI can produce, plus real-registry cases).
+
 Repositories: `composer` type only, Packagist v2 protocol and plain
 `packages.json` files, local or over HTTPS. Not yet: `--with`,
-`vcs`/`path` repositories, Composer's explanation when a set is unsolvable,
-`--dry-run` for `update`/`require`/`remove`, `--minimal-changes`.
+`vcs`/`path` repositories, `--dry-run` for `update`/`require`/`remove`,
+`--minimal-changes`, the `--verbose` form of the explanations.
 
 Composer 2.10's dependency policies are applied the same way: versions
 covered by a security advisory or flagged on Packagist's malware list are

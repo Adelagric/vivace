@@ -16,6 +16,7 @@ to the Rust code ported from them.
 | [composer/class-map-generator](https://github.com/composer/class-map-generator) | MIT | Composer | `docs/reference/cmg-*.php` (`LICENSE.composer-class-map-generator`) | `vivacity-autoload` |
 | [composer/metadata-minifier](https://github.com/composer/metadata-minifier) | MIT | Composer | `docs/reference/resolver/MetadataMinifier.php` (`LICENSE.composer-metadata-minifier`) | `vivacity-resolver` (`loader`) |
 | [composer/installers](https://github.com/composer/installers) 2.0.0–2.3.0 | MIT | Kyle Robinson Young | `docs/reference/installers/` (`LICENSE`) | `vivacity-core` (`installers`, tables in `assets/installers/`) |
+| [composer/xdebug-handler](https://github.com/composer/xdebug-handler) | MIT | Composer | `docs/reference/resolver/xdebug-handler-*.php` (`LICENSE.composer-xdebug-handler`) | `vivacity-resolver` (`platform::ini_files`) |
 
 The PHP sources under `docs/reference/` are not part of the compiled
 crates; they are kept so that `harness/drift-reference.sh` can re-diff

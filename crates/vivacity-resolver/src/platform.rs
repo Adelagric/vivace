@@ -51,6 +51,42 @@ struct Probed {
     provides: Vec<String>,
 }
 
+/// `XdebugHandler::getAllIniFiles()` from the probe's `ini` entry:
+/// `COMPOSER_ORIGINAL_INIS` (set by a Composer restarted without xdebug)
+/// wins; else `[php_ini_loaded_file()]` + the trimmed scanned files.
+pub fn ini_files(probed: &[Value]) -> Vec<String> {
+    if let Ok(env) = std::env::var("COMPOSER_ORIGINAL_INIS") {
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        return env.split(sep).map(str::to_owned).collect();
+    }
+    let Some(entry) = probed
+        .iter()
+        .find(|v| v.get("kind").and_then(Value::as_str) == Some("ini"))
+    else {
+        return vec![String::new()];
+    };
+    let mut paths = vec![entry
+        .get("loaded")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned()];
+    if let Some(scanned) = entry.get("scanned").and_then(Value::as_str) {
+        paths.extend(scanned.split(',').map(|s| s.trim().to_owned()));
+    }
+    paths
+}
+
+/// The extensions the probed PHP has loaded (`extension_loaded`), before
+/// any `config.platform` override: `ext-<name>` keys, lowercased.
+pub fn loaded_extensions(probed: &[Value]) -> std::collections::BTreeSet<String> {
+    probed
+        .iter()
+        .filter(|v| v.get("kind").and_then(Value::as_str) == Some("ext"))
+        .filter_map(|v| v.get("name").and_then(Value::as_str))
+        .map(|n| format!("ext-{}", n.to_lowercase()))
+        .collect()
+}
+
 /// Runs the probe on the current PHP (`VIVACITY_PHP` or `php`).
 pub fn probe() -> Result<Vec<Value>, PlatformError> {
     let php = std::env::var("VIVACITY_PHP").unwrap_or_else(|_| "php".to_owned());

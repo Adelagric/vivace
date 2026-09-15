@@ -231,6 +231,8 @@ pub struct CompleteAdvisory {
     pub cve: Option<String>,
     pub severity: Option<String>,
     pub source_remote_ids: Vec<String>,
+    /// `SecurityAdvisory::$link` (the messages print it as a hyperlink).
+    pub link: Option<String>,
 }
 
 /// `PartialSecurityAdvisory::create`: constraint parsed with its two
@@ -275,6 +277,7 @@ pub fn advisory_from_data(package_name: &str, data: &Value) -> Option<Advisory> 
                         .collect()
                 })
                 .unwrap_or_default(),
+            link: data.get("link").and_then(Value::as_str).map(str::to_owned),
         })
     } else {
         None
@@ -945,6 +948,55 @@ impl ComposerRepository {
     /// `getRepoName`.
     pub fn repo_name(&self) -> String {
         format!("composer repo ({})", self.url)
+    }
+
+    /// The packages `getProviders` walks without the providers API: the
+    /// partial packages of packages.json (every version, every stability)
+    /// and the plain `packages` list (`parent::getProviders` over
+    /// `getPackages()`). Empty for a lazy p2-only repository.
+    pub fn provider_candidates(
+        &self,
+        origin: Origin,
+        arena: &mut Vec<Package>,
+    ) -> Result<Vec<usize>, RepoError> {
+        let root = self.root_data()?;
+        let all: BTreeMap<String, i32> = ["stable", "RC", "beta", "alpha", "dev"]
+            .iter()
+            .map(|s| (s.to_string(), crate::version::stability_rank(s)))
+            .collect();
+        let flags = BTreeMap::new();
+        let already = BTreeMap::new();
+        let mut out: Vec<usize> = Vec::new();
+        let names: Vec<String> = root
+            .partial_packages
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in names {
+            out.extend(
+                self.what_provides_partial(root, &name, &all, &flags, &already, origin, arena)?,
+            );
+        }
+        if let Some(plain) = &root.plain {
+            if self.members.get().is_none() {
+                let configs: Vec<Value> = plain
+                    .iter()
+                    .map(|c| Self::with_notification_url(c, root))
+                    .collect();
+                let ids = loader::load_packages(&configs, origin, arena, true)
+                    .map_err(|e| RepoError::data(e.0))?;
+                for &id in &ids {
+                    let mut p = std::mem::replace(&mut arena[id], Package::new("", "", "", origin));
+                    self.configure_package(root, &mut p);
+                    arena[id] = p;
+                }
+                let _ = self.members.set(ids);
+            }
+            if let Some(members) = self.members.get() {
+                out.extend(members.iter().copied());
+            }
+        }
+        Ok(out)
     }
 
     /// `hasSecurityAdvisories`.

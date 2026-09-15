@@ -61,6 +61,39 @@ impl Problem {
     pub fn next_section(&mut self) {
         self.pending_section = true;
     }
+
+    /// The problem with its rules materialised (the `RuleSet` does not
+    /// outlive the solver; the messages are formatted later).
+    fn materialize(self, rules: &RuleSet) -> SolvedProblem {
+        SolvedProblem {
+            sections: self
+                .sections
+                .into_iter()
+                .map(|section| {
+                    section
+                        .into_iter()
+                        .map(|r| match r {
+                            ProblemRule::InSet(id) => rules.rules[id].clone(),
+                            ProblemRule::Detached(rule) => rule,
+                        })
+                        .collect()
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A `Problem` handed out by the solver: its reasons by section, owned.
+#[derive(Debug, Clone)]
+pub struct SolvedProblem {
+    pub sections: Vec<Vec<Rule>>,
+}
+
+impl SolvedProblem {
+    /// `array_merge(...array_reverse($this->reasons))`: last section first.
+    pub fn reasons(&self) -> Vec<&Rule> {
+        self.sections.iter().rev().flatten().collect()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,7 +101,7 @@ pub enum SolveError {
     #[error("{0}")]
     Bug(String),
     #[error("Your requirements could not be resolved to an installable set of packages.")]
-    Problems(Vec<Problem>),
+    Problems(Vec<SolvedProblem>),
 }
 
 impl From<SolverBug> for SolveError {
@@ -203,11 +236,13 @@ impl<'a> Solver<'a> {
                 .is_empty()
             {
                 let mut problem = Problem::new();
+                let pretty = request.pretty_require(name, &constraint);
                 problem.add_detached(Rule::generic(
                     Vec::new(),
                     Reason::RootRequire {
                         package_name: name.clone(),
                         constraint,
+                        pretty,
                     },
                 ));
                 self.problems.push(problem);
@@ -242,7 +277,13 @@ impl<'a> Solver<'a> {
         self.make_assertion_rule_decisions()?;
         self.run_sat(policy)?;
         if !self.problems.is_empty() {
-            return Err(SolveError::Problems(std::mem::take(&mut self.problems)));
+            let problems = std::mem::take(&mut self.problems);
+            return Err(SolveError::Problems(
+                problems
+                    .into_iter()
+                    .map(|p| p.materialize(&self.rules))
+                    .collect(),
+            ));
         }
         Ok(LockTransaction::new(
             self.pool,
@@ -298,10 +339,7 @@ impl<'a> Solver<'a> {
     ) -> Result<i64, SolveError> {
         level += 1;
         self.decisions.decide(literal, level, rule)?;
-        loop {
-            let Some(conflict) = self.propagate(level)? else {
-                break;
-            };
+        while let Some(conflict) = self.propagate(level)? {
             if level == 1 {
                 self.analyze_unsolvable(conflict);
                 return Ok(0);
