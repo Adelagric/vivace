@@ -52,10 +52,20 @@ pub fn cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("VIVACITY_CACHE_DIR") {
         return PathBuf::from(d);
     }
+    #[cfg(windows)]
+    {
+        if let Ok(l) = std::env::var("LOCALAPPDATA") {
+            if !l.is_empty() {
+                return PathBuf::from(l).join("vivacity");
+            }
+        }
+    }
     if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
         return PathBuf::from(xdg).join("vivacity");
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_owned());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_owned());
     if cfg!(target_os = "macos") {
         PathBuf::from(home).join("Library/Caches/vivacity")
     } else {
@@ -168,16 +178,20 @@ impl Platform {
 }
 
 fn binary_identity(php: &str) -> Option<(String, i64, u64)> {
-    let path = if php.contains('/') {
+    let path = if php.contains('/') || php.contains('\\') {
         PathBuf::from(php)
     } else {
-        let out = Command::new("which").arg(php).output().ok()?;
+        // `which` does not exist on Windows; `where` prints one line per
+        // match, the first being the one the shell would launch.
+        let finder = if cfg!(windows) { "where" } else { "which" };
+        let out = Command::new(finder).arg(php).output().ok()?;
         if !out.status.success() {
             return None;
         }
-        PathBuf::from(String::from_utf8(out.stdout).ok()?.trim())
+        let stdout = String::from_utf8(out.stdout).ok()?;
+        PathBuf::from(stdout.lines().next()?.trim())
     };
-    let canonical = std::fs::canonicalize(&path).ok()?;
+    let canonical = crate::pathutil::canonicalize(&path).ok()?;
     let meta = std::fs::metadata(&canonical).ok()?;
     let mtime = meta
         .modified()

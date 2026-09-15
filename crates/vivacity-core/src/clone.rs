@@ -46,6 +46,13 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<()> {
             let target = std::fs::read_link(&from).map_err(Error::io(&from))?;
             #[cfg(unix)]
             std::os::unix::fs::symlink(&target, &to).map_err(Error::io(&to))?;
+            #[cfg(windows)]
+            clone_symlink_windows(&from, &target, &to)?;
+            #[cfg(not(any(unix, windows)))]
+            {
+                let _ = target;
+                std::fs::copy(&from, &to).map_err(Error::io(&to))?;
+            }
         } else {
             // Hardlink first (free); copy if the FS refuses (other volume).
             if std::fs::hard_link(&from, &to).is_err() {
@@ -54,6 +61,32 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Windows: creating symlinks requires a privilege (Developer Mode or
+/// SeCreateSymbolicLinkPrivilege). We try the real symlink, and failing that
+/// copy the RESOLVED content — the resulting vendor/ is functional but no
+/// longer a link (a parity divergence documented in docs/windows.md). A
+/// dangling link fails loudly instead of vanishing silently.
+#[cfg(windows)]
+fn clone_symlink_windows(from: &Path, target: &Path, to: &Path) -> Result<()> {
+    let is_dir = std::fs::metadata(from).map(|m| m.is_dir()).unwrap_or(false);
+    let made = if is_dir {
+        std::os::windows::fs::symlink_dir(target, to)
+    } else {
+        std::os::windows::fs::symlink_file(target, to)
+    };
+    if made.is_ok() {
+        return Ok(());
+    }
+    if is_dir {
+        link_or_copy_tree(from, to) // read_dir follows the link
+    } else {
+        if std::fs::hard_link(from, to).is_err() {
+            std::fs::copy(from, to).map_err(Error::io(to))?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -74,6 +107,18 @@ mod tests {
                 .expect("chmod");
             std::os::unix::fs::symlink("a.txt", src.join("link")).expect("ln");
         }
+        // Windows: the fixture's link requires Developer Mode or
+        // SeCreateSymbolicLinkPrivilege — without it we cannot build the
+        // fixture, so that portion is announced and then skipped (the copy
+        // fallback of clone_symlink_windows cannot be forced from here).
+        #[cfg(windows)]
+        let with_link = match std::os::windows::fs::symlink_file("a.txt", src.join("link")) {
+            Ok(()) => true,
+            Err(e) => {
+                eprintln!("symlink refused on this host ({e}) — link portion not exercised");
+                false
+            }
+        };
 
         let dst = tmp.path().join("dst/pkg");
         clone_tree(&src, &dst).expect("clone");
@@ -92,6 +137,19 @@ mod tests {
                 .expect("meta")
                 .file_type()
                 .is_symlink());
+        }
+        #[cfg(windows)]
+        if with_link {
+            // Never a lost entry: either a real link (privilege present —
+            // the same one that allowed the fixture), or a copy of the
+            // resolved content; in both cases reading yields the target's
+            // content.
+            let meta = dst.join("link").symlink_metadata().expect("entry lost");
+            assert!(
+                meta.file_type().is_symlink() || meta.file_type().is_file(),
+                "neither link nor file"
+            );
+            assert_eq!(std::fs::read(dst.join("link")).expect("read"), b"hello");
         }
         // Modifying the clone does not touch the source (CoW or hardlink:
         // we replace the file, we do not edit it in place).

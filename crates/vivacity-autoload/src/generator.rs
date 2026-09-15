@@ -158,14 +158,14 @@ pub fn dump(
 ) -> Result<DumpReport, AutoloadError> {
     let mut report = DumpReport::default();
     let base_path = normalize_path(
-        &std::fs::canonicalize(project_dir)
+        &vivacity_core::pathutil::canonicalize(project_dir)
             .map_err(io(project_dir))?
             .to_string_lossy(),
     );
     let vendor_dir = project_dir.join("vendor");
     std::fs::create_dir_all(&vendor_dir).map_err(io(&vendor_dir))?;
     let vendor_path = normalize_path(
-        &std::fs::canonicalize(&vendor_dir)
+        &vivacity_core::pathutil::canonicalize(&vendor_dir)
             .map_err(io(&vendor_dir))?
             .to_string_lossy(),
     );
@@ -576,7 +576,7 @@ fn string_list(v: Option<&Value>) -> Vec<String> {
 }
 
 fn absolute(base: &str, path: &str) -> String {
-    if path.starts_with('/') {
+    if vivacity_core::pathutil::is_absolute_path(path) {
         path.to_owned()
     } else {
         format!("{base}/{path}")
@@ -845,7 +845,7 @@ fn exclusion_piece(p: &Pkg, path: &str, base_path: &str) -> Option<String> {
         Some(s) if !s.is_empty() => s.clone(),
         _ => base_path.to_owned(),
     };
-    let resolved = std::fs::canonicalize(format!("{install}/{updir}")).ok()?;
+    let resolved = vivacity_core::pathutil::canonicalize(format!("{install}/{updir}")).ok()?;
     let resolved = normalize_path(&resolved.to_string_lossy());
     Some(format!("{}/{rest}($|/)", preg_quote(&resolved)))
 }
@@ -860,7 +860,7 @@ fn build_exclusion_regex(
     }
     let mut kept: Vec<String> = excluded.to_vec();
     if Path::new(dir).exists() {
-        let real = std::fs::canonicalize(dir)
+        let real = vivacity_core::pathutil::canonicalize(dir)
             .map(|p| normalize_path(&p.to_string_lossy()))
             .unwrap_or_else(|_| dir.to_owned());
         let dir_match = preg_quote(&real);
@@ -915,7 +915,7 @@ fn get_path_code(base_path: &str, vendor_path: &str, path: &str) -> String {
         )
     } else {
         let short = normalize_path(&find_shortest_path(base_path, &abs));
-        if short.starts_with('/') {
+        if vivacity_core::pathutil::is_absolute_path(&short) {
             (String::new(), short)
         } else {
             ("$baseDir . ".to_owned(), format!("/{short}"))
@@ -935,7 +935,7 @@ fn absolute_value(base_path: &str, vendor_path: &str, path: &str) -> String {
         abs
     } else {
         let short = normalize_path(&find_shortest_path(base_path, &abs));
-        if short.starts_with('/') {
+        if vivacity_core::pathutil::is_absolute_path(&short) {
             short
         } else {
             format!("{base_path}/{short}")

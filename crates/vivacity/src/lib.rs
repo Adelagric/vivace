@@ -340,7 +340,11 @@ struct InstallArgs {
     working_dir: Option<PathBuf>,
     /// Internal: run `composer install` as a subprocess instead of
     /// replacing the process (when the caller still has work to do after).
+    /// Off Unix there is no `exec()`: the subprocess is the only mode, and
+    /// this field is never read (hence the `allow` — callers still set it
+    /// so there is a single construction flow).
     #[arg(skip)]
+    #[cfg_attr(not(unix), allow(dead_code))]
     spawn_fallback: bool,
     /// Internal: install following a resolution (`doInstall` with
     /// `alreadySolved`); the lock pool has already been filtered.
@@ -788,8 +792,15 @@ fn fallback_or_fail(
 
 fn which_composer() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+    // On Windows, composer installs itself as composer.bat/.cmd (a wrapper
+    // around the .phar); `Command` can launch a .bat (via cmd.exe).
+    let names: &[&str] = if cfg!(windows) {
+        &["composer.bat", "composer.cmd", "composer.exe", "composer"]
+    } else {
+        &["composer"]
+    };
     std::env::split_paths(&path)
-        .map(|d| d.join("composer"))
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|c| c.is_file())
 }
 

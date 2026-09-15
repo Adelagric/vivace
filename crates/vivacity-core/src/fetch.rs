@@ -99,10 +99,12 @@ impl Auth {
 }
 
 /// `Factory::useXdg`: true as soon as any `XDG_*` environment variable exists.
+#[cfg(not(windows))]
 fn use_xdg() -> bool {
     std::env::vars_os().any(|(k, _)| k.to_string_lossy().starts_with("XDG_"))
 }
 
+#[cfg(not(windows))]
 fn user_dir() -> Option<PathBuf> {
     std::env::var("HOME")
         .ok()
@@ -110,33 +112,48 @@ fn user_dir() -> Option<PathBuf> {
 }
 
 /// `Factory::getHomeDir` (docs/reference/Factory.php): COMPOSER_HOME, else
-/// the first existing directory among `$XDG_CONFIG_HOME/composer` (if XDG is
-/// in use) and `~/.composer`, else the first candidate.
+/// on Windows `%APPDATA%/Composer`, else the first existing directory among
+/// `$XDG_CONFIG_HOME/composer` (if XDG is in use) and `~/.composer`, else
+/// the first candidate.
 pub fn composer_home() -> Option<PathBuf> {
     if let Ok(h) = std::env::var("COMPOSER_HOME") {
         if !h.is_empty() {
             return Some(PathBuf::from(h));
         }
     }
-    let user = user_dir()?;
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if use_xdg() {
-        let xdg = std::env::var("XDG_CONFIG_HOME")
+    #[cfg(windows)]
+    {
+        // Composer requires APPDATA on Windows (throws otherwise); here it
+        // is None, and the layers above (auth.json, config.json) cope
+        // without it.
+        std::env::var("APPDATA")
             .ok()
             .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| user.join(".config"));
-        dirs.push(xdg.join("composer"));
+            .map(|a| PathBuf::from(a.trim_end_matches(['/', '\\'])).join("Composer"))
     }
-    dirs.push(user.join(".composer"));
-    dirs.iter()
-        .find(|d| d.is_dir())
-        .cloned()
-        .or_else(|| dirs.first().cloned())
+    #[cfg(not(windows))]
+    {
+        let user = user_dir()?;
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        if use_xdg() {
+            let xdg = std::env::var("XDG_CONFIG_HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| user.join(".config"));
+            dirs.push(xdg.join("composer"));
+        }
+        dirs.push(user.join(".composer"));
+        dirs.iter()
+            .find(|d| d.is_dir())
+            .cloned()
+            .or_else(|| dirs.first().cloned())
+    }
 }
 
 /// `Factory::getCacheDir`: COMPOSER_CACHE_DIR; else `$COMPOSER_HOME/cache`
-/// if COMPOSER_HOME is set; Darwin -> `~/Library/Caches/composer`;
+/// if COMPOSER_HOME is set; Windows -> `%LOCALAPPDATA%/Composer` (else
+/// `<home>/cache`); Darwin -> `~/Library/Caches/composer`;
 /// `~/.composer/cache` if it exists; XDG -> `$XDG_CACHE_HOME/composer`;
 /// else `<home>/cache`.
 pub fn composer_cache_dir() -> PathBuf {
@@ -150,23 +167,37 @@ pub fn composer_cache_dir() -> PathBuf {
             return PathBuf::from(h).join("cache");
         }
     }
-    let user = user_dir().unwrap_or_else(|| PathBuf::from("."));
-    let home = composer_home().unwrap_or_else(|| user.join(".composer"));
-    if cfg!(target_os = "macos") {
-        return user.join("Library/Caches/composer");
+    #[cfg(windows)]
+    {
+        if let Ok(l) = std::env::var("LOCALAPPDATA") {
+            if !l.is_empty() {
+                return PathBuf::from(l.trim_end_matches(['/', '\\'])).join("Composer");
+            }
+        }
+        composer_home()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("cache")
     }
-    if home == user.join(".composer") && home.join("cache").is_dir() {
-        return home.join("cache");
+    #[cfg(not(windows))]
+    {
+        let user = user_dir().unwrap_or_else(|| PathBuf::from("."));
+        let home = composer_home().unwrap_or_else(|| user.join(".composer"));
+        if cfg!(target_os = "macos") {
+            return user.join("Library/Caches/composer");
+        }
+        if home == user.join(".composer") && home.join("cache").is_dir() {
+            return home.join("cache");
+        }
+        if use_xdg() {
+            let xdg = std::env::var("XDG_CACHE_HOME")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| user.join(".cache"));
+            return xdg.join("composer");
+        }
+        home.join("cache")
     }
-    if use_xdg() {
-        let xdg = std::env::var("XDG_CACHE_HOME")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| user.join(".cache"));
-        return xdg.join("composer");
-    }
-    home.join("cache")
 }
 
 /// Cache path of a dist, identical to Composer's: sha1 of the FULL URL
@@ -447,7 +478,8 @@ mod tests {
             "monolog/monolog",
             "https://api.github.com/repos/Seldaek/monolog/zipball/abc",
         );
-        let s = p.to_string_lossy();
+        // `join` separates with `\` on Windows: compare in normalized form.
+        let s = p.to_string_lossy().replace('\\', "/");
         assert!(s.starts_with("/c/files/monolog/monolog/"));
         assert!(s.ends_with(".zip"));
         assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");

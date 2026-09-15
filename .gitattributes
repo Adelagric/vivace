@@ -1,0 +1,6 @@
+# vivacity generates files that are compared to Composer byte-for-byte
+# (autoload files, docs/reference fingerprints). Composer writes LF
+# everywhere, including on Windows: the checkout must therefore be LF
+# everywhere, otherwise core.autocrlf=true turns the include_str! assets and
+# the reference sources into CRLF, which breaks fingerprints and parity.
+* text=auto eol=lf

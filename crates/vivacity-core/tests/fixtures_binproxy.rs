@@ -50,3 +50,258 @@ fn proxies_match_composer_byte_for_byte() {
     }
     assert!(checked >= 5, "too few proxies compared: {checked}");
 }
+
+fn scratch_pkg(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!("vivacity-bat-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let vendor = root.join("vendor");
+    let pkg = vendor.join("nikic/php-parser");
+    std::fs::create_dir_all(pkg.join("bin")).unwrap();
+    // Real PHP target with a shebang -> caller `php`.
+    std::fs::write(
+        pkg.join("bin/php-parse"),
+        "#!/usr/bin/env php\n<?php\nrequire __DIR__.'/../lib/x.php';\n",
+    )
+    .unwrap();
+    (root, vendor, pkg)
+}
+
+/// Under a `full` bin-compat the `.bat` proxy is written next to the unixy
+/// proxy and its content is byte-identical to `generateWindowsProxyCode`.
+/// Self-contained: depends neither on the fixture, nor on Composer, nor on
+/// the network — so it runs everywhere.
+#[test]
+fn bat_proxy_bytes_match_composer_under_full_bin_compat() {
+    use vivacity_core::binproxy::{install_binaries, windows_proxy_content, BinCompat};
+
+    let (root, vendor, pkg) = scratch_pkg("bytes");
+    install_binaries(&vendor, &pkg, &["bin/php-parse"], BinCompat::Full).expect("install_binaries");
+
+    let proxy = vendor.join("bin").join("php-parse");
+    let bat = vendor.join("bin").join("php-parse.bat");
+    assert!(proxy.is_file(), "unixy proxy missing");
+    assert!(bat.is_file(), ".bat proxy missing under bin-compat full");
+
+    // Expected bytes of generateWindowsProxyCode for a PHP target named
+    // `php-parse` (caller = php, target = the neighbouring proxy), verified
+    // byte-for-byte against Composer 2.10.3 (php-parse.bat = 136 bytes, CRLF
+    // line endings).
+    let expected = "@ECHO OFF\r\n\
+         setlocal DISABLEDELAYEDEXPANSION\r\n\
+         SET BIN_TARGET=%~dp0/php-parse\r\n\
+         SET COMPOSER_RUNTIME_BIN_DIR=%~dp0\r\n\
+         php \"%BIN_TARGET%\" %*\r\n";
+    let got = std::fs::read_to_string(&bat).expect("read .bat");
+    assert_eq!(got, expected, ".bat diverges from Composer");
+    assert_eq!(got.len(), 136, ".bat must be 136 bytes");
+
+    // `windows_proxy_content` produces the same bytes directly.
+    let direct = windows_proxy_content(&bat, "php-parse", &pkg.join("bin/php-parse")).unwrap();
+    assert_eq!(direct, expected);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The `.bat` follows `bin-compat`, not "everywhere":
+/// `BinaryInstaller::installBinaries` resolves `auto` to `full` only on
+/// Windows/WSL, and `config.bin-compat: "full"` forces it anywhere;
+/// everything else goes through `installUnixyProxyBinaries` alone — a plain
+/// Linux/macOS Composer writes NO `.bat`, and so must vivacity.
+#[test]
+fn bat_follows_resolved_bin_compat() {
+    use serde_json::json;
+    use vivacity_core::binproxy::{install_binaries, resolve_bin_compat_with, BinCompat};
+
+    // The resolution rule of BinaryInstaller::installBinaries + the
+    // COMPOSER_BIN_COMPAT override of Config::get('bin-compat').
+    let empty = json!({});
+    let full = json!({"config": {"bin-compat": "full"}});
+    let proxy = json!({"config": {"bin-compat": "proxy"}});
+    for (env, manifest, windows_or_wsl, want) in [
+        (None, &empty, false, BinCompat::Proxy), // auto on plain Linux/macOS
+        (None, &empty, true, BinCompat::Full),   // auto on Windows/WSL
+        (None, &full, false, BinCompat::Full),   // config full, anywhere
+        (None, &proxy, true, BinCompat::Proxy),  // config proxy, even on Windows
+        (Some("full"), &proxy, false, BinCompat::Full), // env overrides config
+        (Some("symlink"), &empty, true, BinCompat::Proxy), // deprecated = non-full
+    ] {
+        assert_eq!(
+            resolve_bin_compat_with(env, manifest, windows_or_wsl).unwrap(),
+            want,
+            "env={env:?} manifest={manifest} windows_or_wsl={windows_or_wsl}"
+        );
+    }
+    assert!(
+        resolve_bin_compat_with(None, &json!({"config": {"bin-compat": "nope"}}), false).is_err(),
+        "an invalid bin-compat is refused, like Composer"
+    );
+
+    // Proxy mode writes the unixy proxy alone — no `.bat` at all.
+    let (root, vendor, pkg) = scratch_pkg("rule");
+    install_binaries(&vendor, &pkg, &["bin/php-parse"], BinCompat::Proxy)
+        .expect("install_binaries");
+    assert!(
+        vendor.join("bin/php-parse").is_file(),
+        "unixy proxy missing"
+    );
+    assert!(
+        !vendor.join("bin/php-parse.bat").exists(),
+        ".bat written under proxy mode — Composer writes it only when \
+         bin-compat resolves to full"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `installFullBinaries` SKIPS an existing `<name>.bat` (Composer: "Skipped
+/// installation of bin … a .bat proxy was already installed") instead of
+/// overwriting it; the unixy proxy is still (re)written.
+#[test]
+fn bat_proxy_existing_is_skipped_not_overwritten() {
+    use vivacity_core::binproxy::{install_binaries, BinCompat};
+
+    let (root, vendor, pkg) = scratch_pkg("skip");
+    let bat = vendor.join("bin/php-parse.bat");
+    std::fs::create_dir_all(vendor.join("bin")).unwrap();
+    let sentinel = "@ECHO OFF\r\nREM user-managed proxy\r\n";
+    std::fs::write(&bat, sentinel).unwrap();
+
+    install_binaries(&vendor, &pkg, &["bin/php-parse"], BinCompat::Full).expect("install_binaries");
+
+    assert!(
+        vendor.join("bin/php-parse").is_file(),
+        "unixy proxy missing"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&bat).unwrap(),
+        sentinel,
+        "an existing .bat proxy must be skipped, not overwritten"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `determineBinaryCaller`: `call` for a `.bat` or `.exe` target only (NOT
+/// `.cmd`); the shebang regex keeps everything after the last `/`,
+/// arguments included; and a non-`php` caller targets the real binary via
+/// `findShortestPath`, not the neighbouring proxy.
+#[test]
+fn bat_caller_matches_determine_binary_caller() {
+    use std::path::Path;
+    use vivacity_core::binproxy::{windows_binary_caller, windows_proxy_content};
+
+    // `.bat`/`.exe`: `call`, decided on the path alone (the file is not
+    // read) — and the target is the shortest path to the real binary.
+    let content = windows_proxy_content(
+        Path::new("/work/vendor/bin/tool.bat"),
+        "tool",
+        Path::new("/work/vendor/acme/tool/bin/tool.exe"),
+    )
+    .unwrap();
+    assert_eq!(
+        content,
+        "@ECHO OFF\r\n\
+         setlocal DISABLEDELAYEDEXPANSION\r\n\
+         SET BIN_TARGET=%~dp0/../acme/tool/bin/tool.exe\r\n\
+         SET COMPOSER_RUNTIME_BIN_DIR=%~dp0\r\n\
+         call \"%BIN_TARGET%\" %*\r\n"
+    );
+
+    let root = std::env::temp_dir().join(format!("vivacity-bat-caller-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    // `.cmd` is NOT `call` in the reference: the file is read like any
+    // other, and without a shebang the caller falls back to `php`.
+    let cmd = root.join("run.cmd");
+    std::fs::write(&cmd, "@echo off\r\necho hi\r\n").unwrap();
+    assert_eq!(windows_binary_caller(&cmd).unwrap(), "php");
+
+    // The shebang keeps its arguments: `{^#!/(?:usr/bin/env )?(?:[^/]+/)*(.+)$}m`
+    // captures everything after the last `/`, trim()ed.
+    for (shebang, want) in [
+        (
+            "#!/usr/bin/env php -dmemory_limit=1G\n",
+            "php -dmemory_limit=1G",
+        ),
+        ("#!/usr/bin/php -n\r\n", "php -n"),
+        ("#!/bin/sh\n", "sh"),
+        ("#!php\n", "php"), // no `#!/`: the regex does not match -> default
+    ] {
+        let f = root.join("target-bin");
+        std::fs::write(&f, format!("{shebang}<?php\n")).unwrap();
+        assert_eq!(
+            windows_binary_caller(&f).unwrap(),
+            want,
+            "shebang {shebang:?}"
+        );
+    }
+
+    // A non-`php` caller (here `php -n`) targets the REAL binary via the
+    // shortest path — only the plain `php` caller goes through the
+    // neighbouring unixy proxy.
+    let pkg_bin = root.join("vendor/acme/tool/bin");
+    std::fs::create_dir_all(&pkg_bin).unwrap();
+    let target = pkg_bin.join("tool");
+    std::fs::write(&target, "#!/usr/bin/env php -n\n<?php\n").unwrap();
+    let bat = root.join("vendor/bin/tool.bat");
+    let content = windows_proxy_content(&bat, "tool", &target).unwrap();
+    assert_eq!(
+        content,
+        "@ECHO OFF\r\n\
+         setlocal DISABLEDELAYEDEXPANSION\r\n\
+         SET BIN_TARGET=%~dp0/../acme/tool/bin/tool\r\n\
+         SET COMPOSER_RUNTIME_BIN_DIR=%~dp0\r\n\
+         php -n \"%BIN_TARGET%\" %*\r\n"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// ACTUALLY executes the `.bat` proxy: cmd.exe must launch `php` (from PATH)
+/// on the neighbouring unixy proxy, set `COMPOSER_RUNTIME_BIN_DIR` and pass
+/// the arguments through. Ignored by default because it requires a `php` on
+/// PATH; the Windows CI runs it explicitly (`--ignored`). Run without php it
+/// FAILS with a clear message — never a silent skip, like the oracles.
+#[cfg(windows)]
+#[test]
+#[ignore = "requires `php` on PATH — run by the Windows CI via --ignored"]
+fn bat_proxy_executes_with_a_real_php() {
+    use vivacity_core::binproxy::{install_binaries, resolve_bin_compat, BinCompat};
+
+    let root = std::env::temp_dir().join(format!("vivacity-bat-exec-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let vendor = root.join("vendor");
+    let pkg = vendor.join("acme/tool");
+    std::fs::create_dir_all(pkg.join("bin")).unwrap();
+    std::fs::write(
+        pkg.join("bin/greet"),
+        "#!/usr/bin/env php\n<?php\n\
+         $dir = getenv('COMPOSER_RUNTIME_BIN_DIR') !== false ? 'bin-dir-set' : 'bin-dir-missing';\n\
+         echo 'vivacity-bat:' . implode(',', array_slice($argv, 1)) . ':' . $dir . \"\n\";\n",
+    )
+    .unwrap();
+    // On Windows the default `auto` must itself resolve to full — the same
+    // path a real `vivacity install` takes with no config at all.
+    let compat = resolve_bin_compat(&serde_json::json!({})).expect("resolve bin-compat");
+    assert_eq!(
+        compat,
+        BinCompat::Full,
+        "auto must resolve to full on Windows"
+    );
+    install_binaries(&vendor, &pkg, &["bin/greet"], compat).expect("install_binaries");
+
+    // Rust can launch a .bat directly (it goes through cmd.exe, escaping the
+    // arguments) — the same path as a user typing `vendor\bin\greet`.
+    let bat = vendor.join("bin").join("greet.bat");
+    let out = std::process::Command::new(&bat)
+        .args(["alpha", "beta"])
+        .output()
+        .expect("launch the .bat via cmd.exe");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        ".bat failed (php missing from PATH?)\nstdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(stdout.trim_end(), "vivacity-bat:alpha,beta:bin-dir-set");
+    let _ = std::fs::remove_dir_all(&root);
+}

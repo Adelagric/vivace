@@ -19,6 +19,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VIVACITY="$ROOT/target/release/vivacity"
+# Windows (Git Bash) : l'artefact cargo est vivacity.exe — le préférer quand
+# il existe, pour qu'un binaire unixy résiduel ne le masque pas. Gardé par
+# uname : sous WSL, l'interop binfmt rend un .exe « exécutable » aussi.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) if [ -x "${VIVACITY}.exe" ]; then VIVACITY="${VIVACITY}.exe"; fi ;;
+esac
 WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}"
 AUTOLOAD_FLAG="--no-autoloader"
 if [ "${1:-}" = "--with-autoloader" ]; then AUTOLOAD_FLAG=""; shift; fi
