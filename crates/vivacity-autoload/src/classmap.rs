@@ -446,9 +446,17 @@ impl CacheSlot {
                 return;
             }
         }
-        let tmp = self.file.with_extension("bin.tmp");
-        if std::fs::write(&tmp, &buf).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.file);
+        // A unique temporary name: the same slot can be written by two
+        // directories scanned in parallel (or by two processes); each
+        // writer renames its own complete file over the slot.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tmp = self.file.with_extension(format!(
+            "{}.{}.tmp",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        if std::fs::write(&tmp, &buf).is_ok() && std::fs::rename(&tmp, &self.file).is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 }

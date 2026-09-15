@@ -82,8 +82,13 @@ fn link_or_copy_tree(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(target_os = "linux")]
 fn reflink(from: &Path, to: &Path) -> bool {
     use std::os::unix::io::AsRawFd as _;
-    // FICLONE = _IOW(0x94, 9, int) = 0x40049409.
-    const FICLONE: libc::c_ulong = 0x4004_9409;
+    // Once a filesystem has said it cannot reflink, stop asking: the probe
+    // is an open/create/ioctl/unlink per file, and the answer does not
+    // change within a run (the store and vendor/ stay where they are).
+    static UNSUPPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if UNSUPPORTED.load(std::sync::atomic::Ordering::Relaxed) {
+        return false;
+    }
     let Ok(src) = std::fs::File::open(from) else {
         return false;
     };
@@ -98,13 +103,22 @@ fn reflink(from: &Path, to: &Path) -> bool {
     };
     // SAFETY: FICLONE ioctl on two valid, open descriptors; no shared
     // memory. The kernel reads src, writes dst.
-    let rc = unsafe { libc::ioctl(dst.as_raw_fd(), FICLONE, src.as_raw_fd()) };
+    let rc = unsafe { libc::ioctl(dst.as_raw_fd(), libc::FICLONE, src.as_raw_fd()) };
     if rc != 0 {
+        let err = std::io::Error::last_os_error();
         drop(dst);
         let _ = std::fs::remove_file(to); // empty file created by the open
+                                          // ENOTTY / EOPNOTSUPP / EXDEV / EINVAL: this filesystem (or this
+                                          // pair of filesystems) never will; other errors are per file.
+        if matches!(
+            err.raw_os_error(),
+            Some(libc::ENOTTY) | Some(libc::EOPNOTSUPP) | Some(libc::EXDEV) | Some(libc::EINVAL)
+        ) {
+            UNSUPPORTED.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         return false;
     }
-    if let Ok(meta) = std::fs::metadata(from) {
+    if let Ok(meta) = src.metadata() {
         let _ = std::fs::set_permissions(to, meta.permissions());
     }
     true

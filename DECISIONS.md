@@ -437,3 +437,33 @@ par l'oracle `@dry-install`). Reporté en v0.9 : les dépôts `path`
 guesser « comme git », `ArchivableFilesFinder`, glob à accolades,
 `findShortestPath` avec `preferRelative`, dépôts git imbriqués dans les
 fixtures).
+
+## 2026-09-15 — Parallélisme d'E/S par plateforme (PR #4 de Luther Monson)
+
+Fait : la PR parallélise le scan de classmap (répertoires sur rayon) et la
+matérialisation store→vendor, avec des gains mesurés sur ext4/WSL2 (sylius :
+`dump-autoload -o` à froid 1,03 s → 0,48 s, `install` vendor effacé 3,75 s →
+1,68 s ; ×2). Mesuré ici sur APFS (M4 Max) : le même scan passe de 749 ms à
+901 ms (temps système 0,47 s → 8,4 s) — c'est la contention de lecture que
+M5 avait mesurée (3-4×) et qui avait fait choisir des lectures séquentielles
+et une détection CPU sur threads std, sans rayon. Décision : garder le
+parallélisme de la PR **là où il paie**. `vivacity_core::platform::parallel_io()`
+vaut vrai sur Linux, faux ailleurs (`VIVACITY_PARALLEL_IO=0|1` pour forcer) ;
+il gouverne les répertoires en parallèle du scan et le fan-out de la
+matérialisation ; la détection de classes reste parallèle sur le CPU partout.
+Résultat : Linux (conteneur, 4 vCPU, overlay) scan à froid 550 → 340 ms,
+install vendor effacé 806 → 374 ms ; macOS scan 768 → 697 ms (la détection
+sur rayon), install 604 → 623 ms (bruit). rayon est adopté (5 crates, épinglé
+`=1.12.0`) : un pool global au lieu d'un jeu de threads scoped par
+répertoire, et le même outil pour les deux fan-outs — l'entrée M5 « pas de
+dépendance rayon » est amendée par celle-ci. Le reste de la PR est fidèle à
+Composer : écriture des fichiers générés seulement si les octets changent
+(`filePutContentsIfModified`), reflink FICLONE sur Linux (prévu depuis le
+plan r3, jamais implémenté — désactivé pour le run dès le premier
+ENOTTY/EOPNOTSUPP/EXDEV/EINVAL), cache de classmap en binaire v2
+(auto-invalidation par `CACHE_FORMAT`, fichier tronqué ou octets en trop
+→ rescan, compteurs lus jamais pré-alloués). Corrigé en revue : les proxies
+de `vendor/bin` — `Installer::run` appelle `ensureBinariesPresence` sur
+chaque paquet installé à chaque run, donc un proxy manquant d'un paquet
+inchangé est recréé (un `vendor/bin` effacé revient), un proxy existant est
+laissé ; `libc::FICLONE` (la constante codée en dur ne compile pas sous musl).

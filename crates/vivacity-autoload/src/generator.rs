@@ -383,11 +383,27 @@ pub fn dump(
             .iter()
             .map(|j| (j.path.as_path(), j.slot.as_ref()))
             .collect();
+        // Directories in parallel means READS in parallel. That pays where
+        // I/O latency dominates (ext4/WSL2: sylius cold scan 1.03 s -> 0.48 s)
+        // and costs where the page cache is the bottleneck (APFS: 749 ms ->
+        // 901 ms, system time 0.47 s -> 8.4 s, M4 Max — the M5 measurement,
+        // DECISIONS.md). So: parallel directories where parallel I/O pays
+        // (`vivacity_core::platform::parallel_io`), sequential elsewhere;
+        // the class detection of each directory stays parallel on the CPU
+        // either way.
+        let parallel_dirs = vivacity_core::platform::parallel_io();
         let scans: Vec<Result<crate::classmap::ScannedFiles, crate::classmap::ClassMapError>> =
-            inputs
-                .par_iter()
-                .map(|(p, s)| Scanner::scan_only(p, *s))
-                .collect();
+            if parallel_dirs {
+                inputs
+                    .par_iter()
+                    .map(|(p, s)| Scanner::scan_only(p, *s))
+                    .collect()
+            } else {
+                inputs
+                    .iter()
+                    .map(|(p, s)| Scanner::scan_only(p, *s))
+                    .collect()
+            };
         for (j, sf) in jobs.iter().zip(scans) {
             scanner.merge_scanned(sf?, &j.path, j.excl.as_ref(), j.ty, &j.ns)?;
         }

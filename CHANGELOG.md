@@ -4,6 +4,24 @@ All notable changes to vivacity (named vivace up to 0.5.0). The format follows [
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Changed
+- **Faster warm paths** (Luther Monson, [#4](https://github.com/Adelagric/vivacity/pull/4)):
+  the classmap scan and the store→vendor materialization fan out where
+  parallel I/O pays (Linux: sylius cold scan 550 → 340 ms, `install` with
+  `vendor/` wiped 806 → 374 ms in the parity container; `VIVACITY_PARALLEL_IO`
+  overrides the per-platform default — APFS stays sequential, where the
+  same fan-out was measured 20 % slower), the class detection runs on a
+  rayon pool everywhere (macOS scan 768 → 697 ms), generated and state
+  files are written only when their bytes change (Composer's
+  `filePutContentsIfModified`), Linux uses a `FICLONE` reflink before the
+  hardlink/copy fallback, zip extraction memoizes created directories, and
+  the per-store-entry classmap cache switches to a length-prefixed binary
+  encoding (v2; older caches are ignored). `vendor/bin` proxies follow
+  `Installer::run`'s `ensureBinariesPresence`: a missing proxy of an
+  unchanged package is recreated, an existing one is left alone.
+
 ## [0.8.0] — 2026-09-15
 
 ### Added

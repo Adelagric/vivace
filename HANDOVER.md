@@ -78,6 +78,7 @@ Rien n'est porté d'un logiciel GPL.
 
 ## Ce qui N'EST PAS couvert / testé (honnêtement)
 
+- **Parallélisme d'E/S** : `platform::parallel_io()` (Linux vrai, ailleurs faux, `VIVACITY_PARALLEL_IO=0|1`) gouverne les répertoires en parallèle du scan et le fan-out de la matérialisation ; mesuré sur APFS et ext4 seulement (DECISIONS 2026-09-15) — btrfs/xfs (reflink), NFS, disques lents : non mesurés. Cache de classmap en binaire v2 (`CACHE_FORMAT`), les anciens `*.json` restent orphelins dans `~/.cache/vivacity/classmap/` (jamais lus).
 - **Cache de classmap** : suppose vendor/ immuable entre deux installs (un fichier édité à la main n'est pas rescanné) ; `VIVACITY_NO_CLASSMAP_CACHE=1` pour désactiver. Sur un vendor/ posé par Composer, le premier `vivacity install` chauffe le store depuis le cache zip (≈1 s sur Laravel) ; les suivants profitent du cache (65 ms). `VIVACITY_TRACE=1` affiche les phases (temps cumulés).
 - **Autoload, cas non exercés par les fixtures** : `target-dir` avec psr-0 racine (targetDirLoader non porté), `include-path`, apcu, `exclude-from-classmap` avec globs `**` (porté, non vérifié par diff), chemins `.phar`.
 
