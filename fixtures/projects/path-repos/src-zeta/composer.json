@@ -1,0 +1,11 @@
+{
+    "name": "acme/zeta",
+    "description": "reference: none, symlinked",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Zeta\\": "src/"
+        }
+    }
+}

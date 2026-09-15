@@ -1,0 +1,1 @@
+Kept: a .git file is not a VCS directory.

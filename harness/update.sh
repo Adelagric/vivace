@@ -15,9 +15,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/registry.sh
 . "$ROOT/harness/lib/registry.sh"
+# shellcheck source=lib/fixture.sh
+. "$ROOT/harness/lib/fixture.sh"
 VIVACITY="$ROOT/target/release/vivacity"
 WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/update"
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal path-repos)
 # Cas de mise à jour partielle : "fixture|arguments de composer update".
 PARTIAL=(
   "laravel|laravel/pint"
@@ -30,6 +32,7 @@ PARTIAL=(
 )
 [ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
+harness_git_env "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
   archive="$ROOT/fixtures/registry/$fx.tar.gz"
@@ -41,12 +44,10 @@ for fx in "${FIXTURES[@]}"; do
   # blocage déclarées comme sur Packagist.
   write_snapshot_packages_json "$reg"
   home="$WORK/home-$fx"; rm -rf "$home"; mkdir -p "$home"
-  printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$reg" > "$home/config.json"
+  printf '{"repositories": %s}\n' "$(snapshot_repositories_json "$reg")" > "$home/config.json"
   root_version=""; [ "$fx" = "rector" ] && root_version="dev-main"
   for side in ref viv; do
-    d="$WORK/$side-$fx"; rm -rf "$d"; mkdir -p "$d"
-    cp "$ROOT/fixtures/projects/$fx/composer.json" "$d/"
-    [ -f "$ROOT/fixtures/projects/$fx/composer.lock" ] && cp "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
+    stage_project "$fx" "$WORK/$side-$fx"
   done
   if ! (cd "$WORK/ref-$fx" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
         composer update --no-install --no-scripts --no-plugins --no-interaction --no-audit --quiet 2>"$WORK/$fx.composer.log"); then

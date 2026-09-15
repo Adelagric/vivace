@@ -22,3 +22,7 @@ backtracking, an unsolvable set (no reference lock, `unsolvable` in
 `SNAPSHOT`), root aliases on dev branches, virtual packages with several
 providers. They are resolved by `tools/oracle-pool.php --solve` and by
 vivacity on the same snapshot; the decision sequences must be identical.
+
+`path-repos` has no Packagist metadata at all (`p2/` is empty, Packagist is
+disabled in the manifest): the archive only carries the reference lock so
+`harness/update.sh` treats the fixture like the others.

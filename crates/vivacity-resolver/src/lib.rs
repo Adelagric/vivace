@@ -13,6 +13,7 @@ pub mod lockfile;
 pub mod metacache;
 pub mod optimizer;
 pub mod package;
+pub mod path_repo;
 pub mod phpver;
 pub mod platform;
 pub mod platform_filter;

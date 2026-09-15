@@ -52,3 +52,18 @@ psr/log 1, deliberately unsolvable), `solver-aliases` (a `dev-master as
 providers, `symfony/polyfill-mbstring`). Their Packagist snapshots live in
 `fixtures/registry/solver-*.tar.gz`; `harness/update.sh` does not run them
 (they have nothing to install), `tests/oracle_pool.rs` does.
+
+`path-repos` is a manifest written for the harness (MIT, like the harness):
+six `acme/*` packages served by three `path` repositories — a glob
+(`packages/*`), a brace list with `symlink: false` and a `versions`
+override (`libs/{beta,epsilon}`), a plain `./src-zeta` with `reference:
+none`. `fixtures/path-repos.sh` materialises what git cannot store: the
+nested repositories of `gamma` (a `feature-x` branch off `main`) and
+`epsilon` (its HEAD is the dist reference), the symbolic links (into a
+file, an empty directory, a non-empty directory, dangling, outside the
+package), the `0600`/`0755` modes, the empty directory, the `.git` *file*
+of a sub-directory and a `.svn` directory, and the project's own repository
+on `develop` (the branch Composer guesses for `delta` and `zeta`). Its
+`composer.lock` was captured from Composer 2.10.3 on 2026-09-16 on that
+tree; the nested commits are reproducible (author, dates and configuration
+pinned), so the HEAD references in the lock are stable.

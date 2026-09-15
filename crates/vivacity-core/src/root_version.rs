@@ -5,6 +5,12 @@
 //! `dev-<sha>` then exact tag; feature branch -> closest parent branch by
 //! `git rev-list`), else `1.0.0+no-version-set`.
 //! hg/fossil/svn are not ported (fallback to the default, as without a VCS).
+//!
+//! `guess_version` is the `VersionGuesser::guessVersion` used for the root
+//! and for the packages of a `path` repository: git is run in the directory
+//! with no `GIT_DIR` pin, so it walks up to the enclosing repository exactly
+//! as Composer's `git branch` does (a package without a repository of its
+//! own takes the project's branch).
 
 use crate::version::{normalize_pretty, UnsupportedVersion};
 use serde_json::Value;
@@ -17,6 +23,19 @@ pub struct RootVersion {
     /// Normalised version (Composer's `version_normalized`).
     pub version: String,
     pub reference: Option<String>,
+}
+
+/// `VersionGuesser::guessVersion` result after `postprocess`: the version
+/// (the parent branch when HEAD is on a feature branch) and, on a feature
+/// branch, the feature branch itself (`feature_version`,
+/// `feature_pretty_version`) — a `path` repository loads both as packages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuessedVersion {
+    pub version: String,
+    pub pretty_version: String,
+    pub commit: Option<String>,
+    pub feature_version: Option<String>,
+    pub feature_pretty_version: Option<String>,
 }
 
 pub const DEFAULT_PRETTY_VERSION: &str = "1.0.0+no-version-set";
@@ -93,14 +112,16 @@ fn is_feature_branch(manifest: &Value, branch: &str) -> bool {
     true
 }
 
-fn git(project: &Path, args: &[&str]) -> Option<String> {
+/// Runs git in `dir` like `ProcessExecutor` after `GitUtil::cleanEnv`: no
+/// `GIT_DIR`/`GIT_WORK_TREE` (git finds the repository by walking up),
+/// English output, never an interactive prompt. None when git fails.
+pub fn git(dir: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .args(args)
-        .current_dir(project)
-        .env("GIT_DIR", project.join(".git"))
-        .env("GIT_WORK_TREE", project)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_INDEX_FILE")
-        // GitUtil::cleanEnv: English output, never an interactive prompt.
         .env("LANGUAGE", "C")
         .env("LC_ALL", "C")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -112,11 +133,8 @@ fn git(project: &Path, args: &[&str]) -> Option<String> {
     Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// `guessGitVersion` + `postprocess`.
-fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
-    if !project.join(".git").exists() {
-        return None;
-    }
+/// `VersionGuesser::guessVersion` (git only) + `postprocess`.
+pub fn guess_version(manifest: &Value, project: &Path) -> Option<GuessedVersion> {
     let output = git(
         project,
         &["branch", "-a", "--no-color", "--no-abbrev", "-v"],
@@ -185,8 +203,10 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
         branches.push(name.to_owned());
     }
 
+    let mut feature: Option<(String, String)> = None;
     if is_feature {
-        if let (Some(v), Some(_)) = (&version, &pretty) {
+        if let (Some(v), Some(p)) = (&version, &pretty) {
+            feature = Some((v.clone(), p.clone()));
             let (nv, np) = guess_feature_version(manifest, v, &branches, project);
             version = Some(nv);
             pretty = Some(np);
@@ -198,6 +218,7 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
             if let Ok(norm) = normalize_pretty(tag) {
                 version = Some(norm);
                 pretty = Some(tag.to_owned());
+                feature = None;
             }
         }
     }
@@ -211,16 +232,41 @@ fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
         }
     }
     let version = version?;
-    // postprocess: `X.9999999...-dev` displays as `X.x-dev`.
-    let pretty = if version.ends_with("-dev") && version.contains(".9999999") {
-        collapse_nines(&version)
-    } else {
-        pretty?
+    let pretty = pretty?;
+    // postprocess: a feature branch equal to its guess is dropped;
+    // `X.9999999...-dev` displays as `X.x-dev`.
+    let feature = feature.filter(|(fv, fp)| !(fv == &version && fp == &pretty));
+    let collapse = |version: &str, pretty: String| {
+        if version.ends_with("-dev") && version.contains(".9999999") {
+            collapse_nines(version)
+        } else {
+            pretty
+        }
     };
-    Some(RootVersion {
-        pretty_version: pretty,
+    let pretty = collapse(&version, pretty);
+    let (feature_version, feature_pretty_version) = match feature {
+        Some((fv, fp)) => {
+            let fp = collapse(&fv, fp);
+            (Some(fv), Some(fp))
+        }
+        None => (None, None),
+    };
+    Some(GuessedVersion {
         version,
-        reference: commit,
+        pretty_version: pretty,
+        commit,
+        feature_version,
+        feature_pretty_version,
+    })
+}
+
+/// `guessGitVersion` for the root package.
+fn guess_git(manifest: &Value, project: &Path) -> Option<RootVersion> {
+    let g = guess_version(manifest, project)?;
+    Some(RootVersion {
+        pretty_version: g.pretty_version,
+        version: g.version,
+        reference: g.commit,
     })
 }
 
@@ -325,6 +371,26 @@ fn strnatcasecmp(a: &str, b: &str) -> std::cmp::Ordering {
     (ab.len() - i).cmp(&(bb.len() - j))
 }
 
+/// `VersionGuesser::getRootVersionFromEnv`: `COMPOSER_ROOT_VERSION` when
+/// set and non-empty, `1.2-dev` spelled `1.2.x-dev`.
+pub fn root_version_from_env() -> Option<String> {
+    let env = std::env::var("COMPOSER_ROOT_VERSION").ok()?;
+    if env.is_empty() {
+        return None;
+    }
+    Some(match env.strip_suffix("-dev") {
+        Some(num)
+            if !num.is_empty()
+                && num
+                    .split('.')
+                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) =>
+        {
+            format!("{num}.x-dev")
+        }
+        _ => env.clone(),
+    })
+}
+
 /// Determines the root version like RootPackageLoader.
 pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
     if let Some(v) = manifest.get("version").and_then(Value::as_str) {
@@ -334,26 +400,12 @@ pub fn detect(manifest: &Value, project: &Path) -> RootVersion {
             reference: None,
         };
     }
-    if let Ok(env) = std::env::var("COMPOSER_ROOT_VERSION") {
-        if !env.is_empty() {
-            // `1.2-dev` -> `1.2.x-dev`
-            let v = match env.strip_suffix("-dev") {
-                Some(num)
-                    if !num.is_empty()
-                        && num
-                            .split('.')
-                            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) =>
-                {
-                    format!("{num}.x-dev")
-                }
-                _ => env.clone(),
-            };
-            return RootVersion {
-                pretty_version: v.clone(),
-                version: normalize_or_raw(&v),
-                reference: None,
-            };
-        }
+    if let Some(v) = root_version_from_env() {
+        return RootVersion {
+            pretty_version: v.clone(),
+            version: normalize_or_raw(&v),
+            reference: None,
+        };
     }
     if let Some(g) = guess_git(manifest, project) {
         return g;
@@ -546,6 +598,14 @@ mod tests {
         run(&["commit", "-q", "-m", "feat"]);
         let r = detect(&json!({}), p);
         assert_eq!(r.pretty_version, "dev-main");
+        let g = guess_version(&json!({}), p).expect("guess");
+        assert_eq!(g.feature_pretty_version.as_deref(), Some("dev-feature-x"));
+        assert_eq!(g.feature_version.as_deref(), Some("dev-feature-x"));
+        // A sub-directory without a repository of its own: git walks up.
+        std::fs::create_dir_all(p.join("packages/x")).expect("mkdir");
+        let g = guess_version(&json!({}), &p.join("packages/x")).expect("guess");
+        assert_eq!(g.pretty_version, "dev-main");
+        assert_eq!(g.commit.as_deref().map(str::len), Some(40));
 
         // Numeric branch + alias.
         run(&["checkout", "-q", "-b", "2.2"]);

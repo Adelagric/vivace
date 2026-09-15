@@ -17,6 +17,7 @@ to the Rust code ported from them.
 | [composer/metadata-minifier](https://github.com/composer/metadata-minifier) | MIT | Composer | `docs/reference/resolver/MetadataMinifier.php` (`LICENSE.composer-metadata-minifier`) | `vivacity-resolver` (`loader`) |
 | [composer/installers](https://github.com/composer/installers) 2.0.0–2.3.0 | MIT | Kyle Robinson Young | `docs/reference/installers/` (`LICENSE`) | `vivacity-core` (`installers`, tables in `assets/installers/`) |
 | [composer/xdebug-handler](https://github.com/composer/xdebug-handler) | MIT | Composer | `docs/reference/resolver/xdebug-handler-*.php` (`LICENSE.composer-xdebug-handler`) | `vivacity-resolver` (`platform::ini_files`) |
+| [symfony/filesystem](https://github.com/symfony/filesystem), [symfony/finder](https://github.com/symfony/finder) | MIT | Fabien Potencier | `docs/reference/symfony-Filesystem.php`, `docs/reference/symfony-finder-Glob.php` (`LICENSE.symfony`) | `vivacity-core` (`path_install`: the mirror of a `path` package, `Glob::toRegex` of the `.gitattributes` patterns) |
 
 The PHP sources under `docs/reference/` are not part of the compiled
 crates; they are kept so that `harness/drift-reference.sh` can re-diff

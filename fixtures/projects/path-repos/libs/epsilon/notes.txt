@@ -1,0 +1,1 @@
+Kept: a three-field .gitattributes line is ignored.

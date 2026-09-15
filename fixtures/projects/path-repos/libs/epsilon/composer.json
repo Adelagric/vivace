@@ -1,0 +1,11 @@
+{
+    "name": "acme/epsilon",
+    "description": "Mirrored: export-ignore, VCS directories, links, modes, empty directory",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Epsilon\\": "src/"
+        }
+    }
+}

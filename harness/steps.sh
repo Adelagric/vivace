@@ -11,9 +11,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/registry.sh
 . "$ROOT/harness/lib/registry.sh"
+# shellcheck source=lib/fixture.sh
+. "$ROOT/harness/lib/fixture.sh"
 VIVACITY="$ROOT/target/release/vivacity"
 WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/steps"
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies solver-conflict solver-problems)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies solver-conflict solver-problems path-repos)
 # "fixture|arguments" : la commande et ses arguments. Les mots finaux en
 # `@…` préparent la copie avant l'étape (et ne sont pas passés) :
 #   @nolock                 pas de composer.lock
@@ -36,6 +38,9 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @platform:php=7.4.0     config.platform.php dans le manifeste
 #   @lockfile:name          copie `name` (dans le répertoire de la fixture) sur composer.lock
 #   @jq:expr                applique l'expression jq au manifeste (ex. .config.policy.abandoned.block=true)
+#   @pkgedit:dir            change la description du composer.json d'un paquet
+#                           `path` de la fixture (dir relatif au projet) : sa
+#                           référence dist change
 #   @registry-jq:expr       applique l'expression jq au packages.json de l'instantané (le cas seulement)
 #   @repofilter:json        redéclare le dépôt `snapshot` dans le manifeste avec cette option `filter`
 #   @env:NAME=VALUE         variable d'environnement des deux côtés (le cas seulement)
@@ -262,9 +267,34 @@ STEPS=(
   "solver-policies|update @nolock @stderr @jq:.config.policy.abandoned.block=true"
   "solver-policies|update acme/vuln @stderr @lockfile:composer.lock.malware"
   "solver-policies|install @stderr @lockfile:composer.lock.malware"
+  # Dépôts `path` : glob, accolades, dépôt git imbriqué (référence HEAD,
+  # branche de fonctionnalité + parente), version devinée via le dépôt du
+  # projet, `reference: none`, `versions`, paquet symlinké déverrouillé par
+  # une mise à jour partielle (pas son jumeau en miroir), COMPOSER_ROOT_VERSION.
+  "path-repos|update"
+  "path-repos|update @nolock"
+  "path-repos|update @nolock @env:COMPOSER_ROOT_VERSION=1.2.3"
+  "path-repos|update @pkgedit:packages/alpha"
+  "path-repos|update @pkgedit:packages/alpha @dry-install"
+  "path-repos|update acme/gamma @pkgedit:packages/alpha"
+  "path-repos|update acme/gamma @pkgedit:libs/beta"
+  "path-repos|update acme/gamma @pkgedit:libs/beta @pkgedit:packages/alpha"
+  "path-repos|require acme/gamma:dev-main"
+  "path-repos|require acme/gamma:dev-main --dry-run"
+  "path-repos|require acme/nope:^1"
+  "path-repos|remove acme/alpha"
+  "path-repos|remove acme/alpha --dry-run @dry-install"
+  "path-repos|remove acme/zeta"
+  "path-repos|install"
+  "path-repos|install @pkgedit:packages/alpha"
+  "path-repos|update @nolock @nostderr @jq:.repositories[0].url=\"nowhere/*\""
+  "path-repos|update @nolock @jq:.repositories[0].url=\"packages/x*\""
+  "path-repos|update @nolock @jq:.repositories[0].url=\"packages/{alpha,delta}\""
+  "path-repos|update @nolock @jq:.repositories[0].url=\"./packages/*/\""
 )
 [ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
+harness_git_env "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
   archive="$ROOT/fixtures/registry/$fx.tar.gz"
@@ -276,7 +306,7 @@ for fx in "${FIXTURES[@]}"; do
   # blocage déclarées comme sur Packagist.
   write_snapshot_packages_json "$reg"
   home="$WORK/home-$fx"; rm -rf "$home"; mkdir -p "$home"
-  printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$reg" > "$home/config.json"
+  printf '{"repositories": %s}\n' "$(snapshot_repositories_json "$reg")" > "$home/config.json"
   root_version=""; [ "$fx" = "rector" ] && root_version="dev-main"
   n=0
   for spec in "${STEPS[@]}"; do
@@ -291,7 +321,7 @@ for fx in "${FIXTURES[@]}"; do
         *) break ;;
       esac
     done
-    printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}}\n' "$reg" > "$home/config.json"
+    printf '{"repositories": %s}\n' "$(snapshot_repositories_json "$reg")" > "$home/config.json"
     # Préparations partagées (instantané, config globale) : une fois.
     for prep in "${preps[@]+"${preps[@]}"}"; do
       case "$prep" in
@@ -299,8 +329,8 @@ for fx in "${FIXTURES[@]}"; do
           for f in "$reg/p2/$p.json" "$reg/p2/$p~dev.json"; do
             [ -f "$f" ] && mv "$f" "$f.orig"; printf '{"packages": {"%s": []}}' "$p" > "$f"; stubs+=("$f")
           done ;;
-        @global-allow:*) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"allow-plugins": {"%s": true}}}\n' "$reg" "${prep#@global-allow:}" > "$home/config.json" ;;
-        @global-sort) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"sort-packages": true}}\n' "$reg" > "$home/config.json" ;;
+        @global-allow:*) printf '{"repositories": %s, "config": {"allow-plugins": {"%s": true}}}\n' "$(snapshot_repositories_json "$reg")" "${prep#@global-allow:}" > "$home/config.json" ;;
+        @global-sort) printf '{"repositories": %s, "config": {"sort-packages": true}}\n' "$(snapshot_repositories_json "$reg")" > "$home/config.json" ;;
         @registry-jq:*) jq "${prep#@registry-jq:}" "$reg/packages.json" > "$reg/p.tmp" && mv "$reg/p.tmp" "$reg/packages.json"; registry_edited=1 ;;
         @env:*) kv="${prep#@env:}"; export "${kv%%=*}=${kv#*=}"; envs+=("${kv%%=*}") ;;
         @stderr) compare_stderr=1 ;;
@@ -309,9 +339,7 @@ for fx in "${FIXTURES[@]}"; do
       esac
     done
     for side in ref viv; do
-      d="$WORK/$side-$fx-$n"; rm -rf "$d"; mkdir -p "$d"
-      cp "$ROOT/fixtures/projects/$fx/composer.json" "$d/"
-      [ -f "$ROOT/fixtures/projects/$fx/composer.lock" ] && cp "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
+      d="$WORK/$side-$fx-$n"; stage_project "$fx" "$d"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
           @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr|@nostderr|@dry-install) ;;
@@ -326,6 +354,7 @@ for fx in "${FIXTURES[@]}"; do
           @platform:*) kv="${prep#@platform:}"; jq --arg p "${kv%%=*}" --arg v "${kv#*=}" '.config.platform[$p] = $v' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @lockfile:*) cp "$ROOT/fixtures/projects/$fx/${prep#@lockfile:}" "$d/composer.lock" ;;
           @jq:*) jq "${prep#@jq:}" "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
+          @pkgedit:*) pd="$d/${prep#@pkgedit:}"; jq '.description = "edited"' "$pd/composer.json" > "$pd/c.tmp" && mv "$pd/c.tmp" "$pd/composer.json" ;;
           @nolock) rm -f "$d/composer.lock" ;;
           @badlock) printf '{"_readme": [], "content-hash": "x"}\n' > "$d/composer.lock" ;;
           @drop:*) jq --arg p "${prep#@drop:}" 'del(.require[$p])' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
@@ -349,10 +378,10 @@ for fx in "${FIXTURES[@]}"; do
       extra=(--no-audit); viv_extra=()
     fi
     quiet=(--quiet); [ "$compare_stderr" = 1 ] && quiet=(--no-ansi)
-    (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" COMPOSER_TESTS_ARE_RUNNING=1 \
+    (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-$root_version}" COMPOSER_TESTS_ARE_RUNNING=1 \
       composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction "${quiet[@]}" >"$WORK/$fx-$n.composer.log" 2>"$WORK/$fx-$n.composer.err") || ref_code=$?
     viv_code=0
-    (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
+    (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="${COMPOSER_ROOT_VERSION:-$root_version}" \
       "$VIVACITY" "${sargs[@]}" "${viv_extra[@]+"${viv_extra[@]}"}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
     # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
     # packages.json et l'environnement aussi.

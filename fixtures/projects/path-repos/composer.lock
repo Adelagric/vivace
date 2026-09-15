@@ -1,0 +1,158 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "e2f18945637d2ff458dbdfaac37594b5",
+    "packages": [
+        {
+            "name": "acme/alpha",
+            "version": "1.2.0",
+            "dist": {
+                "type": "path",
+                "url": "packages/alpha",
+                "reference": "45ae6094040996caa28bfd4b49f84b53a97c2cfa"
+            },
+            "require": {
+                "acme/beta": "^2.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Alpha\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Versioned in its composer.json",
+            "transport-options": {
+                "relative": true
+            }
+        },
+        {
+            "name": "acme/beta",
+            "version": "2.0.0",
+            "dist": {
+                "type": "path",
+                "url": "libs/beta",
+                "reference": "4285ac871a74d38abb2a8b130dcff6db104cf5ce"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Beta\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Version imposed by the repository options, mirrored",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "acme/delta",
+            "version": "dev-develop",
+            "dist": {
+                "type": "path",
+                "url": "packages/delta",
+                "reference": "50d44ede4b632eab900c3f1dcb95a99a5917e7b5"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Delta\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "No version, no repository of its own: guessed through the project's git",
+            "transport-options": {
+                "relative": true
+            }
+        },
+        {
+            "name": "acme/epsilon",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "libs/epsilon",
+                "reference": "ab005c47df5d2f46c1029957a2a17643ce808584"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Epsilon\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Mirrored: export-ignore, VCS directories, links, modes, empty directory",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "acme/gamma",
+            "version": "dev-feature-x",
+            "dist": {
+                "type": "path",
+                "url": "packages/gamma",
+                "reference": "46d018523dfa750c9ebcc456a0b2b4cb79d3eb52"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Gamma\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Its own git repository, checked out on a feature branch",
+            "transport-options": {
+                "relative": true
+            },
+            "time": "2026-09-01T12:00:00+00:00"
+        },
+        {
+            "name": "acme/zeta",
+            "version": "dev-develop",
+            "dist": {
+                "type": "path",
+                "url": "./src-zeta"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Acme\\Zeta\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "reference: none, symlinked",
+            "transport-options": {
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "dev",
+    "stability-flags": {
+        "acme/gamma": 20
+    },
+    "prefer-stable": true,
+    "prefer-lowest": false,
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.9.0"
+}

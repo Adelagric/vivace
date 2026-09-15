@@ -47,6 +47,14 @@ twin() {
     Installer.php)            echo "src/Composer/Installer.php" ;;
     SuggestedPackagesReporter.php) echo "src/Composer/Installer/SuggestedPackagesReporter.php" ;;
     UpdateCommand.php)        echo "src/Composer/Command/UpdateCommand.php" ;;
+    PathDownloader.php)       echo "src/Composer/Downloader/PathDownloader.php" ;;
+    FileDownloader.php)       echo "src/Composer/Downloader/FileDownloader.php" ;;
+    ArchivableFilesFinder.php) echo "src/Composer/Package/Archiver/ArchivableFilesFinder.php" ;;
+    ArchivableFilesFilter.php) echo "src/Composer/Package/Archiver/ArchivableFilesFilter.php" ;;
+    BaseExcludeFilter.php)    echo "src/Composer/Package/Archiver/BaseExcludeFilter.php" ;;
+    GitExcludeFilter.php)     echo "src/Composer/Package/Archiver/GitExcludeFilter.php" ;;
+    symfony-Filesystem.php)   echo "vendor/symfony/filesystem/Filesystem.php" ;;
+    symfony-finder-Glob.php)  echo "vendor/symfony/finder/Glob.php" ;;
     *) echo "" ;;
   esac
 }

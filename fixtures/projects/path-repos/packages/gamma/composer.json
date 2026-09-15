@@ -1,0 +1,12 @@
+{
+    "name": "acme/gamma",
+    "description": "Its own git repository, checked out on a feature branch",
+    "type": "library",
+    "license": "MIT",
+    "time": "2026-09-01T12:00:00+00:00",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Gamma\\": "src/"
+        }
+    }
+}

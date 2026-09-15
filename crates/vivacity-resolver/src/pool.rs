@@ -209,6 +209,8 @@ pub enum Repository {
     /// `PlatformRepository`.
     Platform(Vec<usize>),
     Composer(Box<ComposerRepository>),
+    /// `PathRepository`: an array repository filled at open time.
+    Path(crate::path_repo::PathRepository),
     /// `LockArrayRepository`.
     Locked(Vec<usize>),
 }
@@ -850,6 +852,14 @@ impl<'a> PoolBuilder<'a> {
                     )?,
                     Repository::Root(members) => array_repository_load_packages(
                         members,
+                        &batch,
+                        &self.set.acceptable_stabilities,
+                        &self.set.stability_flags,
+                        already,
+                        arena,
+                    ),
+                    Repository::Path(repo) => array_repository_load_packages(
+                        &repo.members,
                         &batch,
                         &self.set.acceptable_stabilities,
                         &self.set.stability_flags,

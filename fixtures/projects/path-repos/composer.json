@@ -1,0 +1,19 @@
+{
+    "name": "vivace/path-repos",
+    "description": "Path repositories: glob, brace, nested git, symlink and mirror strategies (see fixtures/path-repos.sh)",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "repositories": [
+        {"type": "path", "url": "packages/*"},
+        {"type": "path", "url": "libs/{beta,epsilon}", "options": {"symlink": false, "versions": {"acme/beta": "2.0.0"}}},
+        {"type": "path", "url": "./src-zeta", "options": {"reference": "none"}},
+        {"packagist.org": false}
+    ],
+    "require": {
+        "acme/alpha": "^1.0",
+        "acme/gamma": "dev-feature-x",
+        "acme/delta": "*",
+        "acme/zeta": "*",
+        "acme/epsilon": "*"
+    }
+}

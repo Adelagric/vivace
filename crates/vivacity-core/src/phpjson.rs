@@ -179,6 +179,15 @@ fn shortest_digits(a: f64) -> (String, String) {
     (digits, exp.to_owned())
 }
 
+/// `smart_str_append_double` with `serialize_precision = -1`: the shortest
+/// round-trip form PHP prints for a float (`json_encode` and `serialize`
+/// share it; the latter spells the exponent `E`).
+pub fn php_double(f: f64) -> Result<String> {
+    let mut out = String::new();
+    encode_double(f, &mut out)?;
+    Ok(out)
+}
+
 fn encode_double(f: f64, out: &mut String) -> Result<()> {
     if !f.is_finite() {
         return Err(Error::NonFiniteFloat(f));

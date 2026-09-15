@@ -487,7 +487,15 @@ impl UpdateSession {
         set.add_repository(Repository::Root(root_members));
         set.add_repository(Repository::Platform(platform.clone()));
         for repo in &config.repositories {
-            set.add_repository(open_repository(repo, http.as_ref(), cache_repo_dir)?);
+            let origin = Origin::Repository(set.repositories.len());
+            set.add_repository(open_repository(
+                repo,
+                http.as_ref(),
+                cache_repo_dir,
+                project_dir,
+                origin,
+                &mut arena,
+            )?);
         }
         if let Some(ids) = &locked {
             set.add_repository(Repository::Locked(ids.clone()));
@@ -1015,13 +1023,31 @@ pub fn install_policy_problems(
     Ok((problems, warnings))
 }
 
-/// `RepositoryManager::createRepository` restricted to `composer`
-/// repositories reachable over `file://` (the other types come with R3).
+/// `RepositoryManager::createRepository` for the `composer` and `path`
+/// types (`vcs` and the others are not supported yet). A `path` repository
+/// reads its packages now, into the arena, as `origin`.
 fn open_repository(
     repo: &RepoConfig,
     http: Option<&HttpTransports>,
     cache_repo_dir: Option<&Path>,
+    project_dir: &Path,
+    origin: Origin,
+    arena: &mut Vec<Package>,
 ) -> Result<Repository, SessionError> {
+    if repo.definition.get("type").and_then(Value::as_str) == Some("path") {
+        if repo.definition.get("only").is_some()
+            || repo.definition.get("exclude").is_some()
+            || repo.definition.get("canonical").is_some()
+        {
+            return Err(SessionError::new(format!(
+                "repository filters (only/exclude/canonical) are not supported by vivacity update yet ({})",
+                key_string(&repo.key)
+            )));
+        }
+        let path_repo = crate::path_repo::open(&repo.definition, project_dir, origin, arena)
+            .map_err(|e| SessionError::new(e.0))?;
+        return Ok(Repository::Path(path_repo));
+    }
     open_repository_with(repo, http, cache_repo_dir, false)
 }
 

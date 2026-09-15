@@ -1,0 +1,11 @@
+{
+    "name": "acme/delta",
+    "description": "No version, no repository of its own: guessed through the project's git",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Delta\\": "src/"
+        }
+    }
+}

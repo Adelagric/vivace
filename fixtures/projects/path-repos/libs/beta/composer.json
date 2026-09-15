@@ -1,0 +1,11 @@
+{
+    "name": "acme/beta",
+    "description": "Version imposed by the repository options, mirrored",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Acme\\Beta\\": "src/"
+        }
+    }
+}

@@ -1025,6 +1025,7 @@ fn repo_name(ctx: &MessageContext<'_>, origin: Origin) -> String {
         Origin::Locked => "lock repo".to_owned(),
         Origin::Repository(i) => match ctx.set.repositories.get(i) {
             Some(Repository::Composer(repo)) => repo.repo_name(),
+            Some(Repository::Path(repo)) => repo.repo_name(),
             _ => "unknown repo".to_owned(),
         },
         Origin::Detached | Origin::Result => "unknown repo".to_owned(),
@@ -1055,6 +1056,7 @@ fn find_packages(
     for (i, repository) in ctx.set.repositories.iter().enumerate() {
         let members: Option<&Vec<usize>> = match repository {
             Repository::Root(m) | Repository::Platform(m) | Repository::Locked(m) => Some(m),
+            Repository::Path(repo) => Some(&repo.members),
             Repository::Composer(_) => None,
         };
         if from_all_repos {
@@ -1143,6 +1145,7 @@ fn providers(ctx: &mut MessageContext<'_>, name: &str) -> Vec<(String, Option<St
     for (i, repository) in ctx.set.repositories.iter().enumerate() {
         let candidates: Vec<usize> = match repository {
             Repository::Root(m) | Repository::Platform(m) | Repository::Locked(m) => m.clone(),
+            Repository::Path(repo) => repo.members.clone(),
             Repository::Composer(repo) => {
                 // `ComposerRepository::getProviders`: the providers API
                 // answers alone when the repository declares one.
