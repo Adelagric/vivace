@@ -40,7 +40,7 @@ Also `cargo install vivacity` (crates.io), `cargo binstall vivacity`, or
 GitHub Actions:
 
 ```yaml
-- uses: Adelagric/vivacity@v0.7.0
+- uses: Adelagric/vivacity@v0.8.0
 - run: vivacity install
 ```
 

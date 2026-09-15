@@ -10,7 +10,7 @@ keywords = ["composer", "php", "autoload"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
-vivacity-core = { path = "../vivacity-core", version = "0.7.0" }
+vivacity-core = { path = "../vivacity-core", version = "0.8.0" }
 serde_json.workspace = true
 thiserror.workspace = true
 md-5.workspace = true
