@@ -257,7 +257,7 @@ pub fn security_advisory_filter(
         .collect();
     let abandoned_re = package_names_regexp(&abandoned_ignore);
     let mut kept: Vec<usize> = Vec::with_capacity(pool.packages.len());
-    let mut security_removed: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+    let mut security_removed: BTreeMap<String, Vec<(String, Vec<String>)>> = BTreeMap::new();
     let mut abandoned_removed: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for &idx in &pool.packages {
         let p = &arena[idx];
@@ -274,10 +274,11 @@ pub fn security_advisory_filter(
         if !matching.is_empty() {
             let ids: Vec<String> = matching.iter().map(|a| a.advisory_id.clone()).collect();
             for name in p.names(false) {
-                security_removed
-                    .entry(name)
-                    .or_default()
-                    .insert(p.version.clone(), ids.clone());
+                let list = security_removed.entry(name).or_default();
+                match list.iter_mut().find(|(v, _)| *v == p.version) {
+                    Some(slot) => slot.1 = ids.clone(),
+                    None => list.push((p.version.clone(), ids.clone())),
+                }
             }
             continue;
         }

@@ -82,6 +82,7 @@ pub fn loaded_extensions(probed: &[Value]) -> std::collections::BTreeSet<String>
     probed
         .iter()
         .filter(|v| v.get("kind").and_then(Value::as_str) == Some("ext"))
+        .filter(|v| v.get("skipped").and_then(Value::as_bool) != Some(true))
         .filter_map(|v| v.get("name").and_then(Value::as_str))
         .map(|n| format!("ext-{}", n.to_lowercase()))
         .collect()

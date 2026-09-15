@@ -177,6 +177,8 @@ fn package_name_regexp(pattern: &str) -> Regex {
 #[derive(Debug, Default)]
 struct RootData {
     lazy_providers_url: Option<String>,
+    /// `providers-api` (`%package%` template): who provides a name.
+    providers_api_url: Option<String>,
     notify_url: Option<String>,
     has_available_package_list: bool,
     available_packages: BTreeSet<String>,
@@ -290,6 +292,9 @@ pub fn advisory_from_data(package_name: &str, data: &Value) -> Option<Advisory> 
     })
 }
 
+/// `getProviders` entries: `(name, description)`.
+pub type Providers = Vec<(String, Option<String>)>;
+
 /// Advisories by package name (`[name => [advisory...]]`).
 pub type AdvisoriesByName = Vec<(String, Vec<Advisory>)>;
 /// List entries by list name.
@@ -307,6 +312,20 @@ pub struct FilterEntry {
     pub reason: Option<String>,
     pub id: Option<String>,
     pub source: Option<String>,
+}
+
+impl FilterEntry {
+    /// The same `FilterListEntry` object (one entry covers every version
+    /// its constraint matches): identity by content.
+    pub fn same_entry(&self, other: &FilterEntry) -> bool {
+        self.package_name == other.package_name
+            && self.constraint == other.constraint
+            && self.list_name == other.list_name
+            && self.url == other.url
+            && self.reason == other.reason
+            && self.id == other.id
+            && self.source == other.source
+    }
 }
 
 /// `FilterListEntryBuilder::build`: entries per list, restricted to the
@@ -655,6 +674,11 @@ impl ComposerRepository {
                 }
             }
         }
+        if non_empty("providers-api") {
+            r.providers_api_url = data["providers-api"]
+                .as_str()
+                .map(|s| self.canonicalize_url(s));
+        }
         let mut has_providers = false;
         let mut has_partial = false;
         if non_empty("providers-lazy-url") {
@@ -948,6 +972,43 @@ impl ComposerRepository {
     /// `getRepoName`.
     pub fn repo_name(&self) -> String {
         format!("composer repo ({})", self.url)
+    }
+
+    /// `getProviders` through the `providers-api` of packages.json:
+    /// `None` when the repository declares none (the caller then walks
+    /// the loaded packages), `Some(list)` otherwise — `(name, description)`
+    /// entries, empty on 404.
+    pub fn providers_api(&self, package_name: &str) -> Result<Option<Providers>, RepoError> {
+        let Some(template) = self.root_data()?.providers_api_url.clone() else {
+            return Ok(None);
+        };
+        let url = template.replace("%package%", package_name);
+        let body = match self.transport.fetch(&url, None)? {
+            Fetched::Body { bytes, .. } => bytes,
+            Fetched::NotFound | Fetched::NotModified => return Ok(Some(Vec::new())),
+        };
+        let data: Value =
+            serde_json::from_slice(&body).map_err(|e| RepoError::data(format!("{url}: {e}")))?;
+        let mut out: Vec<(String, Option<String>)> = Vec::new();
+        for p in data
+            .get("providers")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(name) = p.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let description = p
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match out.iter_mut().find(|(n, _)| n == name) {
+                Some(slot) => slot.1 = description,
+                None => out.push((name.to_owned(), description)),
+            }
+        }
+        Ok(Some(out))
     }
 
     /// The packages `getProviders` walks without the providers API: the

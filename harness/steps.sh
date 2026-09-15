@@ -197,6 +197,7 @@ STEPS=(
   "solver-problems|update @nolock @stderr @require:php=^99"
   "solver-problems|update @nolock @stderr @require:ext-nope=*"
   "solver-problems|update @nolock @stderr @require:ext-nope=* @require:acme/provides-ext=^1.0"
+  "solver-problems|update @nolock @stderr @require:ext-nope=* @registry-jq:.[\"providers-api\"]=(.[\"metadata-url\"]|sub(\"p2/%package%.json\";\"providers/%package%.json\"))"
   "solver-problems|update @nolock @stderr @require:lib-nope=^2.0 @require:acme/provides-lib=^1.0"
   "solver-problems|update @nolock @stderr @require:lib-icu=^999"
   "solver-problems|update @nolock @stderr @require:acme/needs-php=^1.0"

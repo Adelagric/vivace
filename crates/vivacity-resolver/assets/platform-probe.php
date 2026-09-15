@@ -122,7 +122,9 @@ foreach ($loaded as $name) {
     $out[] = ['kind' => 'ext', 'name' => $name, 'version' => $v];
 }
 if ($xdebug_skipped !== null) {
-    $out[] = ['kind' => 'ext', 'name' => 'xdebug', 'version' => $xdebug_skipped];
+    // Listed like Composer does (XdebugHandler::getSkippedVersion), but not
+    // loaded in the restarted process (`extension_loaded('xdebug')` false).
+    $out[] = ['kind' => 'ext', 'name' => 'xdebug', 'version' => $xdebug_skipped, 'skipped' => true];
 }
 
 $libs = [];

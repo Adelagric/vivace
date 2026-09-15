@@ -1018,7 +1018,8 @@ fn resolve_and_lock(
     trace("prepare", t0);
     session.prefer_stable = prefer_stable;
     session.prefer_lowest = prefer_lowest;
-    session.installer_dev_mode = !args.no_dev;
+    session.installer_dev_mode =
+        !(args.no_dev || std::env::var("COMPOSER_NO_DEV").is_ok_and(|v| !v.is_empty() && v != "0"));
     // BaseCommand: COMPOSER_IGNORE_PLATFORM_REQS counts as the option,
     // COMPOSER_IGNORE_PLATFORM_REQ (comma-separated list) counts as the
     // list when it is empty.

@@ -66,8 +66,10 @@ pub fn pretty_string(
             "{}\n",
             problem_pretty_string(ctx, problem, &installed_map)
         ));
-        for rule in problem.reasons() {
-            if let Some(required) = required_package(rule) {
+        // `getExtensionProblems($problem->getReasons())`: sections in their
+        // original order.
+        for rule in problem.sections.iter().flatten() {
+            if let Some(required) = required_package(ctx.arena, rule) {
                 if required.starts_with("ext-") && !missing_extensions.contains(&required) {
                     missing_extensions.push(required);
                 }
@@ -154,10 +156,13 @@ fn extension_hint(ini_files: &[String], missing: &[String]) -> String {
 }
 
 /// `Rule::getRequiredPackage`.
-fn required_package(rule: &Rule) -> Option<String> {
+fn required_package(arena: &[Package], rule: &Rule) -> Option<String> {
     match &rule.reason {
         Reason::RootRequire { package_name, .. } => Some(package_name.clone()),
         Reason::PackageRequires(link) => Some(link.target.clone()),
+        Reason::Fixed { package } | Reason::LockedFilterListRemoved { package } => {
+            Some(arena[*package].name.clone())
+        }
         _ => None,
     }
 }
@@ -195,8 +200,13 @@ pub fn strip_output_styles(text: &str) -> String {
         };
         let tag = &after[..end];
         let name = tag.trim_start_matches('/');
-        let known = matches!(name, "error" | "warning" | "info" | "comment" | "")
-            || name.starts_with("href=");
+        let known = matches!(
+            name,
+            "error" | "warning" | "info" | "comment" | "question" | "highlight" | ""
+        ) || name.starts_with("href=")
+            || name.starts_with("fg=")
+            || name.starts_with("bg=")
+            || name.starts_with("options=");
         if known && !tag.contains('\n') {
             rest = &after[end + 1..];
         } else {
@@ -274,25 +284,40 @@ fn sortable_string(ctx: &MessageContext<'_>, rule: &Rule) -> String {
     match &rule.reason {
         Reason::RootRequire { package_name, .. } => package_name.clone(),
         Reason::Fixed { package } | Reason::LockedFilterListRemoved { package } => {
-            ctx.arena[*package].unique_name()
+            package_to_string(ctx, *package)
         }
         Reason::PackageConflict(link) | Reason::PackageRequires(link) => {
             let source = source_package(ctx, rule);
             format!(
                 "{}//{}",
-                ctx.arena[source].unique_name(),
+                package_to_string(ctx, source),
                 link_pretty_string(&ctx.arena[source], link)
             )
         }
         Reason::PackageSameName(name) => name.clone(),
-        Reason::PackageAlias { alias } => ctx.arena[*alias].unique_name(),
-        Reason::PackageInverseAlias { package } => ctx.arena[*package].unique_name(),
+        Reason::PackageAlias { alias } => package_to_string(ctx, *alias),
+        Reason::PackageInverseAlias { package } => package_to_string(ctx, *package),
         Reason::Learned(_) => rule
             .literals
             .iter()
             .map(|l| l.to_string())
             .collect::<Vec<_>>()
             .join("-"),
+    }
+}
+
+/// `BasePackage::__toString` (`getUniqueName`), with `AliasPackage`'s
+/// ` (alias of <version>)` / ` (root alias of <version>)` suffix.
+fn package_to_string(ctx: &MessageContext<'_>, idx: usize) -> String {
+    let p = &ctx.arena[idx];
+    match p.alias_of {
+        Some(base) => format!(
+            "{} ({}alias of {})",
+            p.unique_name(),
+            if p.root_package_alias { "root " } else { "" },
+            ctx.arena[base].version
+        ),
+        None => p.unique_name(),
     }
 }
 
@@ -366,15 +391,27 @@ fn dedup_default_branch_alias(ctx: &MessageContext<'_>, idx: usize) -> usize {
     }
 }
 
-/// `Link::getPrettyString($sourcePackage)`.
+/// `Link::getPrettyString($sourcePackage)`: the CONSTRAINT's pretty string
+/// (`$this->constraint->getPrettyString()`), not `getPrettyConstraint()`.
 fn link_pretty_string(source: &Package, link: &crate::package::Link) -> String {
     format!(
         "{} {} {} {}",
         source.pretty_string(),
         link.kind.description(),
         link.target,
-        link.pretty_constraint
+        link_constraint_pretty(source, link)
     )
+}
+
+/// `$link->getConstraint()->getPrettyString()`: `ArrayLoader::createLink`
+/// parses `self.version` as the source's pretty version, so that is the
+/// constraint's own pretty string; every other link keeps its text.
+fn link_constraint_pretty(source: &Package, link: &crate::package::Link) -> String {
+    if link.pretty_constraint == "self.version" {
+        source.pretty_version.clone()
+    } else {
+        link.pretty_constraint.clone()
+    }
 }
 
 /// Package pretty name -> normalized version -> pretty version, in a
@@ -654,6 +691,8 @@ fn rule_pretty_string(
             }
             if link.target != ctx.arena[package1].name {
                 let p1 = &ctx.arena[package1];
+                // Both loops run in the reference: a `replaces` link wins
+                // over a `provides` one for the same target.
                 let mut provided: Option<(&str, &str)> = None;
                 for l in p1.provides.iter() {
                     if l.target == link.target {
@@ -661,12 +700,10 @@ fn rule_pretty_string(
                         break;
                     }
                 }
-                if provided.is_none() {
-                    for l in p1.replaces.iter() {
-                        if l.target == link.target {
-                            provided = Some(("replaces", &l.pretty_constraint));
-                            break;
-                        }
+                for l in p1.replaces.iter() {
+                    if l.target == link.target {
+                        provided = Some(("replaces", &l.pretty_constraint));
+                        break;
                     }
                 }
                 if let Some((kind, constraint)) = provided {
@@ -700,12 +737,13 @@ fn rule_pretty_string(
                     package_list(ctx, &requires, Some(&link.constraint), false)
                 );
             }
+            let pretty = link_constraint_pretty(&ctx.arena[source], link);
             let (_, reason) = missing_package_reason(
                 ctx,
                 &link.target,
                 Some(PrettyConstraint {
                     constraint: &link.constraint,
-                    pretty: &link.pretty_constraint,
+                    pretty: &pretty,
                 }),
             );
             format!("{text} -> {reason}")
@@ -1105,9 +1143,21 @@ fn providers(ctx: &mut MessageContext<'_>, name: &str) -> Vec<(String, Option<St
     for (i, repository) in ctx.set.repositories.iter().enumerate() {
         let candidates: Vec<usize> = match repository {
             Repository::Root(m) | Repository::Platform(m) | Repository::Locked(m) => m.clone(),
-            Repository::Composer(repo) => repo
-                .provider_candidates(Origin::Repository(i), ctx.arena)
-                .unwrap_or_default(),
+            Repository::Composer(repo) => {
+                // `ComposerRepository::getProviders`: the providers API
+                // answers alone when the repository declares one.
+                if let Ok(Some(api)) = repo.providers_api(name) {
+                    for (n, d) in api {
+                        match result.iter_mut().find(|(existing, _)| *existing == n) {
+                            Some(slot) => slot.1 = d,
+                            None => result.push((n, d)),
+                        }
+                    }
+                    continue;
+                }
+                repo.provider_candidates(Origin::Repository(i), ctx.arena)
+                    .unwrap_or_default()
+            }
         };
         let mut repo_result: Vec<(String, Option<String>)> = Vec::new();
         for idx in candidates {
@@ -1586,11 +1636,7 @@ fn missing_package_reason(
         }
         let mut suffix = String::new();
         if let Some(pc) = constraint {
-            if let Constraint::Single {
-                op: Op::Eq,
-                version,
-            } = pc.constraint
-            {
+            if let Constraint::Single { version, .. } = pc.constraint {
                 if version == "dev-master" {
                     for &idx in &packages {
                         let v = &ctx.arena[idx].version;

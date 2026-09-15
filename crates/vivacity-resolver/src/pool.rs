@@ -300,8 +300,8 @@ pub struct Pool {
     /// generator and the solver consult it).
     pub filter_list_removed: FilterListRemoved,
     /// `securityRemovedVersions`: name (own name and replaced names) ->
-    /// normalized version -> advisory ids (messages only).
-    pub security_removed: BTreeMap<String, BTreeMap<String, Vec<String>>>,
+    /// [(normalized version, advisory ids)] in pool order (messages only).
+    pub security_removed: BTreeMap<String, Vec<(String, Vec<String>)>>,
     /// `abandonedRemovedVersions`: name -> normalized version -> pretty.
     pub abandoned_removed: BTreeMap<String, BTreeMap<String, String>>,
     /// `removedVersions`: name -> normalized version -> pretty version of
@@ -444,7 +444,7 @@ impl Pool {
             .get(name)
             .and_then(|m| {
                 m.iter()
-                    .find(|(v, _)| constraint.matches(&Constraint::new(Op::Eq, (*v).clone())))
+                    .find(|(v, _)| constraint.matches(&Constraint::new(Op::Eq, v.clone())))
                     .map(|(_, ids)| ids.clone())
             })
             .unwrap_or_default()
@@ -475,12 +475,19 @@ impl Pool {
         constraint: &Constraint,
     ) -> Vec<(String, String)> {
         let mut lists: Vec<(String, Vec<String>)> = Vec::new();
+        // `$seen[spl_object_id($entry)]`: one entry object covers several
+        // versions; the same entry is mentioned once.
+        let mut seen: Vec<&crate::repository::FilterEntry> = Vec::new();
         if let Some(versions) = self.filter_list_removed.get(name) {
             for (v, entries) in versions {
                 if !constraint.matches(&Constraint::new(Op::Eq, v.clone())) {
                     continue;
                 }
                 for e in entries {
+                    if seen.iter().any(|s| s.same_entry(e)) {
+                        continue;
+                    }
+                    seen.push(e);
                     let source = e
                         .source
                         .as_deref()

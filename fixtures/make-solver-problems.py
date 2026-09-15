@@ -126,6 +126,15 @@ def write_registry(reg):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 f.write('{"packages": {"%s": []}}' % name)
+    # A providers API answer (`providers-api` is declared per case with
+    # @registry-jq): who provides ext-nope, Packagist-style.
+    os.makedirs(os.path.join(reg, "providers"), exist_ok=True)
+    with open(os.path.join(reg, "providers", "ext-nope.json"), "w") as f:
+        json.dump({"providers": [
+            {"name": "acme/provides-ext", "description": "Provides the nope extension in pure PHP, for those who cannot install it; this description is longer than one hundred characters to be cut", "type": "library"},
+            {"name": "acme/other", "description": None, "type": "library"},
+        ]}, f)
+        f.write("\n")
     with open(os.path.join(reg, "SNAPSHOT"), "w") as f:
         f.write("synthetic registry built by fixtures/make-solver-problems.py\n")
     with open(os.path.join(reg, "summary.json"), "w") as f:
