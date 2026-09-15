@@ -80,7 +80,7 @@ pub fn config_value(manifest: &Value, key: &str) -> Option<Value> {
     v.get("config")?.get(key).cloned()
 }
 
-fn truthy(v: Option<Value>) -> bool {
+pub(crate) fn truthy(v: Option<Value>) -> bool {
     match v {
         Some(Value::Bool(b)) => b,
         Some(Value::Number(n)) => n.as_f64().is_some_and(|f| f != 0.0),
@@ -656,20 +656,30 @@ pub fn run_require(args: &RequireArgs) -> anyhow::Result<i32> {
         files.revert()?;
         return Ok(status);
     }
-    // After the resolution, a failing install restores nothing
-    // (`dependencyResolutionCompleted`).
+    // `$status = $install->run(); if ($status !== 0) revertComposerFile()`:
+    // a failing install phase restores the files too (an EXCEPTION after
+    // the resolution would not, `dependencyResolutionCompleted`).
     if !args.no_install {
         let virtual_lock = if args.dry_run {
             resolved.lock.clone()
         } else {
             None
         };
-        let status = install_after_update(&update_args, virtual_lock)?;
+        let virtual_manifest = if args.dry_run {
+            Some(resolved.manifest.clone())
+        } else {
+            None
+        };
+        let status = install_after_update(&update_args, virtual_lock, virtual_manifest)?;
         if status != 0 {
+            files.revert()?;
+            if args.dry_run && newly_created {
+                let _ = std::fs::remove_file(&json);
+            }
             return Ok(status);
         }
     }
-    crate::print_post_update(&resolved, &project, args.dry_run);
+    crate::print_post_update(&resolved, &project);
     let status = if !to_guess.is_empty() {
         update_requirements_after_resolution(
             &project,

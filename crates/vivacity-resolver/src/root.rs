@@ -176,16 +176,11 @@ impl RootPackage {
                 .iter()
                 .map(|(n, c)| (n.clone(), Value::String(c.clone())))
                 .collect();
-            let (kind, own, other) = if patch.dev {
-                (
-                    crate::package::LinkType::DevRequire,
-                    "require-dev",
-                    "require",
-                )
+            let kind = if patch.dev {
+                crate::package::LinkType::DevRequire
             } else {
-                (crate::package::LinkType::Require, "require", "require-dev")
+                crate::package::LinkType::Require
             };
-            let _ = other;
             let new_links = loader::parse_links(
                 &self.package.name,
                 &self.package.pretty_version,
@@ -199,7 +194,6 @@ impl RootPackage {
             } else {
                 (&mut self.package.requires, &mut self.package.dev_requires)
             };
-            let _ = own;
             for l in new_links.iter() {
                 own_links.insert(l.clone());
             }

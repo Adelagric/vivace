@@ -23,6 +23,7 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @stub:a/b               fichier de métadonnées vide pour a/b dans l'instantané
 #   @installed:a/b          vendor/composer/installed.json avec a/b et son répertoire
 #   @installed-nodir:a/b    idem sans le répertoire (purgé par Composer)
+#   @installed-funding:a/b  idem avec une entrée `funding` (ligne « looking for funding »)
 #   @global-allow:a/b       config.allow-plugins {a/b: true} dans le config.json global
 #   @global-sort            config.sort-packages true dans le config.json global
 #   @emptyjson              composer.json vide (0 octet)
@@ -200,6 +201,13 @@ STEPS=(
   "laravel|remove laravel/tinker --dry-run @dry-install @installed:laravel/tinker"
   "laravel|require symfony/uid --dry-run @dry-install"
   "solver-policies|update --dry-run @nolock @dry-install"
+  "laravel|update --dry-run @dry-install @installed-funding:laravel/tinker"
+  "laravel|install @installed-nodir:laravel/tinker"
+  "laravel|install @installed-funding:laravel/tinker"
+  "laravel|install @require:acme/nope=^1.0 @stub:acme/nope"
+  "laravel|install @require:laravel/tinker=^99"
+  "laravel|install @jq:.[\"require-dev\"][\"acme/nope\"]=\"^1.0\" @stub:acme/nope"
+  "laravel|install --no-dev @jq:.[\"require-dev\"][\"acme/nope\"]=\"^1.0\" @stub:acme/nope"
   "rector|update --dry-run @require:phpstan/phpstan=^99"
   "rector|update --dry-run --no-dev"
   "symfony|require symfony/yaml --dry-run"
@@ -322,8 +330,9 @@ for fx in "${FIXTURES[@]}"; do
           @badlock) printf '{"_readme": [], "content-hash": "x"}\n' > "$d/composer.lock" ;;
           @drop:*) jq --arg p "${prep#@drop:}" 'del(.require[$p])' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @require:*) kv="${prep#@require:}"; jq --arg p "${kv%%=*}" --arg c "${kv#*=}" '.require[$p] = $c' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
-          @installed:*|@installed-nodir:*) p="${prep#*:}"; mkdir -p "$d/vendor/composer"
-            printf '{"packages": [{"name": "%s", "version": "1.0.0", "version_normalized": "1.0.0.0", "type": "library", "install-path": "../%s"}], "dev": true, "dev-package-names": []}\n' "$p" "$p" > "$d/vendor/composer/installed.json"
+          @installed:*|@installed-nodir:*|@installed-funding:*) p="${prep#*:}"; mkdir -p "$d/vendor/composer"
+            funding=""; [ "${prep%%:*}" = "@installed-funding" ] && funding=', "funding": [{"type": "github", "url": "https://github.com/sponsors/x"}]'
+            printf '{"packages": [{"name": "%s", "version": "1.0.0", "version_normalized": "1.0.0.0", "type": "library", "install-path": "../%s"%s}], "dev": true, "dev-package-names": []}\n' "$p" "$p" "$funding" > "$d/vendor/composer/installed.json"
             [ "${prep%%:*}" = "@installed-nodir" ] || mkdir -p "$d/vendor/$p" ;;
           *) echo "prep inconnu : $prep"; exit 1 ;;
         esac
@@ -335,7 +344,10 @@ for fx in "${FIXTURES[@]}"; do
     # rien télécharger.
     extra=(--no-install --no-audit); [ "${sargs[0]}" = "install" ] && extra=(--dry-run)
     viv_extra=("${extra[0]}")
-    if [ "$dry_install" = 1 ]; then extra=(--no-audit); viv_extra=(); fi
+    if [ "$dry_install" = 1 ]; then
+      [ "${sargs[0]}" != "install" ] || { echo "FAIL $fx ${sargs[*]} : @dry-install ne s'applique pas à install"; status=1; continue; }
+      extra=(--no-audit); viv_extra=()
+    fi
     quiet=(--quiet); [ "$compare_stderr" = 1 ] && quiet=(--no-ansi)
     (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" COMPOSER_TESTS_ARE_RUNNING=1 \
       composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction "${quiet[@]}" >"$WORK/$fx-$n.composer.log" 2>"$WORK/$fx-$n.composer.err") || ref_code=$?
@@ -362,7 +374,7 @@ for fx in "${FIXTURES[@]}"; do
       done
       if ! [ -s "$WORK/$fx-$n.composer.tail" ]; then
         echo "FAIL $label : pas de ligne d'ancrage dans la sortie de Composer (cas mal choisi)"; ok=0
-      elif ! grep -q '^  *- \|^Nothing to modify\|^Nothing to install' "$WORK/$fx-$n.composer.tail"; then
+      elif ! grep -q '^ *- \|^Nothing to modify\|^Nothing to install' "$WORK/$fx-$n.composer.tail"; then
         echo "FAIL $label : oracle aveugle — Composer n'a écrit aucune raison ni opération (\`  - …\`)"; ok=0
       elif ! diff -q "$WORK/$fx-$n.composer.tail" "$WORK/$fx-$n.vivacity.tail" >/dev/null 2>&1; then
         echo "FAIL $label : les explications diffèrent"

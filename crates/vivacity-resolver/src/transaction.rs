@@ -419,7 +419,8 @@ pub fn full_pretty_version(p: &Package, truncate: bool, mode: DisplayRef) -> Str
         return p.pretty_version.clone();
     };
     if truncate && reference.len() == 40 && source_type != "svn" {
-        return format!("{} {}", p.pretty_version, &reference[..7]);
+        let short = String::from_utf8_lossy(&reference.as_bytes()[..7]);
+        return format!("{} {}", p.pretty_version, short);
     }
     format!("{} {}", p.pretty_version, reference)
 }
@@ -441,7 +442,9 @@ pub fn is_upgrade(from: &str, to: &str) -> bool {
     if from.starts_with("dev-") || to.starts_with("dev-") {
         return true;
     }
-    crate::phpver::version_compare_op(&from, &to, "<")
+    // `Semver::sort([$to, $from])[0] === $from`: from sorts first unless
+    // it is strictly greater (a stable sort keeps `to` first on a tie).
+    !crate::phpver::version_compare_op(&to, &from, "<")
 }
 
 impl Operation {

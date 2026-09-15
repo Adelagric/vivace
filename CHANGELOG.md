@@ -25,8 +25,17 @@ byte-identical-output promise are the public API.
   transaction order. Policy warnings lose their `Warning:` prefix.
 - `harness/steps.sh` compares stderr on every case by default (from the
   first operation or headline to the end; `@nostderr` opts out), and
-  `@dry-install` exercises the install phase of a dry run: 202 cases,
-  180 with stderr byte-identical.
+  `@dry-install` exercises the install phase of a dry run: 209 cases,
+  187 with stderr byte-identical.
+- `install` checks the lock against the root requirements like
+  `Locker::getMissingRequirementInfo` (a hand-edited `composer.json`
+  exits 4 with Composer's lines), and installed.json entries whose
+  install path is gone count as absent (`Factory::purgePackages`).
+
+### Fixed
+- `require` did not restore `composer.json`/`composer.lock` when the
+  install phase (not the resolution) failed; Composer reverts on any
+  non-zero status.
 
 ## [0.7.0] — 2026-09-15
 
