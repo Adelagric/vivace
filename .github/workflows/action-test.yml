@@ -50,6 +50,9 @@ jobs:
         with:
           php-version: "8.4"
           tools: composer:2.10.3
+          # Compiled in on Linux/macOS, separate DLLs on Windows (Laravel's
+          # lock requires ext-fileinfo).
+          extensions: mbstring, intl, fileinfo, zip, curl
 
       - name: Install the Laravel skeleton with vivacity (network)
         working-directory: fixtures/projects/laravel

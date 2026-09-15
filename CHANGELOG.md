@@ -17,6 +17,12 @@ byte-identical-output promise are the public API.
   builds every target without publishing. `bin-compat` now also reads
   the global `COMPOSER_HOME/config.json` layer, and `COMPOSER_BIN_COMPAT`
   set to `""` or `"0"` falls through like Composer's `?:`.
+
+### Fixed
+- `install.sh` failed on Linux with "vivacity: Not found in archive": the
+  release archives up to 0.6.0 stored their members with a `./` prefix,
+  which GNU tar does not match against a bare name (bsdtar on macOS
+  does). New archives have no prefix and the script accepts both.
 - **Windows support** (Luther Monson, [#2](https://github.com/Adelagric/vivacity/pull/2)):
   `vendor/bin` `.bat` proxies written exactly when Composer writes them
   (`bin-compat` resolved from `COMPOSER_BIN_COMPAT`, then

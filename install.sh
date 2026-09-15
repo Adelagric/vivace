@@ -54,7 +54,9 @@ case "$base" in
 esac
 (cd "$tmp" && { command -v sha256sum >/dev/null 2>&1 && sha256sum -c --quiet "$name.sha256" || shasum -a 256 -c --quiet "$name.sha256"; })
 mkdir -p "$DIR"
-tar -xzf "$tmp/$name" -C "$tmp" "vivacity$exe"
+# Assets up to v0.6.0 were archived with a `./` prefix, which GNU tar does
+# not match against a bare member name (bsdtar does).
+tar -xzf "$tmp/$name" -C "$tmp" "vivacity$exe" 2>/dev/null || tar -xzf "$tmp/$name" -C "$tmp" "./vivacity$exe"
 install -m 0755 "$tmp/vivacity$exe" "$DIR/vivacity$exe"
 echo "vivacity: installed to $DIR/vivacity$exe ($tag)" >&2
 case ":$PATH:" in
