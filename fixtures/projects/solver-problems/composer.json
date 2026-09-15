@@ -1,0 +1,10 @@
+{
+    "name": "vivace/solver-problems",
+    "description": "Solver case: every branch of Composer's unsolvable-set messages (see fixtures/make-solver-problems.py)",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "require": {
+        "acme/other": "^1.0",
+        "acme/stab": "*"
+    }
+}

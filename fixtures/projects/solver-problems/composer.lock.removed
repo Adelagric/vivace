@@ -1,0 +1,85 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "c23742d47e1229e799beb53a3aab46a1",
+    "packages": [
+        {
+            "name": "acme/other",
+            "version": "1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://example.invalid/acme/other.git",
+                "reference": "ref1100000000000000000000000000000000000"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://example.invalid/acme/other/1.1.0.zip",
+                "reference": "ref1100000000000000000000000000000000000",
+                "shasum": ""
+            },
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "acme/other test package",
+            "time": "2026-01-01T00:00:00+00:00"
+        },
+        {
+            "name": "acme/removed",
+            "version": "1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://example.invalid/acme/removed.git",
+                "reference": "ref1000000000000000000000000000000000000"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://example.invalid/acme/removed/1.0.0.zip",
+                "reference": "ref1000000000000000000000000000000000000",
+                "shasum": ""
+            },
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "acme/removed test package",
+            "time": "2026-01-01T00:00:00+00:00"
+        },
+        {
+            "name": "acme/stab",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://example.invalid/acme/stab.git",
+                "reference": "refdevmain000000000000000000000000000000"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://example.invalid/acme/stab/dev-main.zip",
+                "reference": "refdevmain000000000000000000000000000000",
+                "shasum": ""
+            },
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "acme/stab test package",
+            "time": "2026-01-01T00:00:00+00:00"
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "dev",
+    "stability-flags": {},
+    "prefer-stable": true,
+    "prefer-lowest": false,
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.9.0"
+}
