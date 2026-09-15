@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/harness/lib/registry.sh"
 VIVACITY="$ROOT/target/release/vivacity"
 WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/steps"
-FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies)
+FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius rector drupal solver-policies solver-conflict)
 # "fixture|arguments" : la commande et ses arguments. Les mots finaux en
 # `@…` préparent la copie avant l'étape (et ne sont pas passés) :
 #   @nolock                 pas de composer.lock
@@ -38,6 +38,13 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 #   @registry-jq:expr       applique l'expression jq au packages.json de l'instantané (le cas seulement)
 #   @repofilter:json        redéclare le dépôt `snapshot` dans le manifeste avec cette option `filter`
 #   @env:NAME=VALUE         variable d'environnement des deux côtés (le cas seulement)
+#   @stderr                 compare aussi la sortie d'erreur à partir de la ligne
+#                           « Your requirements could not be resolved… » (ou
+#                           « Unable to find a compatible set… », « Your lock
+#                           file does not contain… ») jusqu'à la fin, à l'octet.
+#                           Composer tourne alors sans --quiet (les explications
+#                           sont au niveau normal) et avec COMPOSER_TESTS_ARE_RUNNING
+#                           (sinon `::error ::…` sur stdout sous GitHub Actions).
 STEPS=(
   "laravel|remove laravel/tinker"
   "laravel|remove laravel/tinker @nolock"
@@ -47,6 +54,7 @@ STEPS=(
   "laravel|remove --unused @drop:laravel/tinker"
   "laravel|remove --unused laravel/pint --dev @drop:laravel/tinker"
   "laravel|remove laravel/pint --dev @require:symfony/console=^99 @stub:symfony/console"
+  "laravel|remove laravel/pint --dev @require:symfony/console=^99 @stub:symfony/console @stderr"
   "laravel|remove laravel/tinker -W"
   "laravel|remove laravel/tinker --no-update-with-dependencies"
   "laravel|remove laravel/tinker --no-update"
@@ -167,6 +175,7 @@ STEPS=(
   "rector|require symfony/finder"
   "drupal|require drupal/core-project-message"
   "drupal|require composer/installers"
+  "solver-conflict|update @nolock @stderr"
 )
 [ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
@@ -188,7 +197,7 @@ for fx in "${FIXTURES[@]}"; do
     [ "${spec%%|*}" = "$fx" ] || continue
     n=$((n + 1))
     read -r -a sargs <<< "${spec#*|}"
-    preps=(); stubs=(); envs=(); registry_edited=0
+    preps=(); stubs=(); envs=(); registry_edited=0; compare_stderr=0
     while [ ${#sargs[@]} -gt 0 ]; do
       last=$(( ${#sargs[@]} - 1 ))
       case "${sargs[$last]}" in
@@ -208,14 +217,16 @@ for fx in "${FIXTURES[@]}"; do
         @global-sort) printf '{"repositories": {"snapshot": {"type": "composer", "url": "file://%s"}, "packagist.org": false}, "config": {"sort-packages": true}}\n' "$reg" > "$home/config.json" ;;
         @registry-jq:*) jq "${prep#@registry-jq:}" "$reg/packages.json" > "$reg/p.tmp" && mv "$reg/p.tmp" "$reg/packages.json"; registry_edited=1 ;;
         @env:*) kv="${prep#@env:}"; export "${kv%%=*}=${kv#*=}"; envs+=("${kv%%=*}") ;;
+        @stderr) compare_stderr=1 ;;
       esac
     done
     for side in ref viv; do
       d="$WORK/$side-$fx-$n"; rm -rf "$d"; mkdir -p "$d"
-      cp "$ROOT/fixtures/projects/$fx/composer.json" "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
+      cp "$ROOT/fixtures/projects/$fx/composer.json" "$d/"
+      [ -f "$ROOT/fixtures/projects/$fx/composer.lock" ] && cp "$ROOT/fixtures/projects/$fx/composer.lock" "$d/"
       for prep in "${preps[@]+"${preps[@]}"}"; do
         case "$prep" in
-          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*) ;;
+          @stub:*|@global-allow:*|@global-sort|@registry-jq:*|@env:*|@stderr) ;;
           @repofilter:*) jq --arg u "file://$reg" --argjson f "${prep#@repofilter:}" '.repositories.snapshot = {"type": "composer", "url": $u, "filter": $f}' "$d/composer.json" > "$d/c.tmp" && mv "$d/c.tmp" "$d/composer.json" ;;
           @emptyjson) : > "$d/composer.json" ;;
           @nojson) rm -f "$d/composer.json" "$d/composer.lock" ;;
@@ -243,11 +254,12 @@ for fx in "${FIXTURES[@]}"; do
     # (refusé) ; --dry-run vérifie le lock (politiques, plateforme) sans
     # rien télécharger.
     extra=(--no-install --no-audit); [ "${sargs[0]}" = "install" ] && extra=(--dry-run)
-    (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction --quiet >"$WORK/$fx-$n.composer.log" 2>&1) || ref_code=$?
+    quiet=(--quiet); [ "$compare_stderr" = 1 ] && quiet=(--no-ansi)
+    (cd "$WORK/ref-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" COMPOSER_TESTS_ARE_RUNNING=1 \
+      composer "${sargs[@]}" "${extra[@]}" --no-scripts --no-plugins --no-interaction "${quiet[@]}" >"$WORK/$fx-$n.composer.log" 2>"$WORK/$fx-$n.composer.err") || ref_code=$?
     viv_code=0
     (cd "$WORK/viv-$fx-$n" && COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_ROOT_VERSION="$root_version" \
-      "$VIVACITY" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivacity.log" 2>&1) || viv_code=$?
+      "$VIVACITY" "${sargs[@]}" "${extra[0]}" >"$WORK/$fx-$n.vivacity.log" 2>"$WORK/$fx-$n.vivacity.err") || viv_code=$?
     # Les métadonnées remplacées par @stub sont rendues à l'instantané, le
     # packages.json et l'environnement aussi.
     for f in "${stubs[@]+"${stubs[@]}"}"; do rm -f "$f"; [ -f "$f.orig" ] && mv "$f.orig" "$f"; done
@@ -256,9 +268,25 @@ for fx in "${FIXTURES[@]}"; do
     label="$fx ${sargs[*]}"; [ ${#preps[@]} -gt 0 ] && label="$label (${preps[*]})"
     if [ "$ref_code" != "$viv_code" ]; then
       echo "FAIL $label : code retour composer=$ref_code vivacity=$viv_code"
-      tail -3 "$WORK/$fx-$n.composer.log" "$WORK/$fx-$n.vivacity.log"; status=1; continue
+      tail -3 "$WORK/$fx-$n.composer.err" "$WORK/$fx-$n.vivacity.err"; status=1; continue
     fi
     ok=1
+    if [ "$compare_stderr" = 1 ]; then
+      # De la ligne d'ancrage à la fin ; les lignes de progression avant
+      # (« Loading composer repositories… ») ne sont pas comparées.
+      anchor='^(Your requirements could not be resolved|Unable to find a compatible set|Your lock file does not contain)'
+      for side in composer vivacity; do
+        sed -E -n "/$anchor/,\$p" "$WORK/$fx-$n.$side.err" > "$WORK/$fx-$n.$side.tail"
+      done
+      if ! [ -s "$WORK/$fx-$n.composer.tail" ]; then
+        echo "FAIL $label : pas de ligne d'ancrage dans la sortie de Composer (cas mal choisi)"; ok=0
+      elif ! grep -q '^    - ' "$WORK/$fx-$n.composer.tail"; then
+        echo "FAIL $label : oracle aveugle — Composer n'a écrit aucune raison (\`    - …\`)"; ok=0
+      elif ! diff -q "$WORK/$fx-$n.composer.tail" "$WORK/$fx-$n.vivacity.tail" >/dev/null 2>&1; then
+        echo "FAIL $label : les explications diffèrent"
+        diff "$WORK/$fx-$n.composer.tail" "$WORK/$fx-$n.vivacity.tail" | head -30 || true; ok=0
+      fi
+    fi
     for f in composer.json composer.lock; do
       # Absent des deux côtés (manifeste jamais créé, lock jamais écrit) : égal.
       [ -e "$WORK/ref-$fx-$n/$f" ] || [ -e "$WORK/viv-$fx-$n/$f" ] || continue
@@ -271,7 +299,8 @@ for fx in "${FIXTURES[@]}"; do
       changed=""
       cmp -s "$ROOT/fixtures/projects/$fx/composer.json" "$WORK/ref-$fx-$n/composer.json" || changed="json"
       [ -f "$WORK/ref-$fx-$n/composer.lock" ] && { cmp -s "$ROOT/fixtures/projects/$fx/composer.lock" "$WORK/ref-$fx-$n/composer.lock" || changed="$changed lock"; } || true
-      echo "OK   $label : identiques (code $ref_code, modifié : ${changed:-rien})"
+      msg="identiques"; [ "$compare_stderr" = 1 ] && msg="identiques, explications comprises"
+      echo "OK   $label : $msg (code $ref_code, modifié : ${changed:-rien})"
     else
       status=1
     fi
