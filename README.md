@@ -27,7 +27,13 @@ and `config.lock` are read from `composer.json` the way Composer reads them.
 curl -fsSL https://raw.githubusercontent.com/Adelagric/vivacity/main/install.sh | sh
 ```
 
-Linux x86_64/arm64, macOS arm64/x86_64; the script checks the sha256.
+Linux x86_64/arm64, macOS arm64/x86_64, Windows x86_64 (Git Bash); the
+script checks the sha256. On Windows from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Adelagric/vivacity/main/install.ps1 | iex
+```
+
 Also `cargo install vivacity` (crates.io), `cargo binstall vivacity`, or
 `cargo install --path crates/vivacity`.
 

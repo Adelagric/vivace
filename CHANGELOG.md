@@ -7,6 +7,16 @@ byte-identical-output promise are the public API.
 ## [Unreleased]
 
 ### Added
+- **Windows binaries and installers**: the release ships
+  `vivacity-<tag>-x86_64-pc-windows-msvc.tar.gz` (with `vivacity.exe`),
+  `install.sh` handles Git Bash/MSYS2, a new `install.ps1` handles
+  PowerShell (5.1 and 7), and the GitHub Action installs on
+  `windows-latest`. Both installers are exercised in CI against a
+  package built from the commit (`tools/package-release.sh`, the same
+  script the release uses); a `workflow_dispatch` dry run of the release
+  builds every target without publishing. `bin-compat` now also reads
+  the global `COMPOSER_HOME/config.json` layer, and `COMPOSER_BIN_COMPAT`
+  set to `""` or `"0"` falls through like Composer's `?:`.
 - **Windows support** (Luther Monson, [#2](https://github.com/Adelagric/vivacity/pull/2)):
   `vendor/bin` `.bat` proxies written exactly when Composer writes them
   (`bin-compat` resolved from `COMPOSER_BIN_COMPAT`, then

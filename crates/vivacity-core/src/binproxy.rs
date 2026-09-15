@@ -352,35 +352,42 @@ pub enum BinCompat {
 
 /// `Config::get('bin-compat')` + the resolution in
 /// `BinaryInstaller::installBinaries` (2.10.3): the value comes from
-/// `COMPOSER_BIN_COMPAT` (non-empty) else `config.bin-compat` of the root
-/// composer.json else `"auto"`, and resolves to `Full` iff it is `"full"`,
-/// or `"auto"` on Windows or WSL (`Platform::isWindows() ||
+/// `COMPOSER_BIN_COMPAT` (`?:` in `Config::get`, so `""` and `"0"` fall
+/// through) else `config.bin-compat` of the root composer.json else the
+/// global `COMPOSER_HOME/config.json` (`Config::merge` layers) else
+/// `"auto"`, and resolves to `Full` iff it is `"full"`, or `"auto"` on
+/// Windows or WSL (`Platform::isWindows() ||
 /// Platform::isWindowsSubsystemForLinux()`).
 pub fn resolve_bin_compat(root_manifest: &serde_json::Value) -> Result<BinCompat> {
-    let env = std::env::var("COMPOSER_BIN_COMPAT")
-        .ok()
-        .filter(|v| !v.is_empty());
+    let env = std::env::var("COMPOSER_BIN_COMPAT").ok();
+    let global = crate::layout::global_config_value("bin-compat");
     resolve_bin_compat_with(
         env.as_deref(),
         root_manifest,
+        global.as_ref(),
         cfg!(windows) || is_windows_subsystem_for_linux(),
     )
 }
 
 /// Pure core of [`resolve_bin_compat`], for tests: `env` is the
-/// `COMPOSER_BIN_COMPAT` override, `windows_or_wsl` the platform predicate.
+/// `COMPOSER_BIN_COMPAT` override, `global` the `config.bin-compat` of
+/// the global config.json, `windows_or_wsl` the platform predicate.
 /// An unknown value is refused with Composer's own message; the deprecated
 /// `"symlink"` is accepted and behaves like `"proxy"` (Composer deprecation-
 /// warns then takes the non-full branch — vivacity never symlinks anyway).
 pub fn resolve_bin_compat_with(
     env: Option<&str>,
     root_manifest: &serde_json::Value,
+    global: Option<&serde_json::Value>,
     windows_or_wsl: bool,
 ) -> Result<BinCompat> {
+    // PHP `?:`: an empty string and "0" are falsy.
+    let env = env.filter(|v| !v.is_empty() && *v != "0");
     let config = root_manifest
         .get("config")
         .and_then(|c| c.get("bin-compat"))
-        .and_then(serde_json::Value::as_str);
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| global.and_then(serde_json::Value::as_str));
     let value = env.or(config).unwrap_or("auto");
     match value {
         "full" => Ok(BinCompat::Full),

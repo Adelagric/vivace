@@ -133,10 +133,16 @@ pub fn plugin_allowed(manifest: &Value, package: &str) -> PluginVerdict {
 
 /// `config.allow-plugins` from COMPOSER_HOME/config.json.
 pub fn global_allow_plugins() -> Option<Value> {
+    global_config_value("allow-plugins")
+}
+
+/// One `config.<key>` value of COMPOSER_HOME/config.json — the global
+/// layer of `Config::merge`, below the root composer.json.
+pub fn global_config_value(key: &str) -> Option<Value> {
     let path = crate::fetch::composer_home()?.join("config.json");
     let text = std::fs::read_to_string(path).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;
-    v.get("config")?.get("allow-plugins").cloned()
+    v.get("config")?.get(key).cloned()
 }
 
 /// Project-relative path of a package handled by LibraryInstaller.

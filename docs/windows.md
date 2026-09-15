@@ -1,10 +1,22 @@
 # Windows support
 
-Status of the `feat/windows-support` branch (rebased onto v0.6.0, the
-vivacity rename): an exploratory spike on a Windows 11 host (MSVC toolchain,
-`x86_64-pc-windows-msvc`), then a hardening pass on the same host with a real
-Windows PHP 8.3 and Composer 2.10. Honest inventory: what compiles, what
-runs, what was verified, what is deferred.
+Merged in #2 (Luther Monson): an exploratory spike on a Windows 11 host
+(MSVC toolchain, `x86_64-pc-windows-msvc`), then a hardening pass on the
+same host with a real Windows PHP 8.3 and Composer 2.10. Honest inventory:
+what compiles, what runs, what was verified, what is deferred.
+
+## Installing
+
+- PowerShell (5.1 or 7): `irm https://raw.githubusercontent.com/Adelagric/vivacity/main/install.ps1 | iex`
+  — installs `vivacity.exe` under `%LOCALAPPDATA%\Programs\vivacity`
+  (`VIVACITY_INSTALL_DIR` to change it) and prints the PATH command if
+  needed. As a saved file it needs `powershell -ExecutionPolicy Bypass
+  -File install.ps1` on a default client policy.
+- Git Bash / MSYS2: the same `install.sh` as Linux/macOS.
+- GitHub Actions: `uses: Adelagric/vivacity@vX.Y.Z` on `windows-latest`.
+- Assets: `vivacity-<tag>-x86_64-pc-windows-msvc.tar.gz` + `.sha256`
+  (extracted with `tar.exe`, which ships with Windows since 10 1803).
+  No ARM64 build yet: `cargo install vivacity`.
 
 ## What works
 

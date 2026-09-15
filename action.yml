@@ -41,8 +41,10 @@ runs:
         path: |
           ~/.cache/vivacity
           ~/Library/Caches/vivacity
+          ~/AppData/Local/vivacity
           ~/.cache/composer
           ~/Library/Caches/composer
+          ~/AppData/Local/Composer
         key: vivacity-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/composer.lock') }}
         restore-keys: |
           vivacity-${{ runner.os }}-${{ runner.arch }}-
@@ -57,9 +59,10 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -eu
+        exe=""; [ "$RUNNER_OS" = "Windows" ] && exe=".exe"
         mkdir -p "$VIVACITY_INSTALL_DIR"
         if [ -n "$VIVACITY_BINARY" ]; then
-          install -m 0755 "$VIVACITY_BINARY" "$VIVACITY_INSTALL_DIR/vivacity"
+          install -m 0755 "$VIVACITY_BINARY" "$VIVACITY_INSTALL_DIR/vivacity$exe"
         else
           case "$VIVACITY_VERSION" in
             v[0-9]*) ;;
@@ -68,4 +71,4 @@ runs:
           sh "$GITHUB_ACTION_PATH/install.sh"
         fi
         echo "$VIVACITY_INSTALL_DIR" >> "$GITHUB_PATH"
-        echo "version=$("$VIVACITY_INSTALL_DIR/vivacity" --version)" >> "$GITHUB_OUTPUT"
+        echo "version=$("$VIVACITY_INSTALL_DIR/vivacity$exe" --version)" >> "$GITHUB_OUTPUT"

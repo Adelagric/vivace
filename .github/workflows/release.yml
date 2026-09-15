@@ -3,6 +3,13 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Dry run: builds and packages every target for a pretend tag, publishes
+  # nothing (the publish job only runs on a real tag push).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Pretend tag for a dry run (e.g. v0.7.0); nothing is published"
+        required: true
 
 permissions:
   contents: write
@@ -11,6 +18,12 @@ jobs:
   build:
     name: build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    # bash everywhere, Git Bash on windows-latest: every step below is bash.
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -18,15 +31,17 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
           - { os: macos-latest, target: aarch64-apple-darwin }
-          # x86_64 macOS est cross-compilé depuis le runner arm64 (macos-13 est rare et déprécié)
+          # x86_64 macOS is cross-compiled from the arm64 runner (macos-13 is rare and deprecated)
           - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@v4
       # The tag, the workspace version and the pins in README/action.yml must
       # agree: a release must not point users at an older release.
       - name: Version consistency
+        if: github.event_name == 'push'
         run: |
-          tag="${{ github.ref_name }}"; v="${tag#v}"
+          tag="$TAG"; v="${tag#v}"
           grep -q "^version = \"$v\"" Cargo.toml || { echo "::error::Cargo.toml version is not $v"; exit 1; }
           grep -q "Adelagric/vivacity@$tag" README.md || { echo "::error::README.md does not pin uses: Adelagric/vivacity@$tag"; exit 1; }
           grep -q "$tag" action.yml || { echo "::error::action.yml examples do not mention $tag"; exit 1; }
@@ -36,20 +51,19 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --locked --target ${{ matrix.target }} -p vivacity
+      # One script for every target (tar.gz + sha256, then re-read and
+      # `--version`): what install.sh and install.ps1 consume.
       - name: Package
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/vivacity dist/
-          cp README.md LICENSE-MIT LICENSE-APACHE dist/
-          tar -C dist -czf vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz .
-          shasum -a 256 vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > vivacity-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+        run: tools/package-release.sh "$TAG" "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: vivacity-${{ matrix.target }}
-          path: vivacity-*.tar.gz*
+          path: vivacity-*
+          if-no-files-found: error
 
   publish:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

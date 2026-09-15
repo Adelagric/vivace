@@ -117,23 +117,40 @@ fn bat_follows_resolved_bin_compat() {
     let empty = json!({});
     let full = json!({"config": {"bin-compat": "full"}});
     let proxy = json!({"config": {"bin-compat": "proxy"}});
-    for (env, manifest, windows_or_wsl, want) in [
-        (None, &empty, false, BinCompat::Proxy), // auto on plain Linux/macOS
-        (None, &empty, true, BinCompat::Full),   // auto on Windows/WSL
-        (None, &full, false, BinCompat::Full),   // config full, anywhere
-        (None, &proxy, true, BinCompat::Proxy),  // config proxy, even on Windows
-        (Some("full"), &proxy, false, BinCompat::Full), // env overrides config
-        (Some("symlink"), &empty, true, BinCompat::Proxy), // deprecated = non-full
+    let g_full = json!("full");
+    let g_proxy = json!("proxy");
+    for (env, manifest, global, windows_or_wsl, want) in [
+        (None, &empty, None, false, BinCompat::Proxy), // auto on plain Linux/macOS
+        (None, &empty, None, true, BinCompat::Full),   // auto on Windows/WSL
+        (None, &full, None, false, BinCompat::Full),   // config full, anywhere
+        (None, &proxy, None, true, BinCompat::Proxy),  // config proxy, even on Windows
+        (Some("full"), &proxy, None, false, BinCompat::Full), // env overrides config
+        (Some("symlink"), &empty, None, true, BinCompat::Proxy), // deprecated = non-full
+        (None, &empty, Some(&g_full), false, BinCompat::Full), // global config.json
+        (None, &proxy, Some(&g_full), true, BinCompat::Proxy), // root beats global
+        (Some("full"), &empty, Some(&g_proxy), false, BinCompat::Full), // env beats global
+        (Some(""), &empty, Some(&g_full), false, BinCompat::Full), // `?:`: "" falls through
+        (Some("0"), &empty, Some(&g_full), false, BinCompat::Full), // `?:`: "0" falls through
     ] {
         assert_eq!(
-            resolve_bin_compat_with(env, manifest, windows_or_wsl).unwrap(),
+            resolve_bin_compat_with(env, manifest, global, windows_or_wsl).unwrap(),
             want,
-            "env={env:?} manifest={manifest} windows_or_wsl={windows_or_wsl}"
+            "env={env:?} manifest={manifest} global={global:?} windows_or_wsl={windows_or_wsl}"
         );
     }
     assert!(
-        resolve_bin_compat_with(None, &json!({"config": {"bin-compat": "nope"}}), false).is_err(),
+        resolve_bin_compat_with(
+            None,
+            &json!({"config": {"bin-compat": "nope"}}),
+            None,
+            false
+        )
+        .is_err(),
         "an invalid bin-compat is refused, like Composer"
+    );
+    assert!(
+        resolve_bin_compat_with(None, &empty, Some(&json!("nope")), false).is_err(),
+        "an invalid global bin-compat is refused too"
     );
 
     // Proxy mode writes the unixy proxy alone — no `.bat` at all.

@@ -3,7 +3,9 @@ name: action
 # The composite action at the repository root, exercised against the binary
 # built from this very commit (`binary:` input), then a real install of the
 # frozen Laravel skeleton over the network — the end-to-end path a user's CI
-# takes with `uses: Adelagric/vivacity@vX.Y.Z`.
+# takes with `uses: Adelagric/vivacity@vX.Y.Z`. A second job packages that
+# same binary like release.yml does and runs install.sh (and install.ps1 on
+# Windows) against it, so the installers are proven before any release.
 
 on:
   push:
@@ -14,10 +16,13 @@ jobs:
   action:
     name: action (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,13 +33,18 @@ jobs:
         id: setup
         uses: ./
         with:
-          binary: target/release/vivacity
+          binary: target/release/vivacity${{ runner.os == 'Windows' && '.exe' || '' }}
 
       - name: vivacity is on PATH and reports its version
         run: |
           which vivacity
           vivacity --version
           test "${{ steps.setup.outputs.version }}" = "$(vivacity --version)"
+
+      - name: vivacity is visible to the native shell too
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: vivacity --version
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -54,3 +64,52 @@ jobs:
           vivacity install 2> install.log
           cat install.log
           grep -q ' 0 installed, ' install.log
+
+  installers:
+    name: installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p vivacity
+
+      - name: Package like release.yml
+        run: tools/package-release.sh v0.0.0-ci ${{ matrix.target }} "" "$RUNNER_TEMP/assets"
+
+      - name: install.sh against the local assets
+        run: |
+          rm -rf "$RUNNER_TEMP/bin-sh"
+          VIVACITY_VERSION=v0.0.0-ci VIVACITY_DOWNLOAD_BASE="$RUNNER_TEMP/assets" VIVACITY_INSTALL_DIR="$RUNNER_TEMP/bin-sh" sh install.sh
+          exe=""; [ "$RUNNER_OS" = "Windows" ] && exe=".exe"
+          "$RUNNER_TEMP/bin-sh/vivacity$exe" --version
+
+      - name: install.ps1 against the local assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:VIVACITY_VERSION = 'v0.0.0-ci'
+          $env:VIVACITY_DOWNLOAD_BASE = Join-Path $env:RUNNER_TEMP 'assets'
+          $env:VIVACITY_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin-ps'
+          ./install.ps1
+          & (Join-Path $env:VIVACITY_INSTALL_DIR 'vivacity.exe') --version
+
+      - name: install.sh resolves the latest real release
+        run: |
+          rm -rf "$RUNNER_TEMP/bin-latest"
+          VIVACITY_INSTALL_DIR="$RUNNER_TEMP/bin-latest" sh install.sh
+          exe=""; [ "$RUNNER_OS" = "Windows" ] && exe=".exe"
+          "$RUNNER_TEMP/bin-latest/vivacity$exe" --version
+        # No Windows asset exists before the first 0.7 release: that step
+        # would fail there until then.
+        if: runner.os != 'Windows'
