@@ -125,7 +125,7 @@ before `vendor/` is touched, and vivacity execs the real `composer install`
 instead (`--no-fallback` to make it fail). Post-install scripts such as
 Laravel's `package:discover` are yours to run.
 
-Not supported: Windows, `gitlab-token` auth, root version detection from
+Not supported: `gitlab-token` auth, root version detection from
 hg/svn/fossil.
 
 ## Embedding

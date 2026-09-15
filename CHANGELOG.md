@@ -4,6 +4,20 @@ All notable changes to vivacity (named vivace up to 0.5.0). The format follows [
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Added
+- **Windows support** (Luther Monson, [#2](https://github.com/Adelagric/vivacity/pull/2)):
+  `vendor/bin` `.bat` proxies written exactly when Composer writes them
+  (`bin-compat` resolved from `COMPOSER_BIN_COMPAT`, then
+  `config.bin-compat`, default `auto` = `full` on Windows/WSL only), with
+  `determineBinaryCaller` and `installFullBinaries` ported to the byte;
+  canonical paths without the `\\?\` verbatim prefix; Composer's
+  `%APPDATA%`/`%LOCALAPPDATA%` cache directories; zip symlink entries
+  extracted as plain files like `ZipArchive`; `.gitattributes` forcing LF.
+  A `windows-latest` job now runs the six-fixture parity harness against
+  Composer 2.10.3 — 0 diff, with and without the autoloader.
+
 ## [0.6.0] — 2026-09-14
 
 ### Changed
