@@ -9,6 +9,18 @@ readme = "README.md"
 keywords = ["composer", "php", "installer"]
 categories = ["development-tools", "command-line-utilities"]
 
+[features]
+# The default keeps the standalone tool self-contained: reqwest's rustls-tls
+# bundles the ring crypto provider. Embedders that link another rustls
+# provider (for example aws-lc-rs) must build with
+# `default-features = false, features = ["rustls-tls-no-provider"]` and
+# install a process-wide default provider themselves, because Cargo features
+# are additive and two compiled-in providers make
+# `rustls::CryptoProvider::from_crate_features()` return None.
+default = ["rustls-tls-ring"]
+rustls-tls-ring = ["reqwest/rustls-tls"]
+rustls-tls-no-provider = ["reqwest/rustls-tls-webpki-roots-no-provider"]
+
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true

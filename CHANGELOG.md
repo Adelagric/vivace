@@ -4,6 +4,18 @@ All notable changes to vivacity (named vivace up to 0.5.0). The format follows [
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Added
+- **Selectable TLS backend** for embedders: `rustls-tls-ring` (default —
+  the standalone binary is unchanged, ring bundled) and
+  `rustls-tls-no-provider` (the rustls stack with no crypto provider, for
+  a host that installs its own process-wide default, e.g. one that links
+  aws-lc-rs). Exposed on `vivacity`, `vivacity-core`, `vivacity-resolver`
+  and `vivacity-autoload`; internal crate edges take `vivacity-core` with
+  `default-features = false` so an embedder's opt-out is not re-added by
+  feature union.
+
 ## [0.8.0] — 2026-09-15
 
 ### Added

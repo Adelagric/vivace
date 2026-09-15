@@ -13,7 +13,7 @@ anyhow = "=1.0.104"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["preserve_order", "float_roundtrip", "unbounded_depth"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "fs", "process"] }
-reqwest = { version = "=0.12.28", default-features = false, features = ["http2", "gzip", "stream", "rustls-tls", "charset"] }
+reqwest = { version = "=0.12.28", default-features = false, features = ["http2", "gzip", "stream", "charset"] }
 zip = "=2.4.2"
 sha1 = "=0.10.7"
 md-5 = "=0.10.6"

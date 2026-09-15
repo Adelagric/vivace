@@ -9,10 +9,18 @@ readme = "README.md"
 keywords = ["composer", "php", "installer", "cli"]
 categories = ["development-tools", "command-line-utilities"]
 
+[features]
+# Passthrough to vivacity-core's TLS backend selection. The default bundles
+# the ring provider so the standalone binary is unchanged; embedders that
+# install their own rustls provider select rustls-tls-no-provider instead.
+default = ["rustls-tls-ring"]
+rustls-tls-ring = ["vivacity-core/rustls-tls-ring"]
+rustls-tls-no-provider = ["vivacity-core/rustls-tls-no-provider"]
+
 [dependencies]
-vivacity-core = { path = "../vivacity-core", version = "0.8.0" }
-vivacity-resolver = { path = "../vivacity-resolver", version = "0.8.0" }
-vivacity-autoload = { path = "../vivacity-autoload", version = "0.8.0" }
+vivacity-core = { path = "../vivacity-core", version = "0.8.0", default-features = false }
+vivacity-resolver = { path = "../vivacity-resolver", version = "0.8.0", default-features = false }
+vivacity-autoload = { path = "../vivacity-autoload", version = "0.8.0", default-features = false }
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
