@@ -9,8 +9,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/fixture.sh
+. "$ROOT/harness/lib/fixture.sh"
 VIVACITY="$ROOT/target/release/vivacity"
 WORK="${VIVACITY_HARNESS_DIR:-/tmp/vivacity-harness}/removal"
+harness_git_env "$WORK"
 [ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 
 # fixture → paquets retirés (feuilles, pour que le lock reste cohérent)

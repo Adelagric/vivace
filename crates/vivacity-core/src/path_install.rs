@@ -148,7 +148,7 @@ pub fn install(
             if let Some(parent) = install_path.parent() {
                 std::fs::create_dir_all(parent).map_err(Error::io(parent))?;
             }
-            symlink(&format!("{target}/"), install_path)?;
+            symlink(Path::new(&format!("{target}/")), install_path)?;
         }
         Strategy::Mirror => {
             let real_url = PathBuf::from(normalize_path(&real_url.to_string_lossy()));
@@ -159,12 +159,12 @@ pub fn install(
 }
 
 #[cfg(unix)]
-fn symlink(target: &str, link: &Path) -> Result<()> {
+fn symlink(target: &Path, link: &Path) -> Result<()> {
     std::os::unix::fs::symlink(target, link).map_err(Error::io(link))
 }
 
 #[cfg(not(unix))]
-fn symlink(_target: &str, link: &Path) -> Result<()> {
+fn symlink(_target: &Path, link: &Path) -> Result<()> {
     Err(Error::Unsupported(format!(
         "path repositories are not installed natively on this platform ({})",
         link.display()
@@ -398,10 +398,16 @@ fn walk(
                 exclude = !p.negate;
             }
         }
+        let rel = path.strip_prefix(source).unwrap_or(&path).to_path_buf();
         if exclude {
+            // The filter sits on the flattened iteration: an excluded
+            // directory is still traversed, and a child re-included by a
+            // later `-export-ignore` rule is kept.
+            if path.is_dir() && !is_link {
+                walk(source, &path, source_str, patterns, out)?;
+            }
             continue;
         }
-        let rel = path.strip_prefix(source).unwrap_or(&path).to_path_buf();
         if path.is_dir() {
             // `accept()`: a directory (a link to one included) only when
             // empty; the finder never descends into a link.
@@ -444,7 +450,7 @@ fn mirror(source: &Path, target: &Path) -> Result<()> {
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(Error::io(parent))?;
                 }
-                symlink(&raw_target.to_string_lossy(), &dest)?;
+                symlink(&raw_target, &dest)?;
             }
             EntryKind::Dir => {
                 std::fs::create_dir_all(&dest).map_err(Error::io(&dest))?;
@@ -479,6 +485,11 @@ fn copy_file(src: &Path, dest: &Path) -> Result<()> {
             .map_err(Error::io(dest))?;
     }
     if let Ok(modified) = meta.modified() {
+        // `touch($target, filemtime($origin))`: whole seconds, atime too.
+        let modified = modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| std::time::UNIX_EPOCH + std::time::Duration::from_secs(d.as_secs()))
+            .unwrap_or(modified);
         let times = std::fs::FileTimes::new()
             .set_modified(modified)
             .set_accessed(modified);

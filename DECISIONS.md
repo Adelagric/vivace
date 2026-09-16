@@ -440,7 +440,16 @@ sont parallèles depuis la PR #4 ; Composer les imprime une à une avant
 chaque opération) : même texte, même ordre, un échec n'imprime que
 l'erreur ; la ligne `vivacity: …` reste et les harnais la tolèrent.
 Windows : jonctions non portées, un lock avec un paquet `path` part en
-fallback (le lock, lui, est identique). Le guesser git ne fixe plus
+fallback (le lock, lui, est identique). Revue indépendante (21 constats) :
+les quatre majeurs corrigés — une mise à jour d'un paquet `path` retire
+d'abord l'ancienne disposition (`FileDownloader::update`), le parsing de
+`(HEAD detached from X)`, `vendor/bin` seulement hors purge, et le
+**dépôt local** : installed.json et l'autoloader sont désormais produits
+depuis les entrées d'installed.json pour les paquets inchangés et depuis
+le lock pour les autres (Composer garde les objets chargés ; avec une
+référence HEAD ou `none`, une édition non commitée change le lock sans
+changer l'identité) — l'ancien modèle « état = lock » était faux dès que
+les deux divergent, ce que seuls les dépôts `path` rendent routinier. Le guesser git ne fixe plus
 `GIT_DIR` : la remontée est celle de Composer (un projet dans un dépôt
 parent prend sa branche), et c'est le plafond du harnais qui protège
 l'oracle du checkout de vivacity.

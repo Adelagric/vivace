@@ -18,6 +18,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/fixture.sh
+. "$ROOT/harness/lib/fixture.sh"
 VIVACITY="$ROOT/target/release/vivacity"
 # Windows (Git Bash) : l'artefact cargo est vivacity.exe — le préférer quand
 # il existe, pour qu'un binaire unixy résiduel ne le masque pas. Gardé par
@@ -32,6 +34,7 @@ FIXTURES=("$@"); [ ${#FIXTURES[@]} -eq 0 ] && FIXTURES=(laravel symfony sylius r
 
 [ -x "$VIVACITY" ] || { echo "binaire absent : cargo build --release"; exit 1; }
 mkdir -p "$WORK"
+harness_git_env "$WORK"
 status=0
 for fx in "${FIXTURES[@]}"; do
   src="$ROOT/fixtures/work/$fx"

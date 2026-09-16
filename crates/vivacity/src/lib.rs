@@ -716,9 +716,13 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     let mut autoload_note = String::new();
     if !args.no_autoloader {
         eprintln!("Generating autoload files");
+        // `AutoloadGenerator::dump($localRepo)`: the local repository, not
+        // the lock (they differ for an unchanged package whose lock entry
+        // moved).
+        let local = report.local_repository.as_ref().unwrap_or(&lock);
         let report = dump_autoload(
             &project,
-            &lock,
+            local,
             &manifest,
             layout,
             with_dev,

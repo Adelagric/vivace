@@ -1,4 +1,5 @@
 /docs export-ignore
 *.md export-ignore
 README.md -export-ignore
+docs/keep.md -export-ignore
 notes.txt export-ignore text

@@ -286,7 +286,7 @@ STEPS=(
   "path-repos|remove acme/alpha --dry-run @dry-install"
   "path-repos|remove acme/zeta"
   "path-repos|install"
-  "path-repos|install @pkgedit:packages/alpha"
+  "path-repos|update @nolock @jq:.repositories[0].options={\"relative\":false}"
   "path-repos|update @nolock @nostderr @jq:.repositories[0].url=\"nowhere/*\""
   "path-repos|update @nolock @jq:.repositories[0].url=\"packages/x*\""
   "path-repos|update @nolock @jq:.repositories[0].url=\"packages/{alpha,delta}\""

@@ -116,6 +116,9 @@ fn unescape(segment: &str) -> String {
 }
 
 fn glob_one(pattern: &str, base: &Path) -> Vec<String> {
+    if pattern.is_empty() {
+        return Vec::new();
+    }
     let segments: Vec<&str> = pattern.split('/').collect();
     // (spelling so far, filesystem path so far)
     let mut current: Vec<(String, PathBuf)> = vec![(String::new(), base.to_path_buf())];
@@ -413,6 +416,7 @@ mod tests {
             "{packages,libs}/*",
             "a-b",
             "l?nk",
+            "",
         ];
         let php = std::process::Command::new("php")
             .arg("-r")

@@ -34,11 +34,22 @@ byte-identical-output promise are the public API.
   repositories with pinned hashes, links, modes, an empty directory, the
   project on `develop`), `harness/path-repos.sh` (seven steps: symlink and
   mirror installs, no-op reinstall, update after editing a package,
-  remove, require of the parent branch — stderr, lock and `vendor/` with a
-  `stat` inventory of modes and link targets), 20 `steps.sh` cases (229
-  cases, 206 with stderr byte-identical), the fixture in `update.sh`.
+  remove, require of the parent branch, links turned into mirrors then
+  into absolute links by changing the repository options, a reinstall
+  after a link was deleted by hand — stderr, lock and `vendor/` with a
+  `stat` inventory of modes and link targets and the mirror mtime
+  invariant), 20 `steps.sh` cases (229 cases, 206 with stderr
+  byte-identical), the fixture in `update.sh`.
 - The git version guesser no longer pins `GIT_DIR`: git walks up to the
-  enclosing repository exactly as Composer's `git branch` does.
+  enclosing repository exactly as Composer's `git branch` does;
+  `non-feature-branches` entries are regex alternatives like Composer's;
+  `(HEAD detached from X)` yields no version, like Composer's regex.
+- installed.json, installed.php and the autoloader are produced from the
+  local repository (the previous installed.json entry for an unchanged
+  package, the lock's for an installed or updated one), as
+  `InstalledFilesystemRepository::write` and `AutoloadGenerator::dump`
+  do; a package listed in installed.json whose directory is gone is
+  purged first (`Factory::purgePackages`).
 
 ### Changed
 - `harness/lib/fixture.sh` stages fixtures and sets the git environment

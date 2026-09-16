@@ -82,7 +82,7 @@
             "dist": {
                 "type": "path",
                 "url": "libs/epsilon",
-                "reference": "ab005c47df5d2f46c1029957a2a17643ce808584"
+                "reference": "fac025e483b076b97c9ea6eb5603c0f976940198"
             },
             "type": "library",
             "autoload": {

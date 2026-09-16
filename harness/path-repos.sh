@@ -33,12 +33,34 @@ export COMPOSER_HOME="$home" COMPOSER_CACHE_DIR="$home/cache" COMPOSER_TESTS_ARE
 status=0
 anchor='^(Installing dependencies from lock file|Lock file operations|Nothing to modify in lock file|Nothing to install, update or remove|Your requirements could not be resolved)'
 
-inventory() { # dir
+# Modes et cibles des liens (un lien absolu est rapporté relativement au
+# projet, physique ou non).
+inventory() { # vendor dir, project dir
+  local real; real="$(cd "$2" && pwd -P)"
   (cd "$1" && find . -print | LC_ALL=C sort | while IFS= read -r f; do
-    if [ -L "$f" ]; then echo "L $f -> $(readlink "$f")"
+    if [ -L "$f" ]; then echo "L $f -> $(readlink "$f" | sed -e "s|^$real/|<project>/|" -e "s|^$2/|<project>/|")"
     elif [ "$(uname -s)" = Darwin ]; then echo "$(stat -f '%Sp' "$f") $f"
     else echo "$(stat -c '%A' "$f") $f"; fi
   done)
+}
+
+mtime() { if [ "$(uname -s)" = Darwin ]; then stat -f '%m' "$1"; else stat -c '%Y' "$1"; fi; }
+
+# Un fichier d'un paquet en miroir porte le mtime (à la seconde) de sa
+# source (Symfony `copy` : `touch($target, filemtime($origin))`) — un
+# invariant par côté, puisque les deux copies de la fixture n'ont pas le
+# même mtime de source.
+check_mirror_mtimes() { # project dir
+  local proj="$1" name url pkgdir f src ok=1
+  while IFS=$'\t' read -r name url; do
+    pkgdir="$proj/vendor/$name"
+    [ -d "$pkgdir" ] && [ ! -L "$pkgdir" ] || continue
+    while IFS= read -r f; do
+      src="$proj/$url/${f#"$pkgdir/"}"
+      [ "$(mtime "$f")" = "$(mtime "$src")" ] || { echo "  mtime $f ≠ $src"; ok=0; }
+    done < <(find "$pkgdir" -type f)
+  done < <(jq -r '.packages[] | select(.dist.type == "path") | [.name, .dist.url] | @tsv' "$proj/vendor/composer/installed.json")
+  [ "$ok" = 1 ]
 }
 
 # step <label> <composer args...> — joue la commande des deux côtés dans
@@ -65,14 +87,20 @@ step() {
       echo "FAIL path-repos $label : $f diffère"; diff "$ref/$f" "$viv/$f" | head -10 || true; ok=0
     fi
   done
-  if ! diff -r --no-dereference "$ref/vendor" "$viv/vendor" >"$WORK/$label.vendor.diff" 2>&1; then
+  # Les cibles des liens sont comparées par l'inventaire (un lien absolu
+  # contient le nom du côté) : `diff -r` compare tout le reste.
+  diff -r --no-dereference "$ref/vendor" "$viv/vendor" 2>&1 | grep -v '^Symbolic links .* differ$' >"$WORK/$label.vendor.diff" || true
+  if [ -s "$WORK/$label.vendor.diff" ]; then
     echo "FAIL path-repos $label : vendor/ diffère"; head -20 "$WORK/$label.vendor.diff"; ok=0
   fi
-  inventory "$ref/vendor" > "$WORK/$label.ref.inv"; inventory "$viv/vendor" > "$WORK/$label.viv.inv"
+  inventory "$ref/vendor" "$ref" > "$WORK/$label.ref.inv"; inventory "$viv/vendor" "$viv" > "$WORK/$label.viv.inv"
   if ! diff -q "$WORK/$label.ref.inv" "$WORK/$label.viv.inv" >/dev/null; then
     echo "FAIL path-repos $label : l'inventaire de vendor/ (modes, liens) diffère"
     diff "$WORK/$label.ref.inv" "$WORK/$label.viv.inv" | head -20 || true; ok=0
   fi
+  for side in "$ref" "$viv"; do
+    check_mirror_mtimes "$side" || { echo "FAIL path-repos $label : mtime d'un fichier en miroir ≠ source ($side)"; ok=0; }
+  done
   # Les sources ne bougent jamais (un remove délie, ne supprime pas).
   for side in "$ref" "$viv"; do
     for src in packages/alpha packages/delta packages/gamma libs/beta libs/epsilon src-zeta; do
@@ -102,6 +130,21 @@ edit_package packages/alpha libs/beta
 step "update-after-edit" update --no-audit
 step "remove-alpha" remove acme/alpha --no-audit
 step "require-gamma-main" require acme/gamma:dev-main --no-audit
+# Les options du dépôt changent : la référence des paquets aussi, et la
+# mise à jour remplace les liens par des miroirs (`symlink: false`), puis
+# les miroirs par des liens absolus (`relative: false`).
+for side in "$ref" "$viv"; do
+  jq '.repositories[0].options = {"symlink": false}' "$side/composer.json" > "$side/c.tmp" && mv "$side/c.tmp" "$side/composer.json"
+done
+step "update-links-to-mirrors" update --no-audit
+for side in "$ref" "$viv"; do
+  jq '.repositories[0].options = {"relative": false}' "$side/composer.json" > "$side/c.tmp" && mv "$side/c.tmp" "$side/composer.json"
+done
+step "update-mirrors-to-absolute-links" update --no-audit
+# Un lien supprimé à la main : Composer purge l'entrée d'installed.json et
+# réinstalle sans créer vendor/bin.
+rm "$ref/vendor/acme/delta" "$viv/vendor/acme/delta"
+step "install-after-deleted-link" install
 # Copies neuves : stratégie miroir imposée par l'environnement, puis retour
 # à l'option par défaut sur un vendor/ déjà en miroir.
 stage_project path-repos "$ref"; stage_project path-repos "$viv"

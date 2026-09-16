@@ -34,6 +34,12 @@ impl PathRepository {
     }
 }
 
+/// `Filesystem::isAbsolutePath` as written in Composer: a leading `/`, a
+/// `:` as second character (any drive-letter form), or a leading `\\\\`.
+fn php_is_absolute_path(path: &str) -> bool {
+    path.starts_with('/') || path.as_bytes().get(1) == Some(&b':') || path.starts_with("\\\\")
+}
+
 /// `__construct` + `initialize`: `def` is the repository configuration,
 /// `project_dir` PHP's cwd, `origin` the repository's index in the set.
 pub fn open(
@@ -57,10 +63,7 @@ pub fn open(
     };
     // `!isset($this->options['relative'])`: absent or null.
     if options.get("relative").is_none_or(Value::is_null) {
-        options.insert(
-            "relative".into(),
-            Value::Bool(!vivacity_core::pathutil::is_absolute_path(&url)),
-        );
+        options.insert("relative".into(), Value::Bool(!php_is_absolute_path(&url)));
     }
     let options = Value::Object(options);
     let serialized_options = vivacity_core::phpserialize::serialize(&options)
@@ -68,7 +71,15 @@ pub fn open(
 
     let url_matches: Vec<String> = glob::glob_dirs(&url, project_dir)
         .into_iter()
-        .map(|m| m.replace('\\', "/").trim_end_matches('/').to_owned())
+        .map(|m| {
+            // `str_replace(DIRECTORY_SEPARATOR, '/', …)`: a no-op on Unix.
+            let m = if cfg!(windows) {
+                m.replace('\\', "/")
+            } else {
+                m
+            };
+            m.trim_end_matches('/').to_owned()
+        })
         .collect();
     if url_matches.is_empty() {
         let has_magic = |s: &str| s.contains(['*', '{', '}']);
@@ -89,14 +100,19 @@ pub fn open(
         )));
     }
 
-    let reference_mode = options
-        .get("reference")
-        .and_then(Value::as_str)
-        .unwrap_or("auto")
-        .to_owned();
+    // `$this->options['reference'] ?? 'auto'`, compared with `===`: a
+    // non-string value matches neither `none` nor `config`/`auto` (no
+    // reference at all).
+    let reference_mode = match options.get("reference") {
+        None | Some(Value::Null) => "auto".to_owned(),
+        Some(Value::String(s)) => s.clone(),
+        Some(_) => String::new(),
+    };
     let mut members: Vec<usize> = Vec::new();
     for matched in url_matches {
         let dir = project_dir.join(&matched);
+        // `$path = realpath($url) . '/'`: the messages name the real path.
+        let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
         let composer_file = dir.join("composer.json");
         if !composer_file.exists() {
             continue;
@@ -163,6 +179,8 @@ pub fn open(
         let has_version = |p: &Map<String, Value>| p.get("version").is_some_and(|v| !v.is_null());
 
         if !has_version(&package) {
+            // `($rootVersion = Platform::getEnv('COMPOSER_ROOT_VERSION'))`:
+            // empty and `0` are falsy (`root_version_from_env` says so).
             if let Some(env_version) = root_version::root_version_from_env() {
                 let head = |d: &Path| root_version::git(d, &["rev-parse", "HEAD"]);
                 if let (Some(a), Some(b)) = (head(&dir), head(project_dir)) {

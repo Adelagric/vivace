@@ -42,6 +42,11 @@ pub struct InstallReport {
     pub store_hits: usize,
     /// Unchanged packages extracted into the store (pre-existing vendor).
     pub store_warmed: usize,
+    /// The local repository after the transaction: the lock's entries for
+    /// the packages installed or updated, the previous installed.json
+    /// entries for the unchanged ones (Composer keeps the loaded objects and
+    /// dumps them back; the autoloader is generated from them too).
+    pub local_repository: Option<Lock>,
 }
 
 /// Installed identity of a package: version + dist reference.
@@ -57,6 +62,8 @@ fn identity(p: &LockPackage) -> (String, String) {
 struct Installed {
     identity: (String, String),
     path_source: Option<String>,
+    /// The entry as written, for a package that stays.
+    raw: serde_json::Map<String, Value>,
 }
 
 fn installed_packages(vendor: &Path) -> BTreeMap<String, Installed> {
@@ -80,6 +87,7 @@ fn installed_packages(vendor: &Path) -> BTreeMap<String, Installed> {
             Installed {
                 identity: (version.to_owned(), reference.to_owned()),
                 path_source,
+                raw: p.as_object().cloned().unwrap_or_default(),
             },
         );
     }
@@ -104,7 +112,16 @@ pub async fn install(
     let mut report = InstallReport::default();
     let wanted: Vec<&LockPackage> = lock.wanted_packages(opts.with_dev).collect();
     let wanted_names: std::collections::BTreeSet<&str> = wanted.iter().map(|p| p.name()).collect();
-    let previous = installed_packages(&vendor);
+    // `Factory::purgePackages`: a package of installed.json whose install
+    // path is gone is not installed at all (a fresh install, not an
+    // update — no `removeBinaries`, no removal of the old path).
+    let mut previous = installed_packages(&vendor);
+    previous.retain(|name, _| {
+        layout
+            .abs(name)
+            .or_else(|| layout.removals().find(|(n, _)| n == name).map(|(_, d)| d))
+            .is_some_and(|d| d.exists())
+    });
 
     // To lay out: changed identity, or missing directory. Unchanged packages
     // whose store entry is missing (vendor/ laid out by Composer before vivacity)
@@ -112,8 +129,12 @@ pub async fn install(
     // cache applies from the next run on.
     let mut to_install: Vec<&LockPackage> = Vec::new();
     let mut to_warm: Vec<&LockPackage> = Vec::new();
+    let mut unchanged_names: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     for p in &wanted {
         if p.is_metapackage() {
+            if previous.get(p.name()).map(|i| &i.identity) == Some(&identity(p)) {
+                unchanged_names.insert(p.name());
+            }
             continue;
         }
         // `LibraryInstaller::isInstalled`: a dangling link is not installed
@@ -121,6 +142,7 @@ pub async fn install(
         let unchanged = previous.get(p.name()).map(|i| &i.identity) == Some(&identity(p))
             && layout.abs(p.name()).is_some_and(|d| d.is_dir());
         if unchanged {
+            unchanged_names.insert(p.name());
             report.unchanged += 1;
             if p.dist_kind() == DistKind::Zip
                 && !store.contains(p.name(), p.version(), p.dist_reference())
@@ -245,6 +267,13 @@ pub async fn install(
         };
         if p.dist_kind() == DistKind::Path {
             let url = p.dist_url().unwrap_or_default();
+            // `FileDownloader::update` removes the previous layout before
+            // `install` (a link becomes a mirror when the options changed);
+            // a fresh install keeps a path that already resolves to the
+            // source.
+            if previous.contains_key(p.name()) {
+                crate::path_install::remove_path(&pkg_root)?;
+            }
             crate::path_install::install(project_dir, &dest, url, p.raw.get("transport-options"))?;
             report.installed += 1;
             continue;
@@ -282,16 +311,40 @@ pub async fn install(
     }
     prune_orphan_bin_proxies(&vendor, &wanted, bin_compat)?;
 
-    // State files + runtime stub.
+    // State files + runtime stub, from the local repository: an unchanged
+    // package keeps the entry installed.json already had (its own
+    // `version_normalized`/`installation-source`/`install-path` are
+    // recomputed), so a lock that changed a package's metadata without
+    // changing its identity — routine with `path` packages whose reference
+    // is a git HEAD or none — leaves installed.json and the autoloader as
+    // Composer leaves them.
+    let mut local = lock.clone();
+    for p in local
+        .packages
+        .iter_mut()
+        .chain(local.packages_dev.iter_mut())
+    {
+        if !unchanged_names.contains(p.name()) {
+            continue;
+        }
+        if let Some(prev) = previous.get(p.name()) {
+            let mut raw = prev.raw.clone();
+            for key in ["version_normalized", "installation-source", "install-path"] {
+                raw.remove(key);
+            }
+            p.raw = raw;
+        }
+    }
     let root = RootPackage::detect(root_manifest, project_dir, opts.with_dev);
     crate::state::write_state_files(
         &vendor.join("composer"),
-        lock,
+        &local,
         &root,
         root_manifest,
         opts.with_dev,
         layout,
     )?;
+    report.local_repository = Some(local);
     if wanted.iter().any(|p| p.name() == "symfony/runtime") {
         crate::runtime_stub::write_stub(&vendor)?;
     }

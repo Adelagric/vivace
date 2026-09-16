@@ -79,37 +79,27 @@ pub fn normalize_branch(name: &str) -> String {
     format!("dev-{name}")
 }
 
-/// `VersionGuesser::isFeatureBranch`.
+/// `VersionGuesser::isFeatureBranch`: the `non-feature-branches` entries
+/// are regex alternatives (`release-.*`), joined in front of the built-in
+/// names and the numeric `\d+\..+` form.
 fn is_feature_branch(manifest: &Value, branch: &str) -> bool {
-    let mut non_feature: Vec<String> = manifest
+    let custom: Vec<&str> = manifest
         .get("non-feature-branches")
         .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    non_feature.extend(
-        [
-            "master", "main", "latest", "next", "current", "support", "tip", "trunk", "default",
-            "develop",
-        ]
-        .iter()
-        .map(|s| (*s).to_owned()),
-    );
-    if non_feature.iter().any(|n| n == branch) {
-        return false;
+    let mut pattern = String::from("^(");
+    if !custom.is_empty() {
+        pattern.push_str(&custom.join("|"));
     }
-    // `\d+\..+`: numeric branch of the 1.x / 2.2 kind
-    let mut it = branch.splitn(2, '.');
-    if let (Some(head), Some(rest)) = (it.next(), it.next()) {
-        if !head.is_empty() && head.bytes().all(|b| b.is_ascii_digit()) && !rest.is_empty() {
-            return false;
-        }
+    pattern
+        .push_str("|master|main|latest|next|current|support|tip|trunk|default|develop|\\d+\\..+)$");
+    match pcre2::bytes::RegexBuilder::new().build(&pattern) {
+        Ok(re) => !re.is_match(branch.as_bytes()).unwrap_or(false),
+        // An invalid custom pattern: Composer's preg_match warns and
+        // returns false -> every branch is a feature branch.
+        Err(_) => true,
     }
-    true
 }
 
 /// Runs git in `dir` like `ProcessExecutor` after `GitUtil::cleanEnv`: no
@@ -169,10 +159,17 @@ pub fn guess_version(manifest: &Value, project: &Path) -> Option<GuessedVersion>
             if !is_hex(sha) {
                 continue;
             }
-            if name == "(no branch)"
-                || name.starts_with("(detached ")
-                || name.starts_with("(HEAD detached at")
-            {
+            if name.starts_with('(') {
+                // The regex only knows `(no branch)`, `(detached from X)` and
+                // `(HEAD detached at X)`: any other parenthesised form (`(HEAD
+                // detached from X)`) matches nothing, and the version stays
+                // unknown (tag lookup, then the caller's default).
+                if !(name == "(no branch)"
+                    || name.starts_with("(detached from ")
+                    || name.starts_with("(HEAD detached at "))
+                {
+                    continue;
+                }
                 version = Some(format!("dev-{sha}"));
                 pretty = version.clone();
                 is_feature = true;
@@ -375,17 +372,19 @@ fn strnatcasecmp(a: &str, b: &str) -> std::cmp::Ordering {
 /// set and non-empty, `1.2-dev` spelled `1.2.x-dev`.
 pub fn root_version_from_env() -> Option<String> {
     let env = std::env::var("COMPOSER_ROOT_VERSION").ok()?;
-    if env.is_empty() {
+    // `if (Platform::getEnv(...))`: `0` is as falsy as an empty string.
+    if env.is_empty() || env == "0" {
         return None;
     }
-    Some(match env.strip_suffix("-dev") {
+    let lower = env.to_ascii_lowercase();
+    Some(match lower.strip_suffix("-dev") {
         Some(num)
             if !num.is_empty()
                 && num
                     .split('.')
                     .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) =>
         {
-            format!("{num}.x-dev")
+            format!("{}.x-dev", &env[..num.len()])
         }
         _ => env.clone(),
     })
@@ -557,7 +556,8 @@ mod tests {
         assert!(!is_feature_branch(&m, "2.2"));
         assert!(is_feature_branch(&m, "feature-x"));
         let m = json!({"non-feature-branches": ["release-.*"]});
-        assert!(is_feature_branch(&m, "release-1")); // the value is used as a regex in Composer: literal here
+        assert!(!is_feature_branch(&m, "release-1"));
+        assert!(is_feature_branch(&m, "feature-1"));
     }
 
     #[test]
@@ -625,5 +625,14 @@ mod tests {
         let r = detect(&json!({}), p);
         assert_eq!(r.pretty_version, "v1.2.3");
         assert_eq!(r.version, "1.2.3.0");
+
+        // A commit on the detached HEAD: `* (HEAD detached from v1.2.3)`
+        // matches none of the forms Composer's regex knows, no tag matches
+        // either: no version (the callers fall back to their default).
+        std::fs::write(p.join("c.txt"), "c").expect("write");
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "detached"]);
+        assert!(guess_version(&json!({}), p).is_none());
+        assert_eq!(detect(&json!({}), p).pretty_version, DEFAULT_PRETTY_VERSION);
     }
 }

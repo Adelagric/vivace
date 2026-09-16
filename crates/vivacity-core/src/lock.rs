@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use serde_json::{Map, Value};
 use std::path::Path;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Lock {
     pub content_hash: Option<String>,
     pub packages: Vec<LockPackage>,
@@ -19,7 +19,7 @@ pub struct Lock {
     pub aliases: Vec<Value>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LockPackage {
     pub raw: Map<String, Value>,
 }
