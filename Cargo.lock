@@ -1929,6 +1929,7 @@ dependencies = [
  "hex",
  "libc 1.0.0-alpha.4",
  "md-5",
+ "pcre2",
  "proptest",
  "reqwest",
  "serde",

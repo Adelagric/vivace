@@ -122,6 +122,18 @@ fn common_path(from: &str, to: &str) -> String {
 /// `Filesystem::findShortestPath($from, $to, $directories, $preferRelative = false)`.
 /// Both paths must be absolute.
 pub fn find_shortest_path(from: &str, to: &str, directories: bool) -> String {
+    find_shortest_path_with(from, to, directories, false)
+}
+
+/// `findShortestPath` with `$preferRelative`: when true, a path that only
+/// shares the root with `from` is still written relative (`../../..`),
+/// which is how a symlinked `path` package points at its source.
+pub fn find_shortest_path_with(
+    from: &str,
+    to: &str,
+    directories: bool,
+    prefer_relative: bool,
+) -> String {
     let mut from = normalize_path(from);
     let to = normalize_path(to);
     if directories {
@@ -136,7 +148,7 @@ pub fn find_shortest_path(from: &str, to: &str, directories: bool) -> String {
     }
     let common = format!("{}/", common.trim_end_matches('/'));
     let depth = from[common.len().min(from.len())..].matches('/').count();
-    if common == "/" && depth > 1 {
+    if !prefer_relative && common == "/" && depth > 1 {
         return to;
     }
     let result = format!(

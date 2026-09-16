@@ -401,6 +401,10 @@ for fx in "${FIXTURES[@]}"; do
       for side in composer vivacity; do
         sed -E -n "/$anchor/,\$p" "$WORK/$fx-$n.$side.err" > "$WORK/$fx-$n.$side.tail"
       done
+      # La ligne de résumé `vivacity: N installed…` d'une installation
+      # réelle n'a pas d'équivalent chez Composer : tolérée.
+      grep -v '^vivacity: ' "$WORK/$fx-$n.vivacity.tail" > "$WORK/$fx-$n.vivacity.tail2" || true
+      mv "$WORK/$fx-$n.vivacity.tail2" "$WORK/$fx-$n.vivacity.tail"
       if ! [ -s "$WORK/$fx-$n.composer.tail" ]; then
         echo "FAIL $label : pas de ligne d'ancrage dans la sortie de Composer (cas mal choisi)"; ok=0
       elif ! grep -q '^ *- \|^Nothing to modify\|^Nothing to install' "$WORK/$fx-$n.composer.tail"; then

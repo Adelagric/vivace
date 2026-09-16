@@ -27,6 +27,8 @@ pub struct LockPackage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DistKind {
     Zip,
+    /// A `path` repository package: `dist.url` is the source directory.
+    Path,
     Other,
     Missing,
 }
@@ -74,6 +76,7 @@ impl LockPackage {
             .and_then(Value::as_str)
         {
             Some("zip") => DistKind::Zip,
+            Some("path") => DistKind::Path,
             Some(_) => DistKind::Other,
             None => DistKind::Missing,
         }

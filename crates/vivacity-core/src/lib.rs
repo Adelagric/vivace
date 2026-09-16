@@ -12,6 +12,7 @@ pub mod installer;
 pub mod installers;
 pub mod layout;
 pub mod lock;
+pub mod path_install;
 pub mod pathutil;
 pub mod phpjson;
 pub mod phpserialize;

@@ -4,6 +4,52 @@ All notable changes to vivacity (named vivace up to 0.5.0). The format follows [
 versions follow [SemVer](https://semver.org/) — the CLI surface and the
 byte-identical-output promise are the public API.
 
+## [Unreleased]
+
+### Added
+- **`path` repositories** (`{"type": "path", "url": "packages/*"}`):
+  `update`, `require` and `remove` read them — glob and brace patterns in
+  libc order, `~`/`$VAR` expansion, the dist reference `sha1(json .
+  serialize(options))` or the HEAD commit of the package's own git
+  repository (`reference: auto`), `reference: none`, the version taken
+  from `options.versions`, the package's `version`, `COMPOSER_ROOT_VERSION`
+  (when the package and the project share a HEAD), the git branch (a
+  feature branch and its parent become two packages; a package without a
+  repository takes the project's branch) or `dev-main`; `transport-options`
+  with `relative` and `symlink` — and `install` lays them out: a symbolic
+  link (relative through `findShortestPath`, or absolute with `relative:
+  false`) or a mirror (`symlink: false`, `COMPOSER_MIRROR_PATH_REPOS`)
+  filtered like `ArchivableFilesFinder` (VCS directories at any depth, the
+  root `.gitattributes` `export-ignore` rules, links to non-empty
+  directories, dangling or outward links dropped, empty directories kept,
+  modes and mtimes of Symfony's `copy`). Windows keeps the Composer
+  fallback for such locks.
+- A real `install` prints Composer's operation lines with the downloader's
+  appendix (`: Extracting archive`, `: Symlinking from …`, `: Mirroring
+  from …`, `: Source already present`) after the transaction, then
+  `Generating autoload files`; the `vivacity:` summary line stays.
+- An update or a removal creates `vendor/bin` even without binaries
+  (`BinaryInstaller::removeBinaries`), as Composer does.
+- Fixture `path-repos` (`fixtures/path-repos.sh` materialises nested git
+  repositories with pinned hashes, links, modes, an empty directory, the
+  project on `develop`), `harness/path-repos.sh` (seven steps: symlink and
+  mirror installs, no-op reinstall, update after editing a package,
+  remove, require of the parent branch — stderr, lock and `vendor/` with a
+  `stat` inventory of modes and link targets), 20 `steps.sh` cases (229
+  cases, 206 with stderr byte-identical), the fixture in `update.sh`.
+- The git version guesser no longer pins `GIT_DIR`: git walks up to the
+  enclosing repository exactly as Composer's `git branch` does.
+
+### Changed
+- `harness/lib/fixture.sh` stages fixtures and sets the git environment
+  of every harness (`GIT_CEILING_DIRECTORIES` = parent of the project,
+  `GIT_CONFIG_GLOBAL=/dev/null`, `LC_ALL=C`); the global config no longer
+  injects an empty snapshot repository; `@pkgedit:` prep;
+  `@env:COMPOSER_ROOT_VERSION` reaches both tools.
+- References vendored: `PathRepository`, `Platform`, `PathDownloader`,
+  `FileDownloader`, the Archiver filters, Symfony `Filesystem` and Finder
+  `Glob` (MIT, NOTICE row).
+
 ## [0.8.0] — 2026-09-15
 
 ### Added

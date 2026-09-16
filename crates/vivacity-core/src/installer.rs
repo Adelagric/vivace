@@ -7,7 +7,7 @@
 use crate::error::{Error, Result};
 use crate::fetch::{Fetcher, Provenance};
 use crate::layout::Layout;
-use crate::lock::{Lock, LockPackage};
+use crate::lock::{DistKind, Lock, LockPackage};
 use crate::state::RootPackage;
 use crate::store::Store;
 use serde_json::Value;
@@ -52,7 +52,14 @@ fn identity(p: &LockPackage) -> (String, String) {
     )
 }
 
-fn installed_identities(vendor: &Path) -> BTreeMap<String, (String, String)> {
+/// What installed.json says of a package: its identity and, for a `path`
+/// package, the source it was laid out from.
+struct Installed {
+    identity: (String, String),
+    path_source: Option<String>,
+}
+
+fn installed_packages(vendor: &Path) -> BTreeMap<String, Installed> {
     let mut out = BTreeMap::new();
     let path = vendor.join("composer/installed.json");
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -65,7 +72,16 @@ fn installed_identities(vendor: &Path) -> BTreeMap<String, (String, String)> {
         let name = p["name"].as_str().unwrap_or_default();
         let version = p["version"].as_str().unwrap_or_default();
         let reference = p["dist"]["reference"].as_str().unwrap_or_default();
-        out.insert(name.to_owned(), (version.to_owned(), reference.to_owned()));
+        let path_source = (p["dist"]["type"].as_str() == Some("path"))
+            .then(|| p["dist"]["url"].as_str().map(str::to_owned))
+            .flatten();
+        out.insert(
+            name.to_owned(),
+            Installed {
+                identity: (version.to_owned(), reference.to_owned()),
+                path_source,
+            },
+        );
     }
     out
 }
@@ -88,7 +104,7 @@ pub async fn install(
     let mut report = InstallReport::default();
     let wanted: Vec<&LockPackage> = lock.wanted_packages(opts.with_dev).collect();
     let wanted_names: std::collections::BTreeSet<&str> = wanted.iter().map(|p| p.name()).collect();
-    let previous = installed_identities(&vendor);
+    let previous = installed_packages(&vendor);
 
     // To lay out: changed identity, or missing directory. Unchanged packages
     // whose store entry is missing (vendor/ laid out by Composer before vivacity)
@@ -100,15 +116,28 @@ pub async fn install(
         if p.is_metapackage() {
             continue;
         }
-        let unchanged = previous.get(p.name()) == Some(&identity(p))
+        // `LibraryInstaller::isInstalled`: a dangling link is not installed
+        // (`is_dir` follows links).
+        let unchanged = previous.get(p.name()).map(|i| &i.identity) == Some(&identity(p))
             && layout.abs(p.name()).is_some_and(|d| d.is_dir());
         if unchanged {
             report.unchanged += 1;
-            if !store.contains(p.name(), p.version(), p.dist_reference()) {
+            if p.dist_kind() == DistKind::Zip
+                && !store.contains(p.name(), p.version(), p.dist_reference())
+            {
                 to_warm.push(p);
             }
         } else {
             to_install.push(p);
+        }
+    }
+    // `PathDownloader::download`: a package cannot be laid out inside its
+    // own source; checked before anything is written.
+    for p in &to_install {
+        if p.dist_kind() == DistKind::Path {
+            if let (Some(dest), Some(url)) = (layout.abs(p.name()), p.dist_url()) {
+                crate::path_install::check_not_inside_source(project_dir, &dest, url, p.name())?;
+            }
         }
     }
 
@@ -119,6 +148,9 @@ pub async fn install(
     let mut tasks = tokio::task::JoinSet::new();
     let warm_names: std::collections::BTreeSet<&str> = to_warm.iter().map(|p| p.name()).collect();
     for p in to_install.iter().chain(to_warm.iter()) {
+        if p.dist_kind() == DistKind::Path {
+            continue;
+        }
         if store.contains(p.name(), p.version(), p.dist_reference()) {
             report.store_hits += 1;
             continue;
@@ -187,9 +219,20 @@ pub async fn install(
             report.removed += 1;
         }
     }
-    for (_, dir) in layout.removals() {
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(Error::io(&dir))?;
+    for (name, dir) in layout.removals() {
+        // `PathDownloader::remove`: the install path that *is* the source
+        // stays (", source is still present").
+        let own_source = previous
+            .get(name)
+            .and_then(|i| i.path_source.as_deref())
+            .is_some_and(|url| {
+                crate::path_install::is_own_source(project_dir, &dir.to_string_lossy(), url)
+            });
+        if own_source {
+            continue;
+        }
+        if std::fs::symlink_metadata(&dir).is_ok() {
+            crate::path_install::remove_path(&dir)?;
             prune_empty_parent(project_dir, &dir);
         }
     }
@@ -200,13 +243,30 @@ pub async fn install(
         else {
             continue;
         };
+        if p.dist_kind() == DistKind::Path {
+            let url = p.dist_url().unwrap_or_default();
+            crate::path_install::install(project_dir, &dest, url, p.raw.get("transport-options"))?;
+            report.installed += 1;
+            continue;
+        }
         // Always start again from an empty package root (target-dir included).
-        if pkg_root.exists() {
-            std::fs::remove_dir_all(&pkg_root).map_err(Error::io(&pkg_root))?;
+        if std::fs::symlink_metadata(&pkg_root).is_ok() {
+            crate::path_install::remove_path(&pkg_root)?;
         }
         let src = store.entry_path(p.name(), p.version(), p.dist_reference());
         crate::clone::clone_tree(&src, &dest)?;
         report.installed += 1;
+    }
+
+    // `BinaryInstaller::removeBinaries` runs `initializeBinDir` before
+    // looking at the package's binaries: an update, a removal, or the
+    // reinstall of a package still listed in installed.json creates
+    // vendor/bin even when nothing has a `bin`.
+    let touches_installed = to_install.iter().any(|p| previous.contains_key(p.name()))
+        || previous.keys().any(|n| !wanted_names.contains(n.as_str()));
+    if touches_installed {
+        let bin_dir = vendor.join("bin");
+        std::fs::create_dir_all(&bin_dir).map_err(Error::io(&bin_dir))?;
     }
 
     // Bin proxies: rebuilt for every wanted package, then purge of the

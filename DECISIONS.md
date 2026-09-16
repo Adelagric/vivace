@@ -413,6 +413,38 @@ les versions retirées par l'optimiseur (`recordRemovedVersionsForPackage`,
 sauté jusqu'ici « parce que seuls les messages s'en servent ») et par les
 politiques, et la sonde PHP renvoie les fichiers `.ini`.
 
+## 2026-09-16 — Dépôts `path` : la capture d'abord, le miroir jusqu'aux modes (v0.9)
+
+Fait : la méta-analyse du plan (docs/plans/v0.9-path-repositories.md, §3)
+a trouvé quatre failles majeures que la lecture du PHP a confirmées — un
+plafond git posé sur le répertoire du projet cache le dépôt du projet aux
+paquets (`GIT_CEILING_DIRECTORIES` n'inspecte jamais le plafond lui-même),
+la mise à jour d'un paquet symlinké imprime `: Source already present`
+(l'appendice est calculé sur le chemin courant de vendor/, avant le
+retrait), `diff -r` ne voit ni les modes que Symfony `copy` pose
+(`0666 & ~umask | bits x`) ni un `.git` copié à tort (que `--exclude=.git`
+masquait), un lien vers un dossier non vide disparaît du miroir
+(`accept()` suit `isDir()`). Décision : la fixture et les captures de
+Composer (lock, inventaire `stat`, stderr de chaque étape) précèdent tout
+Rust ; le harness dédié `harness/path-repos.sh` compare vendor/ par
+`diff -r --no-dereference` ET par un inventaire des modes et cibles de
+liens, sans exclure `.git` ; les harnais fixent le plafond git au parent du
+projet et le projet de la fixture vit sur `develop` pour que la remontée
+vers le dépôt du projet soit distinguable du repli `dev-main`. `glob()` et
+`serialize()` sont écrits à la main (≈ 250 et 90 lignes, oracles PHP)
+plutôt qu'importés : la sémantique à reproduire est celle de la libc et de
+PHP (ordre des alternatives d'accolades, `GLOB_PERIOD` absent, clés
+entières), pas celle d'une crate. Les lignes d'opérations d'une
+installation réelle sont imprimées après la transaction (les placements
+sont parallèles depuis la PR #4 ; Composer les imprime une à une avant
+chaque opération) : même texte, même ordre, un échec n'imprime que
+l'erreur ; la ligne `vivacity: …` reste et les harnais la tolèrent.
+Windows : jonctions non portées, un lock avec un paquet `path` part en
+fallback (le lock, lui, est identique). Le guesser git ne fixe plus
+`GIT_DIR` : la remontée est celle de Composer (un projet dans un dépôt
+parent prend sa branche), et c'est le plafond du harnais qui protège
+l'oracle du checkout de vivacity.
+
 ## 2026-09-15 — Parité de stderr par défaut, et `--dry-run` par un patch du paquet racine (v0.8)
 
 Fait : en portant `--dry-run`, la lecture de `Installer::doUpdate` a montré

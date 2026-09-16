@@ -668,6 +668,15 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
     }
     trace("scope", t0);
 
+    // The operation lines of a real install, in transaction order, with the
+    // downloader's appendix (`getInstallOperationAppendix`: `: Extracting
+    // archive`, `: Symlinking from …`, `: Mirroring from …`, `: Source
+    // already present`) computed on the state before the transaction, like
+    // Composer does right before each operation. They are printed once the
+    // transaction has succeeded: the placements run in parallel, and a
+    // failure is reported alone.
+    let operation_lines = operation_lines(&project, &arena, &transaction.operations, layout)?;
+
     // Transaction.
     let store = Arc::new(vivacity_core::store::Store::default_location());
     let auth = vivacity_core::fetch::Auth::load(&project);
@@ -694,11 +703,19 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
             };
             return fallback_or_fail(args, &project, &scope);
         }
+        Err(vivacity_core::Error::Refused(msg)) => {
+            eprintln!("{msg}");
+            return Ok(1);
+        }
         Err(e) => return Err(e.into()),
     };
     trace("install transaction", t0);
+    for line in &operation_lines {
+        eprintln!("{line}");
+    }
     let mut autoload_note = String::new();
     if !args.no_autoloader {
+        eprintln!("Generating autoload files");
         let report = dump_autoload(
             &project,
             &lock,
@@ -729,6 +746,71 @@ fn run_install(args: &InstallArgs) -> anyhow::Result<i32> {
         t0.elapsed().as_secs_f32()
     );
     Ok(0)
+}
+
+/// `  - <operation><appendix>` for every operation of a real install.
+fn operation_lines(
+    project: &std::path::Path,
+    arena: &[vivacity_resolver::package::Package],
+    operations: &[vivacity_resolver::transaction::Operation],
+    layout: &vivacity_core::layout::Layout,
+) -> anyhow::Result<Vec<String>> {
+    use vivacity_resolver::transaction::Operation;
+    let mut lines = Vec::new();
+    for op in operations {
+        let Some(shown) = op.show(arena, false) else {
+            continue;
+        };
+        let appendix = match *op {
+            Operation::Install(p) | Operation::Update(_, p) => {
+                let pkg = &arena[p];
+                match pkg.dist.as_ref() {
+                    Some(d) if d.kind == "path" => {
+                        let install_path = layout
+                            .abs(&pkg.name)
+                            .unwrap_or_else(|| project.join("vendor").join(&pkg.name));
+                        match vivacity_core::path_install::install_appendix(
+                            project,
+                            &install_path,
+                            &d.url,
+                            pkg.raw.get("transport-options"),
+                        ) {
+                            Ok(a) => a,
+                            Err(vivacity_core::Error::Refused(msg)) => anyhow::bail!("{msg}"),
+                            Err(e) => return Err(e.into()),
+                        }
+                    }
+                    Some(_) if pkg.package_type != "metapackage" => {
+                        ": Extracting archive".to_owned()
+                    }
+                    _ => String::new(),
+                }
+            }
+            Operation::Uninstall(p) => {
+                let pkg = &arena[p];
+                match pkg.dist.as_ref() {
+                    Some(d) if d.kind == "path" => {
+                        let install_path = layout
+                            .abs(&pkg.name)
+                            .unwrap_or_else(|| project.join("vendor").join(&pkg.name));
+                        if vivacity_core::path_install::is_own_source(
+                            project,
+                            &install_path.to_string_lossy(),
+                            &d.url,
+                        ) {
+                            format!(", source is still present in {}", install_path.display())
+                        } else {
+                            String::new()
+                        }
+                    }
+                    _ => String::new(),
+                }
+            }
+            _ => String::new(),
+        };
+        lines.push(format!("  - {shown}{appendix}"));
+    }
+    Ok(lines)
 }
 
 #[allow(clippy::too_many_arguments)]

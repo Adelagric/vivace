@@ -68,7 +68,9 @@ impl std::fmt::Display for ScopeIssue {
                 write!(f, "plugin {p} changes the install layout (not emulated)")
             }
             ScopeIssue::Layout(why) => write!(f, "{why}"),
-            ScopeIssue::NoUsableDist(p) => write!(f, "package {p} has no zip dist (source-only)"),
+            ScopeIssue::NoUsableDist(p) => {
+                write!(f, "package {p} has no usable dist (no zip, no path source)")
+            }
         }
     }
 }
@@ -101,7 +103,7 @@ pub fn analyze(
     let mut report = ScopeReport::default();
 
     for p in lock.wanted_packages(with_dev) {
-        classify_package(p, &mut report);
+        classify_package(project_dir, p, &mut report);
     }
     match Layout::resolve(project_dir, lock, root_manifest, with_dev, plugins_enabled) {
         Ok(layout) => report.layout = Some(layout),
@@ -123,9 +125,20 @@ pub fn plugin_issues(lock: &Lock, with_dev: bool) -> Vec<ScopeIssue> {
     report.issues
 }
 
-fn classify_package(p: &LockPackage, report: &mut ScopeReport) {
+fn classify_package(project_dir: &Path, p: &LockPackage, report: &mut ScopeReport) {
     classify_plugin(p, report);
-    if !p.is_metapackage() && p.dist_kind() != DistKind::Zip {
+    if p.is_metapackage() {
+        return;
+    }
+    let usable = match p.dist_kind() {
+        DistKind::Zip => true,
+        // A `path` package is laid out natively (symlink or mirror) on
+        // Linux/macOS when its source directory is there; Windows
+        // (junctions) is left to Composer.
+        DistKind::Path => cfg!(unix) && p.dist_url().is_some_and(|u| project_dir.join(u).is_dir()),
+        DistKind::Other | DistKind::Missing => false,
+    };
+    if !usable {
         report
             .issues
             .push(ScopeIssue::NoUsableDist(p.name().to_owned()));
@@ -218,6 +231,28 @@ mod tests {
         assert_eq!(r.issues.len(), 2, "{:?}", r.issues);
         assert_eq!(r.issues[0], ScopeIssue::NoUsableDist("a/src-only".into()));
         assert!(matches!(&r.issues[1], ScopeIssue::Layout(m) if m.contains("allow-plugins")));
+    }
+
+    #[test]
+    fn path_package_is_native_when_its_source_exists() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        std::fs::create_dir_all(tmp.path().join("packages/here")).expect("mkdir");
+        let lock = lock_with(json!([
+            {"name": "a/here", "version": "dev-main", "type": "library",
+             "dist": {"type": "path", "url": "packages/here", "reference": "r"}},
+            {"name": "a/gone", "version": "dev-main", "type": "library",
+             "dist": {"type": "path", "url": "packages/gone", "reference": "r"}},
+        ]));
+        let r = analyze(tmp.path(), &lock, &json!({}), true, true);
+        let expected = if cfg!(unix) {
+            vec![ScopeIssue::NoUsableDist("a/gone".into())]
+        } else {
+            vec![
+                ScopeIssue::NoUsableDist("a/here".into()),
+                ScopeIssue::NoUsableDist("a/gone".into()),
+            ]
+        };
+        assert_eq!(r.issues, expected);
     }
 
     #[test]

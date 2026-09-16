@@ -30,13 +30,19 @@ stderr byte for byte.
 
 ## Bigger pieces, roughly in order of impact
 
-- **`path` repositories** (v0.9): `PathRepository` (`sha1(json .
-  serialize(options))` references, a git-like version guesser adding the
-  feature branch and its parent, brace globs) and `PathDownloader`
-  (symlink or `ArchivableFilesFinder` mirror). The opening cadrage is the
-  meta-analysis in `docs/plans/v0.8-dry-run-path.md`.
-- **`vcs` repositories** — `VcsRepository`, the git/GitHub/GitLab drivers,
-  source checkouts on install.
+- **`vcs` repositories** (v0.10 candidate) — `VcsRepository`, the
+  git/GitHub/GitLab drivers, source checkouts on install. `path`
+  repositories (0.9, `docs/plans/v0.9-path-repositories.md`) already hold
+  the pieces a `vcs` port reuses: the git-like version guesser
+  (`root_version::guess_version`), the reference dump, the operation
+  appendix.
+- **`path` repositories on Windows** — junctions (`Filesystem::junction`,
+  `PathDownloader`'s Windows branch); today such a lock goes through the
+  Composer fallback there.
+- **The `  - Downloading …` lines of a real install** — vivacity prints
+  the `Installing … : Extracting archive` lines after the transaction but
+  never announces downloads; with warm caches the two outputs are already
+  identical.
 - **Plugins to emulate natively** — every install-time plugin proven harmless
   (or reproduced exactly, like `symfony/runtime` and `composer/installers`)
   moves a whole ecosystem off the fallback path. See `scope.rs` for the

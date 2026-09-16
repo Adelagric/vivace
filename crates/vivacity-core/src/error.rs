@@ -50,6 +50,11 @@ pub enum Error {
     /// before any change to vendor/: the CLI delegates to Composer.
     #[error("{0}")]
     Unsupported(String),
+
+    /// A refusal Composer states in its own words (`PathDownloader`):
+    /// printed as is, exit 1.
+    #[error("{0}")]
+    Refused(String),
 }
 
 impl Error {

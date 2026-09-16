@@ -258,7 +258,8 @@ fn bracket(p: &[u8], s: &[u8]) -> Option<(bool, usize)> {
     None
 }
 
-/// PHP `dirname()` for the "does not exist" walk of `PathRepository`.
+/// PHP `dirname()` for the "does not exist" walk of `PathRepository`:
+/// trailing slashes ignored, `.` without a slash, `/` for a root child.
 pub fn php_dirname(path: &str) -> String {
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
@@ -271,22 +272,13 @@ pub fn php_dirname(path: &str) -> String {
     match trimmed.rfind('/') {
         None => ".".into(),
         Some(0) => "/".into(),
-        Some(i) => trimmed[..i]
-            .trim_end_matches('/')
-            .to_owned()
-            .replace_empty_with_root(),
-    }
-}
-
-trait ReplaceEmpty {
-    fn replace_empty_with_root(self) -> String;
-}
-impl ReplaceEmpty for String {
-    fn replace_empty_with_root(self) -> String {
-        if self.is_empty() {
-            "/".into()
-        } else {
-            self
+        Some(i) => {
+            let parent = trimmed[..i].trim_end_matches('/');
+            if parent.is_empty() {
+                "/".into()
+            } else {
+                parent.to_owned()
+            }
         }
     }
 }

@@ -52,8 +52,11 @@ using `composer/installers`, a Drupal `recommended-project`) and `diff -r`s
 the results — the whole project tree for the last two, since their files
 land outside `vendor/`. `harness/update.sh` does the same for
 `composer update --no-install` and `vivacity update --no-install` against
-frozen Packagist snapshots, comparing the lock files. Both must report no
-difference; CI runs them on Linux and macOS on every push.
+frozen Packagist snapshots, comparing the lock files; `harness/path-repos.sh`
+plays install, update, remove and require on a project served by `path`
+repositories and compares stderr, the lock and `vendor/` down to file modes
+and link targets. All must report no difference; CI runs them on Linux and
+macOS on every push.
 
 Underneath, each generated file and each step of the resolver is a port of
 the corresponding Composer function; the source files ported are vendored
@@ -104,12 +107,18 @@ line, `install`'s `Package operations`, and `--dry-run` on `update`,
 `require` and `remove` (resolution and listing, nothing written — the
 install phase lists its operations from the unwritten lock). The stderr
 of every `steps.sh` case is compared byte for byte from the first of
-those lines to the end (187 cases).
+those lines to the end (206 cases). A real `install` prints the same
+`  - Installing … : Extracting archive` / `Symlinking from …` lines and
+`Generating autoload files`, plus one `vivacity:` summary line.
 
-Repositories: `composer` type only, Packagist v2 protocol and plain
-`packages.json` files, local or over HTTPS. Not yet: `--with`,
-`vcs`/`path` repositories, `--minimal-changes`, the audit (`--no-audit`
-is the compared behaviour), the `--verbose` form of the explanations.
+Repositories: `composer` (Packagist v2 protocol and plain `packages.json`
+files, local or over HTTPS) and `path` (globs and braces, a package's own
+git repository as reference, the version guessed from its branch or the
+project's, symlinked or mirrored with Composer's exclusion rules — on
+Linux and macOS; on Windows a lock with a `path` package goes through the
+Composer fallback). Not yet: `--with`, `vcs` repositories,
+`--minimal-changes`, the audit (`--no-audit` is the compared behaviour),
+the `--verbose` form of the explanations.
 
 Composer 2.10's dependency policies are applied the same way: versions
 covered by a security advisory or flagged on Packagist's malware list are
@@ -144,7 +153,8 @@ emulated (its source is GPL-2.0-or-later, see NOTICE.md): a project that
 uses it goes through the Composer fallback below.
 
 Anything else — other plugins, `composer/installers` cases with custom
-naming, source-only packages, a plugin upgrade in progress — is detected
+naming, source-only packages, a `path` package on Windows, a plugin
+upgrade in progress — is detected
 before `vendor/` is touched, and vivacity execs the real `composer install`
 instead (`--no-fallback` to make it fail). Post-install scripts such as
 Laravel's `package:discover` are yours to run.
@@ -174,6 +184,7 @@ cargo test                   # unit tests and oracles against the Composer phar
 harness/diff-vendor.sh --with-autoloader
 harness/update.sh
 harness/steps.sh
+harness/path-repos.sh
 harness/removal.sh
 harness/transitions.sh
 harness/boot.sh

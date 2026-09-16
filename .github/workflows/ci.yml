@@ -73,6 +73,8 @@ jobs:
         run: harness/removal.sh
       - name: Transitions left to Composer (plugin upgrade)
         run: harness/transitions.sh
+      - name: Path repositories (symlink and mirror strategies, modes and links)
+        run: harness/path-repos.sh
 
       - name: Boot on vivacity vendor
         run: harness/boot.sh
