@@ -4,8 +4,12 @@
 //!
 //! - braces expand first, left to right, nesting allowed; every alternative
 //!   is globbed on its own and its matches are sorted bytewise among
-//!   themselves, so `{b,a}` lists the `b` matches before the `a` ones and a
-//!   duplicate alternative yields the same path twice;
+//!   themselves (glibc's order: `{b,a}` lists the `b` matches before the
+//!   `a` ones — PHP builds differ here, the 8.4 build of the macOS CI runner
+//!   sorts across alternatives where 8.5 on macOS and glibc do not; the
+//!   order only decides `addPackage` order between alternatives, i.e. which
+//!   of two identical name/version packages comes first); a duplicate
+//!   alternative yields the same path twice;
 //! - `*`, `?` and `[…]` match inside one path segment and never a leading
 //!   `.` (no `GLOB_PERIOD`); a segment without a metacharacter is a literal
 //!   that must exist; `\` escapes the next character;
@@ -438,8 +442,15 @@ mod tests {
             .map(str::to_owned)
             .collect();
         for (p, expected) in patterns.iter().zip(lines) {
-            let ours = serde_json::to_string(&glob_dirs(p, root)).unwrap();
-            assert_eq!(ours, expected, "pattern {p}");
+            let mut ours = glob_dirs(p, root);
+            let mut theirs: Vec<String> = serde_json::from_str(&expected).unwrap();
+            // The order across brace alternatives depends on the PHP build
+            // (module header): compared as sets for those patterns.
+            if brace_expand(p).len() > 1 {
+                ours.sort();
+                theirs.sort();
+            }
+            assert_eq!(ours, theirs, "pattern {p}");
         }
     }
 }
