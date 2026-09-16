@@ -15,9 +15,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 md-5.workspace = true
 pcre2.workspace = true
+rayon.workspace = true
 walkdir.workspace = true
-base64.workspace = true
 sha1.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+base64.workspace = true

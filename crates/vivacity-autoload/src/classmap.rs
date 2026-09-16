@@ -18,6 +18,7 @@
 //! file).
 
 use crate::pathutil::normalize_path;
+use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -333,52 +334,41 @@ impl ClassFinder {
     }
 }
 
-/// Parallel detection (scoped threads, one `ClassFinder` per thread since
-/// pcre2 regexes cannot be shared), results in input order to preserve
-/// "first one wins".
-fn find_all_parallel(
-    todo: &[(PathBuf, PathBuf, Vec<u8>)],
-) -> Result<Vec<Vec<Vec<u8>>>, ClassMapError> {
+thread_local! {
+    /// One `ClassFinder` per thread (compiled pcre2 regexes cannot be
+    /// shared, and recompiling them per file is expensive) — reused from one
+    /// scan to the next on the same rayon worker.
+    static FINDER: std::cell::RefCell<Option<ClassFinder>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `findClasses` through the current thread's finder (compiled on first
+/// use).
+fn find_one(contents: &[u8]) -> Result<Vec<Vec<u8>>, ClassMapError> {
+    FINDER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(ClassFinder::new()?);
+        }
+        slot.as_ref().unwrap().find_classes(contents)
+    })
+}
+
+/// Parallel detection on the rayon pool (one finder per thread), results in
+/// input order to preserve "first one wins".
+fn find_all(todo: &[(PathBuf, PathBuf, Vec<u8>)]) -> Result<Vec<Vec<Vec<u8>>>, ClassMapError> {
     if todo.is_empty() {
         return Ok(Vec::new());
     }
-    let threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(todo.len())
-        .max(1);
-    let chunk_size = todo.len().div_ceil(threads);
-    let results: Vec<Result<Vec<Vec<Vec<u8>>>, ClassMapError>> = std::thread::scope(|s| {
-        let handles: Vec<_> = todo
-            .chunks(chunk_size)
-            .map(|chunk| {
-                s.spawn(move || {
-                    let finder = ClassFinder::new()?;
-                    chunk
-                        .iter()
-                        .map(|(_, _, contents)| finder.find_classes(contents))
-                        .collect::<Result<Vec<_>, _>>()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join()
-                    .unwrap_or_else(|_| Err(ClassMapError::Regex("scan thread interrupted".into())))
-            })
-            .collect()
-    });
-    let mut out = Vec::with_capacity(todo.len());
-    for r in results {
-        out.extend(r?);
-    }
-    Ok(out)
+    todo.par_iter()
+        .map(|(_, _, contents)| find_one(contents))
+        .collect()
 }
 
-/// Version of the scan format/algorithm: bump it whenever detection changes,
-/// to invalidate existing caches.
-const CACHE_FORMAT: &str = "v1";
+/// Version of the scan format/algorithm: bump it whenever detection (or the
+/// cache encoding) changes, to invalidate existing caches.
+/// v2: length-prefixed binary encoding (replaces the JSON+base64).
+const CACHE_FORMAT: &str = "v2";
 
 /// Cache location for the scan of a store entry's directory:
 /// key = entry (name/version/ref) + relative subdirectory + format version.
@@ -397,52 +387,114 @@ impl CacheSlot {
         h.update(rel_subdir.to_string_lossy().as_bytes());
         let key: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         CacheSlot {
-            file: cache_root.join("classmap").join(format!("{key}.json")),
+            file: cache_root.join("classmap").join(format!("{key}.bin")),
         }
     }
 
     /// Entries (relative path, raw classes) in walk order.
+    ///
+    /// Length-prefixed binary format (little-endian):
+    ///   u32 file_count
+    ///   [ u32 rel_len, rel(utf-8 bytes),
+    ///     u32 class_count, [ u32 class_len, class(raw bytes) ]* ]*
+    /// Class names are raw bytes (see the module header): no base64, no
+    /// lossy round-trip — the bytes are written and read back as-is. The
+    /// relative paths come from `to_string_lossy` (like the JSON version
+    /// this replaces), so they are identical to what was written.
     fn load(&self) -> Option<Vec<(PathBuf, Vec<Vec<u8>>)>> {
-        use base64::Engine as _;
-        let text = std::fs::read(&self.file).ok()?;
-        let raw: Vec<(String, Vec<String>)> = serde_json::from_slice(&text).ok()?;
-        let engine = base64::engine::general_purpose::STANDARD;
-        let mut out = Vec::with_capacity(raw.len());
-        for (rel, classes) in raw {
-            let mut decoded = Vec::with_capacity(classes.len());
-            for c in classes {
-                decoded.push(engine.decode(c).ok()?);
+        let bytes = std::fs::read(&self.file).ok()?;
+        let mut r = ByteReader::new(&bytes);
+        let n = r.u32()? as usize;
+        // The counts come from the (possibly corrupt) file: clamp the
+        // pre-allocations to what the remaining bytes could actually encode
+        // (a file entry is ≥ 8 bytes, a class entry ≥ 4), so a garbage
+        // count is caught by the truncation checks below instead of asking
+        // the allocator for gigabytes. Exact for every well-formed file.
+        let mut out = Vec::with_capacity(n.min(r.remaining() / 8));
+        for _ in 0..n {
+            let rel = r.slice()?;
+            let rel = String::from_utf8(rel.to_vec()).ok()?;
+            let nc = r.u32()? as usize;
+            let mut classes = Vec::with_capacity(nc.min(r.remaining() / 4));
+            for _ in 0..nc {
+                classes.push(r.slice()?.to_vec());
             }
-            out.push((PathBuf::from(rel), decoded));
+            out.push((PathBuf::from(rel), classes));
+        }
+        if !r.is_empty() {
+            return None; // trailing bytes: corrupt file, rescan
         }
         Some(out)
     }
 
     fn store(&self, base: &Path, files: &[(PathBuf, PathBuf, Vec<Vec<u8>>)]) {
-        use base64::Engine as _;
-        let engine = base64::engine::general_purpose::STANDARD;
-        let mut raw: Vec<(String, Vec<String>)> = Vec::with_capacity(files.len());
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&(files.len() as u32).to_le_bytes());
         for (file, _, classes) in files {
             let Ok(rel) = file.strip_prefix(base) else {
                 return; // outside the base: do not cache
             };
-            raw.push((
-                rel.to_string_lossy().into_owned(),
-                classes.iter().map(|c| engine.encode(c)).collect(),
-            ));
+            let rel = rel.to_string_lossy();
+            push_slice(&mut buf, rel.as_bytes());
+            buf.extend_from_slice(&(classes.len() as u32).to_le_bytes());
+            for c in classes {
+                push_slice(&mut buf, c);
+            }
         }
-        let Ok(json) = serde_json::to_vec(&raw) else {
-            return;
-        };
         if let Some(parent) = self.file.parent() {
             if std::fs::create_dir_all(parent).is_err() {
                 return;
             }
         }
-        let tmp = self.file.with_extension("json.tmp");
-        if std::fs::write(&tmp, json).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.file);
+        // A unique temporary name: the same slot can be written by two
+        // directories scanned in parallel (or by two processes); each
+        // writer renames its own complete file over the slot.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tmp = self.file.with_extension(format!(
+            "{}.{}.tmp",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        if std::fs::write(&tmp, &buf).is_ok() && std::fs::rename(&tmp, &self.file).is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
+    }
+}
+
+/// Appends `u32 len` then the bytes.
+fn push_slice(buf: &mut Vec<u8>, s: &[u8]) {
+    buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    buf.extend_from_slice(s);
+}
+
+/// Byte reader that fails cleanly (None) on any truncation.
+struct ByteReader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> ByteReader<'a> {
+    fn new(bytes: &'a [u8]) -> ByteReader<'a> {
+        ByteReader { bytes, pos: 0 }
+    }
+    fn u32(&mut self) -> Option<u32> {
+        let end = self.pos.checked_add(4)?;
+        let raw = self.bytes.get(self.pos..end)?;
+        self.pos = end;
+        Some(u32::from_le_bytes(raw.try_into().ok()?))
+    }
+    fn slice(&mut self) -> Option<&'a [u8]> {
+        let len = self.u32()? as usize;
+        let end = self.pos.checked_add(len)?;
+        let out = self.bytes.get(self.pos..end)?;
+        self.pos = end;
+        Some(out)
+    }
+    fn is_empty(&self) -> bool {
+        self.pos == self.bytes.len()
+    }
+    fn remaining(&self) -> usize {
+        self.bytes.len() - self.pos
     }
 }
 
@@ -466,6 +518,10 @@ pub struct Scanner {
     pub class_map: ClassMap,
     scanned: BTreeSet<PathBuf>,
 }
+
+/// `(path, real path, raw classes)` of one directory, in walk order — the
+/// output of the pure `scan_only` phase.
+pub type ScannedFiles = Vec<(PathBuf, PathBuf, Vec<Vec<u8>>)>;
 
 const VCS_DIRS: [&str; 9] = [
     ".svn",
@@ -519,10 +575,21 @@ impl Scanner {
         namespace: &str,
         cache: Option<&CacheSlot>,
     ) -> Result<(), ClassMapError> {
-        let base_path = normalize_path(&path.to_string_lossy());
+        let scanned_files = Scanner::scan_only(path, cache)?;
+        self.merge_scanned(scanned_files, path, excluded, autoload_type, namespace)
+    }
 
+    /// The pure, parallelizable phase of a scan: produces `(path, real path,
+    /// raw classes)` in walk order, served from the cache when present. Uses
+    /// no `Scanner` state (deduplication/ambiguities/exclusions are applied
+    /// by `merge_scanned`), so several directories can be scanned in
+    /// parallel and then merged sequentially in order.
+    pub fn scan_only(
+        path: &Path,
+        cache: Option<&CacheSlot>,
+    ) -> Result<ScannedFiles, ClassMapError> {
         // (path, real path, raw classes) in walk order.
-        let mut scanned_files: Vec<(PathBuf, PathBuf, Vec<Vec<u8>>)> = Vec::new();
+        let mut scanned_files: ScannedFiles = Vec::new();
 
         let cached = cache.and_then(|c| c.load());
         if let Some(entries) = cached {
@@ -532,7 +599,7 @@ impl Scanner {
                 scanned_files.push((path.join(&rel), base_real.join(&rel), classes));
             }
         } else {
-            let (files, saw_symlink) = self.collect_files(path)?;
+            let (files, saw_symlink) = Scanner::collect_files(path)?;
             // Sequential reads (parallel reading is slower on APFS),
             // parallel detection on the CPU.
             let mut todo: Vec<(PathBuf, PathBuf, Vec<u8>)> = Vec::new();
@@ -541,7 +608,7 @@ impl Scanner {
                     std::fs::read(&file).map_err(|_| ClassMapError::Read(file.clone()))?;
                 todo.push((file, real, contents));
             }
-            let found = find_all_parallel(&todo)?;
+            let found = find_all(&todo)?;
             for ((file, real, _), classes) in todo.into_iter().zip(found) {
                 scanned_files.push((file, real, classes));
             }
@@ -551,7 +618,21 @@ impl Scanner {
                 }
             }
         }
+        Ok(scanned_files)
+    }
 
+    /// Merge phase (sequential, ordered): applies exclusions, realpath
+    /// deduplication, the PSR filter and "first one wins" on ambiguities —
+    /// the shared state that forces the order across directories.
+    pub fn merge_scanned(
+        &mut self,
+        scanned_files: ScannedFiles,
+        path: &Path,
+        excluded: Option<&pcre2::bytes::Regex>,
+        autoload_type: AutoloadType,
+        namespace: &str,
+    ) -> Result<(), ClassMapError> {
+        let base_path = normalize_path(&path.to_string_lossy());
         for (file, real, classes) in scanned_files {
             let file_path = normalize_path(&file.to_string_lossy());
             if self.scanned.contains(&real) {
@@ -599,7 +680,7 @@ impl Scanner {
 
     /// Finder-style walk: (path, real path) of php/inc/hh files, and whether
     /// a symlink was traversed (the cache is then disabled).
-    fn collect_files(&self, path: &Path) -> Result<(Vec<(PathBuf, PathBuf)>, bool), ClassMapError> {
+    fn collect_files(path: &Path) -> Result<(Vec<(PathBuf, PathBuf)>, bool), ClassMapError> {
         let mut files: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut saw_symlink = false;
         if path.is_file() {
@@ -877,5 +958,50 @@ mod cache_tests {
             !slot.file.exists(),
             "a tree with a symlink must not be cached"
         );
+    }
+
+    /// A corrupt cache file — truncated, trailing garbage, or a garbage
+    /// count field claiming billions of entries — must be ignored (rescan),
+    /// never panic, never abort in the allocator, never return a partial
+    /// classmap.
+    #[test]
+    fn corrupt_cache_is_rescanned() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let pkg = tmp.path().join("store/acme/lib/1.0.0-abc");
+        write(
+            &pkg.join("src/A.php"),
+            b"<?php\nnamespace Acme;\nclass A {}\n",
+        );
+        let slot = CacheSlot::new(&tmp.path().join("cache"), &pkg, Path::new("src"));
+
+        let run = |slot: Option<&CacheSlot>| {
+            let mut s = Scanner::new().expect("scanner");
+            s.scan_path_cached(&pkg.join("src"), None, AutoloadType::ClassMap, "", slot)
+                .expect("scan");
+            (s.class_map.map, s.class_map.ambiguous)
+        };
+        let direct = run(None);
+        run(Some(&slot)); // fills the cache
+        let valid = std::fs::read(&slot.file).expect("cache bytes");
+        assert!(slot.load().is_some(), "sanity: the valid cache loads");
+
+        // count=1, rel="a", then an absurd class count (and no class bytes).
+        let mut huge_class_count = Vec::new();
+        huge_class_count.extend_from_slice(&1u32.to_le_bytes());
+        huge_class_count.extend_from_slice(&1u32.to_le_bytes());
+        huge_class_count.push(b'a');
+        huge_class_count.extend_from_slice(&u32::MAX.to_le_bytes());
+        let corruptions: Vec<Vec<u8>> = vec![
+            valid[..valid.len() - 1].to_vec(),        // truncated
+            [valid.clone(), vec![0u8]].concat(),      // trailing bytes
+            vec![0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x01], // absurd file count
+            huge_class_count,
+            Vec::new(), // empty file
+        ];
+        for (i, bad) in corruptions.iter().enumerate() {
+            write(&slot.file, bad);
+            assert!(slot.load().is_none(), "corruption #{i} must not load");
+            assert_eq!(run(Some(&slot)), direct, "corruption #{i} must rescan");
+        }
     }
 }

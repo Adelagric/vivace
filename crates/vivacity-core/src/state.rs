@@ -479,6 +479,11 @@ pub fn write_state_files(
     ];
     for (file, content) in writes {
         let path = vendor_composer.join(file);
+        // Deterministic content: skip the write (and the mtime bump) when
+        // the file is already byte-identical — safe for parity.
+        if std::fs::read(&path).is_ok_and(|existing| existing == content.as_bytes()) {
+            continue;
+        }
         let tmp = vendor_composer.join(format!(".{file}.vivacity-tmp"));
         std::fs::write(&tmp, content).map_err(Error::io(&tmp))?;
         std::fs::rename(&tmp, &path).map_err(Error::io(&path))?;

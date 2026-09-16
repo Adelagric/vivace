@@ -48,6 +48,18 @@ pub enum FailureReason {
     Unsupported,
 }
 
+/// Whether parallel file I/O pays on this machine: yes where I/O latency
+/// dominates (Linux: ext4/WSL2 measured 2x on a wiped vendor/ and on a
+/// cold classmap scan), no where the page cache is the bottleneck (APFS:
+/// parallel reads 1.3-4x slower, DECISIONS.md M5). `VIVACITY_PARALLEL_IO`
+/// (`0`/`1`) overrides the default.
+pub fn parallel_io() -> bool {
+    match std::env::var("VIVACITY_PARALLEL_IO") {
+        Ok(v) => v != "0" && !v.is_empty(),
+        Err(_) => cfg!(target_os = "linux"),
+    }
+}
+
 pub fn cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("VIVACITY_CACHE_DIR") {
         return PathBuf::from(d);

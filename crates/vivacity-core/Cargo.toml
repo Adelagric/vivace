@@ -21,11 +21,12 @@ sha1.workspace = true
 tempfile.workspace = true
 md-5.workspace = true
 thiserror.workspace = true
+rayon.workspace = true
 hex = "=0.4.3"
 pcre2.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 libc = "=1.0.0-alpha.4"

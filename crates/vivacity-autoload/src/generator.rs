@@ -241,15 +241,31 @@ pub fn dump(
     }
 
     // Classmap cache: absolute install path -> store entry.
-    let store_entries: Vec<(String, PathBuf)> = match &opts.classmap_cache {
+    // The store entry's `is_dir` stat is done once here (instead of once per
+    // scanned directory), and the `/` suffix is precomputed to avoid one
+    // `format!` per comparison in the prefix lookup.
+    struct StoreEntry {
+        install: String,
+        install_slash: String,
+        entry: PathBuf,
+    }
+    let store_entries: Vec<StoreEntry> = match &opts.classmap_cache {
         Some(cfg) => {
             let store = vivacity_core::store::Store::at(cfg.store_root.clone());
             lock.wanted_packages(opts.dev_mode)
                 .filter_map(|p| {
-                    Some((
-                        install_abs(p.name())?,
-                        store.entry_path(p.name(), p.version(), p.dist_reference()),
-                    ))
+                    let install = install_abs(p.name())?;
+                    let entry = store.entry_path(p.name(), p.version(), p.dist_reference());
+                    // Absent/non-directory entry: no cache for this package
+                    // (same as the old `if !entry.is_dir() { return None }`).
+                    if !entry.is_dir() {
+                        return None;
+                    }
+                    Some(StoreEntry {
+                        install_slash: format!("{install}/"),
+                        install,
+                        entry,
+                    })
                 })
                 .collect()
         }
@@ -257,19 +273,16 @@ pub fn dump(
     };
     let cache_slot = |abs: &str| -> Option<crate::classmap::CacheSlot> {
         let cfg = opts.classmap_cache.as_ref()?;
-        let (install, entry) = store_entries
+        let se = store_entries
             .iter()
-            .find(|(install, _)| abs == install || abs.starts_with(&format!("{install}/")))?;
-        if !entry.is_dir() {
-            return None;
-        }
+            .find(|se| abs == se.install || abs.starts_with(&se.install_slash))?;
         let rel = abs
-            .strip_prefix(install)
+            .strip_prefix(&se.install)
             .unwrap_or("")
             .trim_start_matches('/');
         Some(crate::classmap::CacheSlot::new(
             &cfg.cache_root,
-            entry,
+            &se.entry,
             Path::new(rel),
         ))
     };
@@ -293,19 +306,33 @@ pub fn dump(
         );
     }
 
-    // Classmap.
-    let mut scanner = Scanner::new()?;
+    // Classmap. Each directory to scan becomes a "job" (built sequentially
+    // and cheaply: exclusion-regex compilation + cache-slot lookup), in
+    // Composer's EXACT order (classmap first, then the PSR directories by
+    // descending namespace). The heavy phase — walk, reads, class detection —
+    // runs in parallel on rayon, then the merge (deduplication, exclusions,
+    // "first one wins") is replayed SEQUENTIALLY in that same order: the
+    // classmap and the bytes of autoload_classmap.php therefore do not
+    // depend on the parallelism.
+    struct ScanJob {
+        path: PathBuf,
+        excl: Option<pcre2::bytes::Regex>,
+        ty: AutoloadType,
+        ns: String,
+        slot: Option<crate::classmap::CacheSlot>,
+    }
+    let mut jobs: Vec<ScanJob> = Vec::new();
     for dir in &autoloads.classmap {
         let abs = absolute(&base_path, dir);
         let excl = build_exclusion_regex(&abs, &autoloads.exclude, &base_path)?;
         let slot = cache_slot(&normalize_path(&abs));
-        scanner.scan_path_cached(
-            Path::new(&abs),
-            excl.as_ref(),
-            AutoloadType::ClassMap,
-            "",
-            slot.as_ref(),
-        )?;
+        jobs.push(ScanJob {
+            path: PathBuf::from(&abs),
+            excl,
+            ty: AutoloadType::ClassMap,
+            ns: String::new(),
+            slot,
+        });
     }
     if opts.optimize || opts.authoritative {
         // krsort of the namespaces, psr-4 then psr-0 within each group
@@ -335,15 +362,50 @@ pub fn dump(
                     }
                     let excl = build_exclusion_regex(&abs, &excluded, &base_path)?;
                     let slot = cache_slot(&abs);
-                    scanner.scan_path_cached(
-                        Path::new(&abs),
-                        excl.as_ref(),
-                        *ty,
-                        ns,
-                        slot.as_ref(),
-                    )?;
+                    jobs.push(ScanJob {
+                        path: PathBuf::from(&abs),
+                        excl,
+                        ty: *ty,
+                        ns: ns.clone(),
+                        slot,
+                    });
                 }
             }
+        }
+    }
+
+    let mut scanner = Scanner::new()?;
+    {
+        use rayon::prelude::*;
+        // The pure phase only touches `path`/`slot` (Send + Sync), never the
+        // exclusion regex — no Sync requirement on pcre2::Regex.
+        let inputs: Vec<(&Path, Option<&crate::classmap::CacheSlot>)> = jobs
+            .iter()
+            .map(|j| (j.path.as_path(), j.slot.as_ref()))
+            .collect();
+        // Directories in parallel means READS in parallel. That pays where
+        // I/O latency dominates (ext4/WSL2: sylius cold scan 1.03 s -> 0.48 s)
+        // and costs where the page cache is the bottleneck (APFS: 749 ms ->
+        // 901 ms, system time 0.47 s -> 8.4 s, M4 Max — the M5 measurement,
+        // DECISIONS.md). So: parallel directories where parallel I/O pays
+        // (`vivacity_core::platform::parallel_io`), sequential elsewhere;
+        // the class detection of each directory stays parallel on the CPU
+        // either way.
+        let parallel_dirs = vivacity_core::platform::parallel_io();
+        let scans: Vec<Result<crate::classmap::ScannedFiles, crate::classmap::ClassMapError>> =
+            if parallel_dirs {
+                inputs
+                    .par_iter()
+                    .map(|(p, s)| Scanner::scan_only(p, *s))
+                    .collect()
+            } else {
+                inputs
+                    .iter()
+                    .map(|(p, s)| Scanner::scan_only(p, *s))
+                    .collect()
+            };
+        for (j, sf) in jobs.iter().zip(scans) {
+            scanner.merge_scanned(sf?, &j.path, j.excl.as_ref(), j.ty, &j.ns)?;
         }
     }
     for (class, others) in &scanner.class_map.ambiguous {
@@ -584,8 +646,17 @@ fn absolute(base: &str, path: &str) -> String {
 }
 
 fn write(path: &Path, content: impl AsRef<[u8]>) -> Result<(), AutoloadError> {
+    let content = content.as_ref();
+    // Deterministic content: not rewriting when it is already byte-identical
+    // on disk saves the I/O AND the mtime bump on a no-op `install`/`dump`.
+    // Safe for parity (we only write when the bytes differ).
+    if let Ok(existing) = std::fs::read(path) {
+        if existing == content {
+            return Ok(());
+        }
+    }
     let tmp = path.with_extension("vivacity-tmp");
-    std::fs::write(&tmp, content.as_ref()).map_err(io(&tmp))?;
+    std::fs::write(&tmp, content).map_err(io(&tmp))?;
     std::fs::rename(&tmp, path).map_err(io(path))?;
     Ok(())
 }
