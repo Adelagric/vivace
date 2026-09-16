@@ -9,8 +9,14 @@ readme = "README.md"
 keywords = ["composer", "php", "resolver", "semver"]
 categories = ["development-tools", "command-line-utilities"]
 
+[features]
+# Passthrough to vivacity-core's TLS backend selection; see vivacity-core.
+default = ["rustls-tls-ring"]
+rustls-tls-ring = ["vivacity-core/rustls-tls-ring"]
+rustls-tls-no-provider = ["vivacity-core/rustls-tls-no-provider"]
+
 [dependencies]
-vivacity-core = { path = "../vivacity-core", version = "0.8.0" }
+vivacity-core = { path = "../vivacity-core", version = "0.8.0", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

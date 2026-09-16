@@ -166,6 +166,19 @@ The lower layers are separate crates (`vivacity-core`: manifests, lock,
 store, installers; `vivacity-resolver`: the resolver port; `vivacity-autoload`:
 the autoloader generator).
 
+Embedding brings in vivacity's HTTP stack (reqwest over rustls). The default
+feature `rustls-tls-ring` bundles the ring crypto provider — right for the
+standalone binary, wrong for a host that already links another rustls
+provider: Cargo unions features across the whole tree, so both providers end
+up compiled in and `rustls::CryptoProvider::from_crate_features()` returns
+`None`, which panics every bare `ClientConfig::builder()` in the process at
+runtime. Such a host selects the provider-agnostic backend instead and
+installs its own process-wide default provider before the first request:
+
+```toml
+vivacity = { version = "0.8", default-features = false, features = ["rustls-tls-no-provider"] }
+```
+
 ## Development
 
 ```bash
